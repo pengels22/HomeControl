@@ -61,7 +61,10 @@ class ModuleRegistry:
             return None
         if not settings.tls_cert or not settings.tls_key:
             raise RuntimeError('HCM_TLS_ENABLED requires HCM_TLS_CERT and HCM_TLS_KEY')
+        if settings.tls_require_client_cert and not settings.tls_ca:
+            raise RuntimeError('HCM_TLS_REQUIRE_CLIENT_CERT requires HCM_TLS_CA')
         ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         ctx.load_cert_chain(settings.tls_cert, settings.tls_key)
         if settings.tls_ca:
             ctx.load_verify_locations(settings.tls_ca)
@@ -82,6 +85,8 @@ class ModuleRegistry:
             row = await conn.fetchrow('SELECT hostname, ip_address FROM modules WHERE module_uuid=$1', module_uuid)
             if row:
                 return {'hostname': row['hostname'], 'ip_address': str(row['ip_address']), 'reboot_required': False}
+            if not settings.commissioning_enabled:
+                raise PermissionError(f'commissioning disabled for unknown {typ} module {module_uuid}')
             used = {int(str(r['ip_address']).split('.')[-1]) for r in await conn.fetch('SELECT ip_address FROM modules WHERE module_type=$1', typ)}
             octet = next((n for n in RANGES[typ] if n not in used), None)
             if octet is None:
@@ -112,6 +117,8 @@ class ModuleRegistry:
             first = await protocol.read_frame(reader)
             if first.get('type') != 'identify':
                 raise protocol.ProtocolError('first message must be identify')
+            if settings.tls_enabled and settings.tls_require_client_cert and not writer.get_extra_info('peercert'):
+                raise protocol.ProtocolError('client certificate required')
             ident = first.get('payload', {})
             conn.module_uuid = ident['module_uuid']
             assignment = await self._assign(ident)

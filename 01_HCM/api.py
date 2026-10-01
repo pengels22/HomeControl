@@ -1,8 +1,8 @@
 from __future__ import annotations
 import asyncio
 from fastapi import APIRouter, Depends, HTTPException
-from .models import RoomStateIn, HvacSetpointIn, HvacModeIn, DeviceCommand, FireStateIn
-from .auth import require_user, create_session
+from .models import AuthChallengeIn, AuthVerifyIn, RoomStateIn, HvacSetpointIn, HvacModeIn, DeviceCommand, FireStateIn
+from .auth import create_login_challenge, require_user, create_session, verify_login_challenge
 from .devices import MaintenanceLockedError, command_logical
 from .hvac import Mode
 from .settings import settings
@@ -21,6 +21,14 @@ async def dev_session():
         raise HTTPException(404)
     return {'token': create_session('local-admin','ADMIN')}
 
+@router.post('/auth/passkey/challenge')
+async def auth_challenge(body: AuthChallengeIn):
+    return await create_login_challenge(body.username)
+
+@router.post('/auth/passkey/verify')
+async def auth_verify(body: AuthVerifyIn):
+    return {'token': await verify_login_challenge(body.username, body.challenge, body.assertion)}
+
 @router.get('/hvac')
 async def get_hvac(user=Depends(require_user)):
     s = hvac.state
@@ -30,6 +38,7 @@ async def get_hvac(user=Depends(require_user)):
 async def set_mode(body: HvacModeIn, user=Depends(require_user)):
     if user['role'] != 'ADMIN': raise HTTPException(403)
     hvac.state.mode = Mode(body.mode)
+    await hvac.persist_state()
     if hvac.state.mode == Mode.OFF: await hvac.force_off()
     else: await hvac.evaluate()
     return {'ok': True, 'mode': hvac.state.mode.value}
@@ -38,6 +47,7 @@ async def set_mode(body: HvacModeIn, user=Depends(require_user)):
 async def set_setpoint(body: HvacSetpointIn, user=Depends(require_user)):
     if user['role'] != 'ADMIN': raise HTTPException(403)
     hvac.state.setpoint_f = body.setpoint_f
+    await hvac.persist_state()
     await hvac.evaluate()
     return {'ok': True, 'setpoint_f': hvac.state.setpoint_f}
 
@@ -46,13 +56,14 @@ async def room(body: RoomStateIn, user=Depends(require_user)):
     if user['role'] != 'ADMIN': raise HTTPException(403)
     from .hvac import RoomReading
     hvac.rooms[body.room] = RoomReading(**body.model_dump())
+    await hvac.persist_room(hvac.rooms[body.room])
     await hvac.evaluate()
     return {'ok': True, 'average_f': hvac.average_temperature()}
 
 @router.post('/device/command')
 async def device_command(body: DeviceCommand, user=Depends(require_user)):
     if user['role'] != 'ADMIN': raise HTTPException(403)
-    try: return await command_logical(body.logical_name, body.command)
+    try: return await command_logical(body.logical_name, body.command, source='user')
     except KeyError as exc: raise HTTPException(404, str(exc))
     except MaintenanceLockedError as exc: raise HTTPException(423, str(exc))
     except ConnectionError as exc: raise HTTPException(503, str(exc))

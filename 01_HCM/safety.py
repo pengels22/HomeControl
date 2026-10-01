@@ -1,8 +1,9 @@
 from __future__ import annotations
 import logging
 from . import db
-from .devices import command_logical
+from .devices import apply_active_intent, command_logical
 from .notifications import notifications, Notification
+from .priority import OutputSource, clear_source
 
 log = logging.getLogger(__name__)
 
@@ -25,6 +26,16 @@ class SafetyController:
                 rows = await conn.fetch("SELECT logical_name FROM logical_devices WHERE device_class='light' AND enabled=true AND maintenance_locked=false")
             for r in rows:
                 try:
-                    await command_logical(r['logical_name'], {'op':'light','percent':100,'value':True})
+                    await command_logical(
+                        r['logical_name'],
+                        {'op':'light','percent':100,'value':True},
+                        source=OutputSource.LIFE_SAFETY,
+                    )
                 except Exception:
                     log.exception('failed life-safety light command: %s', r['logical_name'])
+        else:
+            for logical_device_id in await clear_source(OutputSource.LIFE_SAFETY):
+                try:
+                    await apply_active_intent(logical_device_id)
+                except Exception:
+                    log.exception('failed restoring output after life-safety clear: %s', logical_device_id)

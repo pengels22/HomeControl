@@ -17,5 +17,8 @@ class Settings(BaseSettings):
     tls_ca: str | None = None
     tls_require_client_cert: bool = True
     commissioning_enabled: bool = True
+    auth_rp_id: str = 'homecontrol.local'
+    auth_challenge_ttl_s: int = 300
+    auth_session_ttl_s: int = 3600
 
 settings = Settings()

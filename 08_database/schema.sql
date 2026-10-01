@@ -33,6 +33,17 @@ CREATE TABLE IF NOT EXISTS logical_devices (
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
+CREATE TABLE IF NOT EXISTS output_intents (
+    id BIGSERIAL PRIMARY KEY,
+    logical_device_id BIGINT NOT NULL REFERENCES logical_devices(id) ON DELETE CASCADE,
+    source TEXT NOT NULL CHECK (source IN ('life_safety','local_override','user','rules')),
+    command JSONB NOT NULL,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ,
+    UNIQUE(logical_device_id, source)
+);
+
 CREATE TABLE IF NOT EXISTS device_bindings (
     id BIGSERIAL PRIMARY KEY,
     logical_device_id BIGINT NOT NULL REFERENCES logical_devices(id) ON DELETE CASCADE,
@@ -42,6 +53,23 @@ CREATE TABLE IF NOT EXISTS device_bindings (
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     UNIQUE(logical_device_id,module_id,channel,binding_type)
+);
+
+CREATE TABLE IF NOT EXISTS hvac_state (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+    mode TEXT NOT NULL DEFAULT 'OFF' CHECK (mode IN ('OFF','HEAT','COOL','FAN')),
+    setpoint_f NUMERIC NOT NULL DEFAULT 70.0 CHECK (setpoint_f >= 45 AND setpoint_f <= 90),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS room_hvac (
+    room_id BIGINT PRIMARY KEY REFERENCES rooms(id) ON DELETE CASCADE,
+    temperature_f NUMERIC,
+    occupied BOOLEAN NOT NULL DEFAULT FALSE,
+    actuated_damper BOOLEAN NOT NULL DEFAULT TRUE,
+    damper_logical_device_id BIGINT REFERENCES logical_devices(id),
+    sensor_ok BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS faults (
@@ -63,6 +91,25 @@ CREATE TABLE IF NOT EXISTS users (
     passkey_credential JSONB,
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS auth_challenges (
+    id BIGSERIAL PRIMARY KEY,
+    username TEXT NOT NULL REFERENCES users(username) ON DELETE CASCADE,
+    challenge TEXT UNIQUE NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    consumed_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id BIGSERIAL PRIMARY KEY,
+    username TEXT NOT NULL REFERENCES users(username) ON DELETE CASCADE,
+    token_hash TEXT UNIQUE NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('ADMIN','READONLY')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS rules (
@@ -100,6 +147,9 @@ CREATE TABLE IF NOT EXISTS safety_events (
 
 CREATE INDEX IF NOT EXISTS idx_modules_online ON modules(online);
 CREATE INDEX IF NOT EXISTS idx_faults_active ON faults(active, severity);
+CREATE INDEX IF NOT EXISTS idx_output_intents_active ON output_intents(logical_device_id, active, source);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token_hash) WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_auth_challenges_challenge ON auth_challenges(challenge) WHERE consumed_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS notification_log (
     id BIGSERIAL PRIMARY KEY,

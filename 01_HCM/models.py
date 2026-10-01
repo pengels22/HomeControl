@@ -22,3 +22,11 @@ class DeviceCommand(BaseModel):
 
 class FireStateIn(BaseModel):
     active: bool
+
+class AuthChallengeIn(BaseModel):
+    username: str
+
+class AuthVerifyIn(BaseModel):
+    username: str
+    challenge: str
+    assertion: dict[str, Any]

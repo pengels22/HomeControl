@@ -35,6 +35,7 @@ api.safety = safety
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.connect()
+    await hvac.load_from_db()
     await registry.start()
     rule_task = asyncio.create_task(rules.run())
     hvac_task = asyncio.create_task(hvac_loop())

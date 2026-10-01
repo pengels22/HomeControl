@@ -53,6 +53,104 @@ class HVACController:
         rs = self.control_rooms()
         return None if not rs else sum(r.temperature_f for r in rs)/len(rs)
 
+    async def load_from_db(self) -> None:
+        from . import db
+
+        async with db.acquire() as conn:
+            state = await conn.fetchrow("SELECT mode,setpoint_f FROM hvac_state WHERE singleton=true")
+            rows = await conn.fetch(
+                """
+                SELECT
+                    r.name AS room,
+                    COALESCE(rh.temperature_f, 70) AS temperature_f,
+                    COALESCE(rh.occupied, false) AS occupied,
+                    COALESCE(rh.actuated_damper, NOT r.permanently_open_hvac) AS actuated_damper,
+                    ld.logical_name AS damper_logical_device,
+                    COALESCE(rh.sensor_ok, true) AS sensor_ok
+                FROM rooms r
+                LEFT JOIN room_hvac rh ON rh.room_id=r.id
+                LEFT JOIN logical_devices ld ON ld.id=rh.damper_logical_device_id
+                WHERE r.enabled=true
+                ORDER BY r.name
+                """
+            )
+        async with self._lock:
+            if state:
+                self.state.mode = Mode(state["mode"])
+                self.state.setpoint_f = float(state["setpoint_f"])
+            self.rooms = {
+                r["room"]: RoomReading(
+                    room=r["room"],
+                    temperature_f=float(r["temperature_f"]),
+                    occupied=bool(r["occupied"]),
+                    actuated_damper=bool(r["actuated_damper"]),
+                    damper_logical_device=r["damper_logical_device"],
+                    sensor_ok=bool(r["sensor_ok"]),
+                )
+                for r in rows
+            }
+
+    async def persist_state(self) -> None:
+        from . import db
+
+        async with db.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO hvac_state(singleton,mode,setpoint_f,updated_at)
+                VALUES(true,$1,$2,now())
+                ON CONFLICT(singleton)
+                DO UPDATE SET mode=EXCLUDED.mode, setpoint_f=EXCLUDED.setpoint_f, updated_at=now()
+                """,
+                self.state.mode.value,
+                self.state.setpoint_f,
+            )
+
+    async def persist_room(self, reading: RoomReading) -> None:
+        from . import db
+
+        async with db.acquire() as conn:
+            room = await conn.fetchrow(
+                """
+                INSERT INTO rooms(name, permanently_open_hvac)
+                VALUES($1, $2)
+                ON CONFLICT(name) DO UPDATE SET enabled=true
+                RETURNING id
+                """,
+                reading.room,
+                not reading.actuated_damper,
+            )
+            damper_id = None
+            if reading.damper_logical_device:
+                damper = await conn.fetchrow(
+                    "SELECT id FROM logical_devices WHERE logical_name=$1 AND enabled=true",
+                    reading.damper_logical_device,
+                )
+                if damper:
+                    damper_id = damper["id"]
+            await conn.execute(
+                """
+                INSERT INTO room_hvac(
+                    room_id, temperature_f, occupied, actuated_damper,
+                    damper_logical_device_id, sensor_ok, updated_at
+                )
+                VALUES($1,$2,$3,$4,$5,$6,now())
+                ON CONFLICT(room_id)
+                DO UPDATE SET
+                    temperature_f=EXCLUDED.temperature_f,
+                    occupied=EXCLUDED.occupied,
+                    actuated_damper=EXCLUDED.actuated_damper,
+                    damper_logical_device_id=EXCLUDED.damper_logical_device_id,
+                    sensor_ok=EXCLUDED.sensor_ok,
+                    updated_at=now()
+                """,
+                room["id"],
+                reading.temperature_f,
+                reading.occupied,
+                reading.actuated_damper,
+                damper_id,
+                reading.sensor_ok,
+            )
+
     async def _set_output(self, name: str, value: bool):
         await self.output(name, value)
         setattr(self.state, name.lower(), value)
@@ -69,6 +167,11 @@ class HVACController:
                 continue
             needs = r.temperature_f < self.state.setpoint_f if heating else r.temperature_f > self.state.setpoint_f
             await self.damper(r, needs)
+
+    async def _open_failed_sensor_dampers(self):
+        for r in self.rooms.values():
+            if r.actuated_damper and not r.sensor_ok:
+                await self.damper(r, True)
 
     async def force_off(self):
         async with self._lock:
@@ -88,7 +191,9 @@ class HVACController:
             mode = self.state.mode
             avg = self.average_temperature()
 
-            if mode == Mode.OFF or (not any(r.occupied for r in self.rooms.values())):
+            await self._open_failed_sensor_dampers()
+
+            if mode == Mode.OFF:
                 await self._stop_conditioning(now, immediate_fan_off=True)
                 return
 
@@ -96,6 +201,10 @@ class HVACController:
                 if self.state.heat: await self._set_output('HEAT', False); self.state.last_heat_off = now
                 if self.state.cool: await self._set_output('COOL', False); self.state.last_cool_off = now
                 if not self.state.fan: await self._set_output('FAN', True)
+                return
+
+            if not any(r.occupied for r in self.rooms.values()):
+                await self._stop_conditioning(now, immediate_fan_off=True)
                 return
 
             if avg is None:

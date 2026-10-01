@@ -81,6 +81,8 @@ class ModuleAgent:
         if not tls.get('enabled', False):
             return None
         ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=tls.get('ca_file'))
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.check_hostname = bool(tls.get('check_hostname', True))
         cert = tls.get('cert_file')
         key = tls.get('key_file')
         if cert and key:
@@ -88,7 +90,14 @@ class ModuleAgent:
         return ctx
 
     async def _session(self) -> None:
-        reader, writer = await asyncio.open_connection(self.hcm_host, self.hcm_port, ssl=self._ssl_context())
+        tls = self.config.get('tls', {})
+        server_hostname = tls.get('server_hostname', self.hcm_host) if tls.get('enabled', False) else None
+        reader, writer = await asyncio.open_connection(
+            self.hcm_host,
+            self.hcm_port,
+            ssl=self._ssl_context(),
+            server_hostname=server_hostname,
+        )
         await write_frame(writer, {
             'type': 'identify',
             'payload': {
