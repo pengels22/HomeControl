@@ -293,16 +293,14 @@ async def index():
     .screen-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
     .screen-action{border:1px solid rgba(23,32,27,.35);border-radius:4px;padding:6px;text-align:center;font-size:.68rem;background:rgba(255,255,255,.24)}
     .pairing-screen{background:#080d0b;color:#ecfff4;place-items:center;text-align:center;overflow:hidden;position:relative}
-    .pairing-screen:before{content:"";position:absolute;inset:-20%;background:radial-gradient(circle at 50% 45%,rgba(68,197,137,.24),transparent 36%),radial-gradient(circle at 35% 70%,rgba(141,229,186,.12),transparent 28%);animation:pairGlow 5s ease-in-out infinite alternate}
+    .pairing-screen:before{content:"";position:absolute;inset:-20%;background:radial-gradient(circle at 50% 45%,rgba(68,197,137,.24),transparent 36%),radial-gradient(circle at 35% 70%,rgba(141,229,186,.12),transparent 28%)}
     .pairing-content{position:relative;z-index:1;display:grid;gap:8px;justify-items:center}
-    .pair-code-glyph{width:220px;height:220px;display:grid;gap:1px;padding:14px;background:#fff;border-radius:50%;overflow:hidden;box-shadow:0 0 0 1px rgba(236,255,244,.35),0 0 34px rgba(68,197,137,.35);animation:pairBreathe 3.5s ease-in-out infinite}
+    .pair-code-glyph{width:220px;height:220px;display:grid;gap:1px;padding:14px;background:#fff;border-radius:50%;overflow:hidden;box-shadow:0 0 0 1px rgba(236,255,244,.35),0 0 34px rgba(68,197,137,.35)}
     .pair-dot{background:transparent;border-radius:2px}
     .pair-dot.on,.pair-dot.eye{background:#000}
     .pair-dot.soft{background:transparent}
     .pair-title{font-weight:700;letter-spacing:.08em;font-size:.7rem}.pair-code{font-size:.92rem;font-weight:700;letter-spacing:.08em}.pair-help{font-size:.58rem;color:#a7d8bf}
-    @keyframes pairBreathe{0%,100%{transform:scale(.985);filter:saturate(.9)}50%{transform:scale(1.015);filter:saturate(1.25)}}
     @keyframes pairTwinkle{0%,100%{opacity:.72}50%{opacity:1}}
-    @keyframes pairGlow{from{transform:translate3d(-2%,0,0)}to{transform:translate3d(2%,1%,0)}}
     .led-row{display:flex;gap:8px;margin-top:10px}.led{width:10px;height:10px;border-radius:50%;background:#3c4441}.led.on{background:#44c589}.led.warn{background:#d99b43}
     .kv{display:grid;grid-template-columns:180px 1fr;gap:8px;padding:7px 0;border-bottom:1px solid #2b3035}
     .kv span:first-child{color:#aab2ae}
