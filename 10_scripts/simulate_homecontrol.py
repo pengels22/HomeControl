@@ -17,6 +17,7 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 
 ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_SIM_PUBLIC_URL = os.environ.get("HC_SIM_PUBLIC_URL", "http://192.168.2.33:8088").rstrip("/")
 sys.path.insert(0, str(ROOT))
 
 common_can = import_module("07_servises.common.can")
@@ -115,7 +116,7 @@ class HomeControlSimulator:
 
     def pairing_glyph(self) -> dict[str, Any]:
         glyph = self.active_pairing
-        qr_payload = f"http://100.71.53.54:8088/pair?payload={quote(glyph.payload, safe='')}"
+        qr_payload = f"{DEFAULT_SIM_PUBLIC_URL}/pair?payload={quote(glyph.payload, safe='')}"
         qr_matrix = common_pairing.encode_qr_v1_l(qr_payload)
         return {
             "format": "HC-CIRCULAR-PAIR-1",
@@ -752,4 +753,4 @@ async def sim_rmc_tick():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host=os.environ.get("HC_SIM_HOST", "100.71.53.54"), port=8088)
+    uvicorn.run(app, host=os.environ.get("HC_SIM_HOST", "0.0.0.0"), port=8088)

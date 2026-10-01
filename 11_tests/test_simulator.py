@@ -36,7 +36,7 @@ def test_pairing_qr_payload_is_actionable_url_with_secure_payload():
     payload = parse_qs(parsed.query)['payload'][0]
 
     assert parsed.scheme == 'http'
-    assert parsed.netloc == '100.71.53.54:8088'
+    assert parsed.netloc == '192.168.2.33:8088'
     assert parsed.path == '/pair'
     assert payload == pairing['payload']
     assert payload.startswith('HC2:')

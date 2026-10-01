@@ -77,7 +77,7 @@ Run the local simulator on macOS:
 ```
 
 Open `http://127.0.0.1:8088` on the Mac running the simulator, or use
-`http://100.71.53.54:8088` from the iOS app/device network. The simulator
+`http://192.168.2.33:8088` from the iOS app/device network on the current Mac Wi-Fi network. The simulator
 provides the HCM dashboard, Devices, Service, Settings, and Users tabs. Device
 pages expose functional simulated RCM, LCM, SIM, PNL, RMC telemetry, HVAC,
 relay, dimmer, lock, naming, and pairing flows without touching physical GPIO,

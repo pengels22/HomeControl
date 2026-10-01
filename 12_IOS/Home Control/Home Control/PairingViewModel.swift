@@ -7,7 +7,7 @@ import Foundation
 
 @Observable
 final class PairingViewModel {
-    var simulatorURL = "http://100.71.53.54:8088"
+    var simulatorURL = "http://192.168.2.33:8088"
     var glyph: PairingGlyph?
     var payload: PairingPayload?
     var errorMessage: String?
