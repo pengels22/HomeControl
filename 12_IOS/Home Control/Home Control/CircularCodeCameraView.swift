@@ -26,16 +26,21 @@ final class CircularCodeCameraViewController: UIViewController, AVCaptureVideoDa
     private let session = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
     private let ciContext = CIContext()
+    private let scanQueue = DispatchQueue(label: "homecontrol.circular-code.scan")
     private var previewLayer: AVCaptureVideoPreviewLayer?
     private var guideOverlay: CircularCodeGuideOverlay?
+    private var latestFrame: CGImage?
     private var didScan = false
     private var lastAttempt = Date.distantPast
+    private var lastStatusUpdate = Date.distantPast
+    private var attemptCount = 0
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
         configureSession()
         addGuideOverlay()
+        addScanButton()
     }
 
     override func viewDidLayoutSubviews() {
@@ -72,7 +77,7 @@ final class CircularCodeCameraViewController: UIViewController, AVCaptureVideoDa
         videoOutput.videoSettings = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
         ]
-        videoOutput.setSampleBufferDelegate(self, queue: DispatchQueue(label: "homecontrol.circular-code.scan"))
+        videoOutput.setSampleBufferDelegate(self, queue: scanQueue)
         session.addOutput(videoOutput)
 
         let layer = AVCaptureVideoPreviewLayer(session: session)
@@ -95,6 +100,25 @@ final class CircularCodeCameraViewController: UIViewController, AVCaptureVideoDa
         ])
     }
 
+    private func addScanButton() {
+        let button = UIButton(type: .system)
+        button.setTitle("Scan Now", for: .normal)
+        button.setTitleColor(.black, for: .normal)
+        button.titleLabel?.font = .preferredFont(forTextStyle: .headline)
+        button.backgroundColor = .white
+        button.layer.cornerRadius = 22
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.addTarget(self, action: #selector(scanCurrentFrame), for: .touchUpInside)
+        view.addSubview(button)
+
+        NSLayoutConstraint.activate([
+            button.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            button.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -28),
+            button.heightAnchor.constraint(equalToConstant: 44),
+            button.widthAnchor.constraint(greaterThanOrEqualToConstant: 150)
+        ])
+    }
+
     private func showMessage(_ message: String) {
         let label = UILabel()
         label.text = message
@@ -111,6 +135,24 @@ final class CircularCodeCameraViewController: UIViewController, AVCaptureVideoDa
         ])
     }
 
+    @objc private func scanCurrentFrame() {
+        guideOverlay?.setManualScanStarted()
+        scanQueue.async {
+            guard let frame = self.latestFrame else {
+                DispatchQueue.main.async {
+                    self.guideOverlay?.setNoFrame()
+                }
+                return
+            }
+
+            if !self.tryDecode(cgImage: frame) {
+                DispatchQueue.main.async {
+                    self.guideOverlay?.setScanFailed()
+                }
+            }
+        }
+    }
+
     func captureOutput(
         _ output: AVCaptureOutput,
         didOutput sampleBuffer: CMSampleBuffer,
@@ -125,7 +167,22 @@ final class CircularCodeCameraViewController: UIViewController, AVCaptureVideoDa
 
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else { return }
+        latestFrame = cgImage
+        attemptCount += 1
 
+        if Date().timeIntervalSince(lastStatusUpdate) > 0.8 {
+            let attempts = attemptCount
+            lastStatusUpdate = Date()
+            DispatchQueue.main.async {
+                self.guideOverlay?.setScanning(attempts: attempts)
+            }
+        }
+
+        _ = tryDecode(cgImage: cgImage)
+    }
+
+    private func tryDecode(cgImage: CGImage) -> Bool {
+        guard !didScan else { return true }
         do {
             _ = try CircularGlyphImageDecoder.decode(cgImage: cgImage)
             didScan = true
@@ -135,8 +192,9 @@ final class CircularCodeCameraViewController: UIViewController, AVCaptureVideoDa
                 self.session.stopRunning()
                 self.onImage?(image)
             }
+            return true
         } catch {
-            return
+            return false
         }
     }
 }
@@ -193,6 +251,26 @@ final class CircularCodeGuideOverlay: UIView {
         detailLabel.text = "Opening HCM"
     }
 
+    func setScanning(attempts: Int) {
+        instructionLabel.text = "Scanning circular code"
+        detailLabel.text = "Trying frame \(attempts). Fill the ring and hold steady."
+    }
+
+    func setManualScanStarted() {
+        instructionLabel.text = "Scanning current frame"
+        detailLabel.text = "Hold steady"
+    }
+
+    func setScanFailed() {
+        instructionLabel.text = "Still searching"
+        detailLabel.text = "Move closer until the white circle fills the ring"
+    }
+
+    func setNoFrame() {
+        instructionLabel.text = "Waiting for camera"
+        detailLabel.text = "Point at the HCM code"
+    }
+
     private func setupLabels() {
         instructionLabel.text = "Align circular HCM code"
         instructionLabel.textColor = .white
@@ -215,7 +293,7 @@ final class CircularCodeGuideOverlay: UIView {
             stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 24),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -24),
             stack.centerXAnchor.constraint(equalTo: centerXAnchor),
-            stack.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor, constant: -32)
+            stack.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor, constant: -88)
         ])
     }
 
