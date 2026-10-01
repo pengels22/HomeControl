@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from importlib import import_module
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, unquote
 
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException
@@ -114,14 +115,17 @@ class HomeControlSimulator:
 
     def pairing_glyph(self) -> dict[str, Any]:
         glyph = self.active_pairing
+        qr_payload = f"http://100.71.53.54:8088/pair?payload={quote(glyph.payload, safe='')}"
+        qr_matrix = common_pairing.encode_qr_v1_l(qr_payload)
         return {
             "format": "HC-CIRCULAR-PAIR-1",
             "payload": glyph.payload,
+            "qr_payload": qr_payload,
             "code": glyph.code,
             "size": glyph.size,
             "matrix": glyph.matrix,
-            "qr_size": glyph.qr_size,
-            "qr_matrix": glyph.qr_matrix,
+            "qr_size": len(qr_matrix),
+            "qr_matrix": qr_matrix,
         }
 
     def verify_pairing_payload(self, payload: str) -> bool:
@@ -295,7 +299,10 @@ async def index():
     .pairing-screen{background:#080d0b;color:#ecfff4;place-items:center;text-align:center;overflow:hidden;position:relative}
     .pairing-screen:before{content:"";position:absolute;inset:-20%;background:radial-gradient(circle at 50% 45%,rgba(68,197,137,.24),transparent 36%),radial-gradient(circle at 35% 70%,rgba(141,229,186,.12),transparent 28%)}
     .pairing-content{position:relative;z-index:1;display:grid;gap:8px;justify-items:center}
-    .pair-code-glyph{width:220px;height:220px;display:grid;gap:1px;padding:14px;background:#fff;border-radius:50%;overflow:hidden;box-shadow:0 0 0 1px rgba(236,255,244,.35),0 0 34px rgba(68,197,137,.35)}
+    .pair-code-frame{width:248px;height:248px;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle,rgba(68,197,137,.14),rgba(68,197,137,.34) 70%,rgba(236,255,244,.18));box-shadow:0 0 0 1px rgba(236,255,244,.35),0 0 34px rgba(68,197,137,.35)}
+    .pair-code-glyph{width:210px;height:210px;display:grid;background:#fff}
+    .pair-code-glyph.circular-glyph{gap:1px;padding:14px;border-radius:50%;overflow:hidden}
+    .pair-code-glyph.qr-code-glyph{gap:0;padding:0;border-radius:8px;overflow:visible}
     .pair-dot{background:transparent;border-radius:2px}
     .pair-dot.on,.pair-dot.eye{background:#000}
     .pair-dot.soft{background:transparent}
@@ -555,7 +562,9 @@ function pairingScreenFace(){
   return `<div class="screen pairing-screen">
     <div class="pairing-content">
       <div class="pair-title">PAIRING MODE</div>
-      <div class="pair-code-glyph" aria-label="Circular optical pairing code" style="grid-template-columns:repeat(${visualSize},1fr);grid-template-rows:repeat(${visualSize},1fr)">${cells}</div>
+      <div class="pair-code-frame">
+        <div class="pair-code-glyph ${useQr ? 'qr-code-glyph' : 'circular-glyph'}" aria-label="Circular optical pairing code" style="grid-template-columns:repeat(${visualSize},1fr);grid-template-rows:repeat(${visualSize},1fr)">${cells}</div>
+      </div>
       <div class="pair-code">${pairing.code.replace(/(\\d{3})(\\d{3})/,'$1 $2')}</div>
       <div class="pair-help">Scan from HomeControl setup</div>
     </div>
@@ -633,6 +642,23 @@ async def state():
 @app.get("/api/pairing-glyph")
 async def pairing_glyph():
     return sim.pairing_glyph()
+
+
+@app.get("/pair")
+async def pairing_landing(payload: str = ""):
+    clean = unquote(payload)
+    if not sim.verify_pairing_payload(clean):
+        raise HTTPException(400, "invalid or expired pairing code")
+    return HTMLResponse("""
+<!doctype html>
+<html>
+<head><meta name="viewport" content="width=device-width,initial-scale=1"><title>HomeControl Pairing</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0f1113;color:#fff;padding:24px">
+  <h1>HomeControl Pairing Code</h1>
+  <p>This pairing code is valid. Open the HomeControl app and scan this code to continue.</p>
+</body>
+</html>
+""")
 
 
 @app.post("/api/pairing-glyph/compare")

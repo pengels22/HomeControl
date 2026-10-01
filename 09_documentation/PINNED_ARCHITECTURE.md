@@ -66,9 +66,9 @@ HCM remains the central authentication authority.
 - Passwords are not stored in plain text.
 - Module web UIs require HCM-issued bearer tokens.
 - The iOS app talks to HCM only; it does not create direct app-to-module control paths.
-- HCM local-screen pairing uses a custom circular optical code.
-- The circular code carries an opaque `HC2:...` signed/encrypted pairing payload.
-- The iOS app decodes the optical pattern but does not hold the HCM pairing secret.
+- HCM local-screen pairing uses a standards-compliant QR URL inside the circular pairing UI.
+- The QR URL carries an opaque `HC2:...` signed/encrypted pairing payload.
+- The iOS app scans the QR and extracts the opaque payload, but does not hold the HCM pairing secret.
 - HCM verifies/decrypts the opaque pairing payload against its active pairing record.
 - A valid pairing payload can be exchanged for an app session token.
 

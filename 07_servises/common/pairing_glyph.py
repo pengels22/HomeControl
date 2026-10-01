@@ -197,13 +197,13 @@ def _xor_stream(data: bytes, key: bytes, nonce: bytes) -> bytes:
 
 def encode_qr_v1_l(payload: str) -> list[str]:
     qr = qrcode.QRCode(
-        version=1,
+        version=None,
         error_correction=qrcode.constants.ERROR_CORRECT_L,
         box_size=1,
         border=0,
     )
     qr.add_data(payload)
-    qr.make(fit=False)
+    qr.make(fit=True)
     matrix = qr.get_matrix()
     return ["".join("1" if cell else "0" for cell in row) for row in matrix]
 

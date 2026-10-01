@@ -85,12 +85,13 @@ I2C, CAN, PostgreSQL, or systemd.
 
 ### Secure circular pairing
 
-The HCM generates a custom circular optical pairing code for the 3.3-inch local
-screen. The code carries an opaque `HC2:...` pairing payload. The iOS app
-captures the circular pattern as an image, decodes the fixed HomeControl optical
-format, and posts the opaque payload to HCM. HCM verifies/decrypts it using its
-own secret and the active pairing record. On success, HCM returns the app session
-token. The HCM secret is not stored in the iOS app.
+The HCM generates a scanner-compatible pairing code for the 3.3-inch local
+screen. The visible code is a standards-compliant QR URL, framed by the circular
+pairing UI, and the URL query carries an opaque `HC2:...` pairing payload. The
+iOS app scans the QR, extracts only the opaque payload, and posts that payload
+to HCM. HCM verifies/decrypts it using its own secret and the active pairing
+record. On success, HCM returns the app session token. The HCM secret is not
+stored in the iOS app.
 
 ## Module details
 

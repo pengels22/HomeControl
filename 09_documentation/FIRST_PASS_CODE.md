@@ -20,7 +20,7 @@ Implemented in this pass:
 - per-module local web UI scaffolds with HCM-token authentication expectation
 - RCM simulator controls for 32 relays, maintenance locks, and editable channel names
 - LCM simulator controls for relay names, low-voltage dimming fade targets, and high-voltage dimmer status
-- 3.3-inch HCM screen mockup with secure circular pairing code
+- 3.3-inch HCM screen mockup with secure QR pairing code inside the circular pairing UI
 - iOS companion app prototype with standard-code scanning, circular-code camera scanning, HCM login, and simulator loading
 - secure circular pairing payloads using opaque `HC2` tokens verified by HCM
 - systemd unit templates
@@ -34,7 +34,7 @@ Not production-complete yet:
 - TLS certificate provisioning and enforcement
 - full passkey/WebAuthn verification
 - APNs push and Apple Watch app
-- production-grade circular-code perspective correction and camera alignment
+- production-grade visual treatment for the circular pairing UI around the scanner-compatible QR
 - production crypto provider for pairing payload encryption, replacing the current standard-library simulator implementation
 - final rules schema/executor
 - final PNL UI

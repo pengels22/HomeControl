@@ -1,4 +1,5 @@
 from importlib import import_module
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -25,6 +26,22 @@ async def test_mac_simulator_builds_module_state_and_rmc_frames():
     assert sim.verify_pairing_payload(state['hcm']['pairing']['payload'])
     assert state['hcm']['pairing']['format'] == 'HC-CIRCULAR-PAIR-1'
     assert state['sim']['rmc_nodes']
+
+
+def test_pairing_qr_payload_is_actionable_url_with_secure_payload():
+    sim = simulator.HomeControlSimulator()
+
+    pairing = sim.pairing_glyph()
+    parsed = urlparse(pairing['qr_payload'])
+    payload = parse_qs(parsed.query)['payload'][0]
+
+    assert parsed.scheme == 'http'
+    assert parsed.netloc == '100.71.53.54:8088'
+    assert parsed.path == '/pair'
+    assert payload == pairing['payload']
+    assert payload.startswith('HC2:')
+    assert pairing['qr_size'] == len(pairing['qr_matrix'])
+    assert sim.verify_pairing_payload(payload)
 
 
 @pytest.mark.asyncio

@@ -8,9 +8,19 @@ import Foundation
 struct PairingGlyph: Decodable {
     let format: String
     let payload: String
+    let qrPayload: String?
     let code: String
     let size: Int
     let matrix: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case format
+        case payload
+        case qrPayload = "qr_payload"
+        case code
+        case size
+        case matrix
+    }
 }
 
 struct PairingPayload: Equatable {
@@ -86,18 +96,31 @@ struct PairingGlyphCodec {
     }
 
     static func parse(payload: String) throws -> PairingPayload {
-        guard payload.hasPrefix("\(HomeControlCircularPairingCodeSpec.protocolVersion):") else {
+        let securePayload = try securePayload(from: payload)
+        guard securePayload.hasPrefix("\(HomeControlCircularPairingCodeSpec.protocolVersion):") else {
             throw PairingGlyphError.invalidFormat
         }
-        let token = String(payload.dropFirst(HomeControlCircularPairingCodeSpec.protocolVersion.count + 1))
+        let token = String(securePayload.dropFirst(HomeControlCircularPairingCodeSpec.protocolVersion.count + 1))
         guard !token.isEmpty,
               token.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }) else {
             throw PairingGlyphError.invalidFormat
         }
         return PairingPayload(
             protocolVersion: HomeControlCircularPairingCodeSpec.protocolVersion,
-            opaqueToken: payload
+            opaqueToken: securePayload
         )
+    }
+
+    static func securePayload(from value: String) throws -> String {
+        if value.hasPrefix("\(HomeControlCircularPairingCodeSpec.protocolVersion):") {
+            return value
+        }
+        guard let components = URLComponents(string: value),
+              let payload = components.queryItems?.first(where: { $0.name == "payload" })?.value,
+              payload.hasPrefix("\(HomeControlCircularPairingCodeSpec.protocolVersion):") else {
+            throw PairingGlyphError.invalidFormat
+        }
+        return payload
     }
 
     static func decode(matrix: [String]) throws -> String {

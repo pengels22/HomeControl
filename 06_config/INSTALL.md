@@ -87,8 +87,10 @@ The simulator binds to `100.71.53.54` by default so the iOS app can reach it;
 set `HC_SIM_HOST=127.0.0.1` for localhost-only development or another address
 for a different host network.
 
-The HCM screen mockup displays the current secure circular pairing code. The
-pairing endpoint returns a camera-friendly `17x17` `HC2:...` opaque payload:
+The HCM screen mockup displays the current secure pairing code inside the
+circular pairing UI. The scan target itself is a standards-compliant QR URL
+such as `http://100.71.53.54:8088/pair?payload=...`; the query value is still
+the opaque `HC2:...` pairing payload that HCM verifies:
 
 ```bash
 curl http://127.0.0.1:8088/api/pairing-glyph
@@ -112,10 +114,9 @@ The iOS project is in `12_IOS/Home Control`.
 
 The primary pairing path is:
 
-1. HCM displays the circular optical code.
-2. The app scans the circular code using the camera.
-3. The app decodes the fixed HomeControl optical format into an opaque `HC2`
-   payload.
+1. HCM displays the QR pairing code inside the circular pairing UI.
+2. The app scans the QR using the camera.
+3. The app extracts the opaque `HC2` payload from the pairing URL.
 4. The app posts that payload to HCM.
 5. HCM verifies/decrypts the payload using its local secret.
 6. HCM returns an app session token and the app loads the HCM configuration page.
