@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,6 +46,9 @@ class HomeControlSimulator:
         self.lcm_fades: dict[str, asyncio.Task] = {}
         self.lcm_names = self.default_lcm_names()
         self.pairing_code = "482913"
+        self.pairing_secret = "simulator-hcm-local-pairing-secret"
+        self.active_pairing = common_pairing.encode_pairing_glyph("HCM01", self.pairing_code, self.pairing_secret)
+        self.auth_tokens = {"sim-dev-token": {"user": "local-admin", "role": "ADMIN"}}
         self.hvac_events: list[dict[str, Any]] = []
         self.hvac = hvac_mod.HVACController(self.hvac_output, self.hvac_damper)
         self.hvac.DAMPER_LEAD_S = 0
@@ -109,14 +112,29 @@ class HomeControlSimulator:
         ]
 
     def pairing_glyph(self) -> dict[str, Any]:
-        glyph = common_pairing.encode_pairing_glyph("HCM01", self.pairing_code)
+        glyph = self.active_pairing
         return {
             "format": "HC-CIRCULAR-PAIR-1",
             "payload": glyph.payload,
             "code": glyph.code,
             "size": glyph.size,
             "matrix": glyph.matrix,
+            "qr_size": glyph.qr_size,
+            "qr_matrix": glyph.qr_matrix,
         }
+
+    def verify_pairing_payload(self, payload: str) -> bool:
+        return payload == self.active_pairing.payload and common_pairing.verify_secure_pairing_payload(
+            payload,
+            "HCM01",
+            self.pairing_code,
+            self.pairing_secret,
+        )
+
+    def auth_session(self, authorization: str | None) -> dict[str, str] | None:
+        if not authorization or not authorization.startswith("Bearer "):
+            return None
+        return self.auth_tokens.get(authorization.removeprefix("Bearer ").strip())
 
     async def set_rcm_relay(self, channel: str, value: bool) -> dict[str, Any]:
         ch = channel.upper()
@@ -276,11 +294,10 @@ async def index():
     .pairing-screen{background:#080d0b;color:#ecfff4;place-items:center;text-align:center;overflow:hidden;position:relative}
     .pairing-screen:before{content:"";position:absolute;inset:-20%;background:radial-gradient(circle at 50% 45%,rgba(68,197,137,.24),transparent 36%),radial-gradient(circle at 35% 70%,rgba(141,229,186,.12),transparent 28%);animation:pairGlow 5s ease-in-out infinite alternate}
     .pairing-content{position:relative;z-index:1;display:grid;gap:9px;justify-items:center}
-    .pair-code-glyph{width:136px;height:136px;border-radius:50%;display:grid;grid-template-columns:repeat(17,1fr);grid-template-rows:repeat(17,1fr);gap:2px;padding:10px;background:radial-gradient(circle,rgba(236,255,244,.08),rgba(68,197,137,.04));box-shadow:0 0 0 1px rgba(236,255,244,.22),0 0 34px rgba(68,197,137,.35);animation:pairBreathe 3.5s ease-in-out infinite}
-    .pair-dot{border-radius:2px;background:transparent;opacity:0}
-    .pair-dot.on{background:#ecfff4;box-shadow:0 0 6px rgba(236,255,244,.55);opacity:.95;animation:pairTwinkle 3.2s ease-in-out infinite}
-    .pair-dot.soft{background:#8de5ba;opacity:.42}
-    .pair-dot.eye{border-radius:3px;background:#ecfff4;box-shadow:0 0 10px rgba(236,255,244,.65);opacity:1}
+    .pair-code-glyph{width:168px;height:168px;display:grid;gap:1px;padding:12px;background:#fff;border-radius:50%;overflow:hidden;box-shadow:0 0 0 1px rgba(236,255,244,.35),0 0 34px rgba(68,197,137,.35);animation:pairBreathe 3.5s ease-in-out infinite}
+    .pair-dot{background:transparent;border-radius:2px}
+    .pair-dot.on,.pair-dot.eye{background:#000}
+    .pair-dot.soft{background:#d9efe3}
     .pair-title{font-weight:700;letter-spacing:.08em;font-size:.74rem}.pair-code{font-size:1.02rem;font-weight:700;letter-spacing:.08em}.pair-help{font-size:.62rem;color:#a7d8bf}
     @keyframes pairBreathe{0%,100%{transform:scale(.985);filter:saturate(.9)}50%{transform:scale(1.015);filter:saturate(1.25)}}
     @keyframes pairTwinkle{0%,100%{opacity:.72}50%{opacity:1}}
@@ -536,7 +553,7 @@ function pairingScreenFace(){
   return `<div class="screen pairing-screen">
     <div class="pairing-content">
       <div class="pair-title">PAIRING MODE</div>
-      <div class="pair-code-glyph" aria-label="Circular pairing code">${pairGlyphCells(pairing.matrix)}</div>
+      <div class="pair-code-glyph" aria-label="Circular optical pairing code" style="grid-template-columns:repeat(${pairing.size},1fr);grid-template-rows:repeat(${pairing.size},1fr)">${pairGlyphCells(pairing.matrix)}</div>
       <div class="pair-code">${pairing.code.replace(/(\\d{3})(\\d{3})/,'$1 $2')}</div>
       <div class="pair-help">Scan from HomeControl setup</div>
     </div>
@@ -550,6 +567,19 @@ function pairGlyphCells(matrix){
       const cls=value==='E' ? 'eye' : value==='1' ? 'on' : value==='0' ? 'soft' : '';
       const delay=((x+y)%6)*.08;
       cells+=`<span class="pair-dot ${cls}" style="animation-delay:${delay}s"></span>`;
+    }
+  }
+  return cells;
+}
+function qrCells(matrix){
+  const quiet=4;
+  const size=matrix.length + quiet * 2;
+  let cells='';
+  for(let y=0;y<size;y++){
+    for(let x=0;x<size;x++){
+      const yy=y-quiet, xx=x-quiet;
+      const dark=yy>=0 && yy<matrix.length && xx>=0 && xx<matrix[yy].length && matrix[yy][xx]==='1';
+      cells+=`<span class="pair-dot ${dark?'on':''}"></span>`;
     }
   }
   return cells;
@@ -601,6 +631,33 @@ async def state():
 @app.get("/api/pairing-glyph")
 async def pairing_glyph():
     return sim.pairing_glyph()
+
+
+@app.post("/api/pairing-glyph/compare")
+async def pairing_glyph_compare(body: dict[str, Any], authorization: str | None = Header(default=None)):
+    provided = str(body.get("payload", ""))
+    ok = sim.verify_pairing_payload(provided)
+    return {"ok": ok, "expected_hcm": "HCM01", "token": "sim-dev-token" if ok else None}
+
+
+@app.post("/api/v1/auth/dev-session")
+async def simulator_dev_session():
+    return {"token": "sim-dev-token"}
+
+
+@app.post("/api/v1/auth/login")
+async def simulator_login(body: dict[str, Any]):
+    if not body.get("username") or not body.get("password"):
+        raise HTTPException(401, "invalid credentials")
+    return {"token": "sim-dev-token"}
+
+
+@app.get("/api/v1/auth/session")
+async def simulator_session(authorization: str | None = Header(default=None)):
+    session = sim.auth_session(authorization)
+    if not session:
+        raise HTTPException(401, "invalid session")
+    return session
 
 
 @app.post("/api/rcm/relay")

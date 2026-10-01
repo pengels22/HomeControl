@@ -21,7 +21,8 @@ async def test_mac_simulator_builds_module_state_and_rmc_frames():
     assert 'sim' in state
     assert state['hcm']['hvac']['mode'] == 'COOL'
     assert state['hcm']['hvac']['cool'] is True
-    assert state['hcm']['pairing']['payload'] == 'HC1:HCM01:482913'
+    assert state['hcm']['pairing']['payload'].startswith('HC2:')
+    assert sim.verify_pairing_payload(state['hcm']['pairing']['payload'])
     assert state['hcm']['pairing']['format'] == 'HC-CIRCULAR-PAIR-1'
     assert state['sim']['rmc_nodes']
 
