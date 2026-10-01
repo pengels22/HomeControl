@@ -26,18 +26,14 @@ enum CircularGlyphImageDecoder {
         let sampler = try PixelSampler(cgImage: cgImage)
         for crop in candidateCrops(from: sampler) {
             for threshold in thresholds {
-                do {
-                    let matrix = sampleMatrix(from: sampler, crop: crop, threshold: threshold)
-                    for orientedMatrix in matrixOrientations(matrix) {
-                        do {
-                            let payload = try PairingGlyphCodec.decode(matrix: orientedMatrix)
-                            return try PairingGlyphCodec.parse(payload: payload)
-                        } catch {
-                            lastError = error
-                        }
+                let matrix = sampleMatrix(from: sampler, crop: crop, threshold: threshold)
+                for orientedMatrix in matrixOrientations(matrix) {
+                    do {
+                        let payload = try PairingGlyphCodec.decode(matrix: orientedMatrix)
+                        return try PairingGlyphCodec.parse(payload: payload)
+                    } catch {
+                        lastError = error
                     }
-                } catch {
-                    lastError = error
                 }
             }
         }
