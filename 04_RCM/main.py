@@ -7,6 +7,7 @@ common_agent = import_module('07_servises.common.agent')
 common_cfg = import_module('07_servises.common.config')
 common_hw = import_module('07_servises.common.hardware')
 common_pinmap = import_module('07_servises.common.pinmap')
+common_io = import_module('07_servises.common.io')
 
 class RCMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
@@ -18,12 +19,14 @@ class RCMAgent(common_agent.ModuleAgent):
         )
         self.pinout = common_pinmap.load_pinout(pinout_path)
         common_pinmap.require_channels(self.pinout, names)
+        self.io_mode = common_io.io_mode(config)
         self.relays = common_hw.DigitalBank(names)
         self.fail_actions = config.get('fail_actions', {})
 
     async def collect_state(self):
         return {
             'relays': self.relays.snapshot(),
+            'io_mode': self.io_mode,
             'pinout': {
                 channel: {
                     'hardware_address': entry.hardware_address,

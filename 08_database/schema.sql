@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS users (
     id BIGSERIAL PRIMARY KEY,
     username TEXT UNIQUE NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('ADMIN','READONLY')),
+    password_hash TEXT,
     passkey_credential JSONB,
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -110,6 +111,19 @@ CREATE TABLE IF NOT EXISTS user_sessions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at TIMESTAMPTZ NOT NULL,
     revoked_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS pairing_keys (
+    id BIGSERIAL PRIMARY KEY,
+    label TEXT NOT NULL,
+    target_type TEXT NOT NULL CHECK (target_type IN ('HCM_SCREEN','PNL','RCM','LCM','SIM','RMC','OTHER')),
+    pairing_token_hash TEXT UNIQUE NOT NULL,
+    created_by TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    used_by TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
 CREATE TABLE IF NOT EXISTS rules (
@@ -150,6 +164,7 @@ CREATE INDEX IF NOT EXISTS idx_faults_active ON faults(active, severity);
 CREATE INDEX IF NOT EXISTS idx_output_intents_active ON output_intents(logical_device_id, active, source);
 CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token_hash) WHERE revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_auth_challenges_challenge ON auth_challenges(challenge) WHERE consumed_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_pairing_keys_hash ON pairing_keys(pairing_token_hash) WHERE used_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS notification_log (
     id BIGSERIAL PRIMARY KEY,

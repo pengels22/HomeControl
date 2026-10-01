@@ -3,7 +3,35 @@ hcm_host: 192.168.60.1
 hcm_port: 6501
 heartbeat_seconds: 5
 software_version: 0.1.0
+io:
+  mode: auto
 tls:
   enabled: false
 capabilities: [rmc-can, telemetry, faults]
 identity_path: ./runtime/sim_identity.json
+web:
+  enabled: true
+  host: 0.0.0.0
+  port: 8092
+  hcm_api_url: http://192.168.60.1:8080/api/v1
+can_enabled: false
+can_bitrate: 125000
+can_interfaces:
+  - name: can0
+    label: CAN A
+    hardware: FYSETC Hexa CAN0
+    connector: Hexa Port 1
+    bitrate: 125000
+    enabled: true
+  - name: can1
+    label: CAN B
+    hardware: UCAN1
+    connector: Hexa Port 2
+    bitrate: 125000
+    enabled: true
+  - name: can2
+    label: CAN C
+    hardware: UCAN2
+    connector: Hexa Port 3
+    bitrate: 125000
+    enabled: true

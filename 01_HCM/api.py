@@ -1,8 +1,30 @@
 from __future__ import annotations
 import asyncio
 from fastapi import APIRouter, Depends, HTTPException
-from .models import AuthChallengeIn, AuthVerifyIn, RoomStateIn, HvacSetpointIn, HvacModeIn, DeviceCommand, FireStateIn
-from .auth import create_login_challenge, require_user, create_session, verify_login_challenge
+from .models import (
+    AuthChallengeIn,
+    AuthVerifyIn,
+    DeviceCommand,
+    FireStateIn,
+    HvacModeIn,
+    HvacSetpointIn,
+    PairingKeyCreateIn,
+    PairingKeyVerifyIn,
+    PasswordLoginIn,
+    RoomStateIn,
+    UserCreateIn,
+)
+from .auth import (
+    create_login_challenge,
+    create_pairing_key,
+    create_session,
+    create_user,
+    list_pairing_keys,
+    login_password,
+    require_user,
+    verify_login_challenge,
+    verify_pairing_key,
+)
 from .devices import MaintenanceLockedError, command_logical
 from .hvac import Mode
 from .settings import settings
@@ -21,6 +43,19 @@ async def dev_session():
         raise HTTPException(404)
     return {'token': create_session('local-admin','ADMIN')}
 
+@router.post('/auth/login')
+async def auth_login(body: PasswordLoginIn):
+    return {'token': await login_password(body.username, body.password)}
+
+@router.get('/auth/session')
+async def auth_session(user=Depends(require_user)):
+    return user
+
+@router.post('/auth/users')
+async def auth_create_user(body: UserCreateIn, user=Depends(require_user)):
+    if user['role'] != 'ADMIN': raise HTTPException(403)
+    return await create_user(body.username, body.password, body.role)
+
 @router.post('/auth/passkey/challenge')
 async def auth_challenge(body: AuthChallengeIn):
     return await create_login_challenge(body.username)
@@ -28,6 +63,26 @@ async def auth_challenge(body: AuthChallengeIn):
 @router.post('/auth/passkey/verify')
 async def auth_verify(body: AuthVerifyIn):
     return {'token': await verify_login_challenge(body.username, body.challenge, body.assertion)}
+
+@router.post('/pairing-keys')
+async def pairing_create(body: PairingKeyCreateIn, user=Depends(require_user)):
+    if user['role'] != 'ADMIN': raise HTTPException(403)
+    return await create_pairing_key(
+        body.label,
+        body.target_type,
+        user['user'],
+        body.ttl_minutes,
+        body.metadata,
+    )
+
+@router.get('/pairing-keys')
+async def pairing_list(user=Depends(require_user)):
+    if user['role'] != 'ADMIN': raise HTTPException(403)
+    return {'pairing_keys': await list_pairing_keys()}
+
+@router.post('/pairing-keys/verify')
+async def pairing_verify(body: PairingKeyVerifyIn):
+    return await verify_pairing_key(body.pairing_key, body.used_by)
 
 @router.get('/hvac')
 async def get_hvac(user=Depends(require_user)):

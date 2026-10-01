@@ -3,6 +3,8 @@ import asyncio, logging, sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from .settings import settings
 from . import db
@@ -52,6 +54,12 @@ async def hvac_loop():
 
 app = FastAPI(title='HomeControl HCM', version='0.1.0', lifespan=lifespan)
 app.include_router(api.router)
+WEB_ROOT = Path(__file__).resolve().parent / 'www'
+app.mount('/static', StaticFiles(directory=WEB_ROOT), name='static')
+
+@app.get('/')
+async def web_index():
+    return FileResponse(WEB_ROOT / 'index.html')
 
 if __name__ == '__main__':
     if '-dev' in sys.argv or '--dev' in sys.argv:

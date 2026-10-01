@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HomeControl</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="topbar">
+      <div>
+        <h1>HomeControl</h1>
+        <p>HCM control interface</p>
+      </div>
+      <button id="logout" class="secondary" hidden>Log out</button>
+    </section>
+
+    <section id="login-view" class="panel narrow">
+      <h2>Sign In</h2>
+      <label>Username <input id="username" autocomplete="username"></label>
+      <label>Password <input id="password" type="password" autocomplete="current-password"></label>
+      <button id="login">Sign in</button>
+      <p id="login-error" class="error"></p>
+    </section>
+
+    <section id="app-view" hidden>
+      <div class="grid">
+        <section class="panel">
+          <h2>HVAC</h2>
+          <div class="metric"><span>Mode</span><strong id="hvac-mode">-</strong></div>
+          <div class="metric"><span>Setpoint</span><strong id="hvac-setpoint">-</strong></div>
+          <div class="metric"><span>Average</span><strong id="hvac-average">-</strong></div>
+          <div class="row">
+            <select id="mode">
+              <option>OFF</option>
+              <option>HEAT</option>
+              <option>COOL</option>
+              <option>FAN</option>
+            </select>
+            <input id="setpoint" type="number" min="45" max="90" value="70">
+            <button id="apply-hvac">Apply</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Pairing Keys</h2>
+          <div class="row">
+            <input id="pair-label" placeholder="Label">
+            <select id="pair-type">
+              <option>HCM_SCREEN</option>
+              <option>PNL</option>
+              <option>RCM</option>
+              <option>LCM</option>
+              <option>SIM</option>
+              <option>RMC</option>
+              <option>OTHER</option>
+            </select>
+            <button id="create-pairing">Generate</button>
+          </div>
+          <div id="pairing-output" class="pairing-key" hidden></div>
+          <table>
+            <thead><tr><th>Label</th><th>Type</th><th>Expires</th><th>Used</th></tr></thead>
+            <tbody id="pairing-list"></tbody>
+          </table>
+        </section>
+      </div>
+      <p id="app-error" class="error"></p>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

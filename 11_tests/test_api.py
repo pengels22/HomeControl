@@ -27,6 +27,13 @@ async def test_dev_session_available_when_dev_mode_enabled(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_auth_session_returns_current_user():
+    result = await api.auth_session({'user': 'patrick', 'role': 'ADMIN'})
+
+    assert result == {'user': 'patrick', 'role': 'ADMIN'}
+
+
+@pytest.mark.asyncio
 async def test_passkey_challenge_endpoint_uses_auth_service(monkeypatch):
     async def create_login_challenge(username):
         return {'rp_id': 'homecontrol.local', 'username': username, 'challenge': 'abc'}

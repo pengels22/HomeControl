@@ -6,6 +6,7 @@ from importlib import import_module
 common_agent = import_module('07_servises.common.agent')
 common_cfg = import_module('07_servises.common.config')
 common_hw = import_module('07_servises.common.hardware')
+common_io = import_module('07_servises.common.io')
 
 class LCMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
@@ -14,15 +15,39 @@ class LCMAgent(common_agent.ModuleAgent):
         self.relay_map.update({str(i): f'B{i - 8}' for i in range(9, 13)})
         self.hv_dimmer_map = {str(i): f'HV-{i - 12}' for i in range(13, 17)}
         self.lv_dimmer_map = {str(i): f'10-{i - 16}' for i in range(17, 25)}
+        self.io_mode = common_io.io_mode(config)
         self.relays = common_hw.DigitalBank(sorted(set(self.relay_map.values())))
         self.hv_dimmers = common_hw.AnalogOutputs(sorted(set(self.hv_dimmer_map.values())))
-        self.lv_dimmers = common_hw.AnalogOutputs([f'10-{i}' for i in range(1, 9)])
+        self.i2c = config.get('i2c', {})
+        self.i2c_bus = common_hw.I2CBus(
+            int(self.i2c.get('bus', 1)),
+            enabled=bool(self.i2c.get('enabled', False)) and common_io.real_io_enabled(config),
+        )
+        lv_channels = self.i2c.get('lv_dimmers') or {
+            f'10-{i}': {'mux_channel': i - 1, 'dac_address': int(self.i2c.get('dac_address', 0x60))}
+            for i in range(1, 9)
+        }
+        self.lv_dimmers = common_hw.MultiplexedDACOutputs(
+            lv_channels,
+            self.i2c_bus,
+            mux_address=int(self.i2c.get('mux_address', 0x70)),
+            dac_address=int(self.i2c.get('dac_address', 0x60)),
+        )
 
     async def collect_state(self):
         return {
             'relays': self.relays.snapshot(),
             'hv_dimmers': self.hv_dimmers.snapshot(),
             'lv_dimmers': self.lv_dimmers.snapshot(),
+            'i2c': {
+                'enabled': bool(self.i2c.get('enabled', False)),
+                'io_mode': self.io_mode,
+                'real_bus_active': self.i2c_bus.enabled,
+                'bus': self.i2c_bus.bus_id,
+                'mux_address': self.lv_dimmers.mux.address,
+                'dac_address': self.lv_dimmers.dac.address,
+                'selected_mux_channel': self.lv_dimmers.mux.selected_channel,
+            },
         }
 
     def _percent(self, payload):
@@ -44,6 +69,9 @@ class LCMAgent(common_agent.ModuleAgent):
             physical = self.hv_dimmer_map[logical]
             self.hv_dimmers.set_percent(physical, self._percent(payload))
             return {'ok': True, 'kind': 'hv_dimmer', 'channel': logical, 'physical': physical, **self.hv_dimmers.snapshot()[physical]}
+        if logical in self.hv_dimmers.values:
+            self.hv_dimmers.set_percent(logical, self._percent(payload))
+            return {'ok': True, 'kind': 'hv_dimmer', 'channel': logical, **self.hv_dimmers.snapshot()[logical]}
         if logical in self.lv_dimmer_map:
             physical = self.lv_dimmer_map[logical]
             self.lv_dimmers.set_percent(physical, self._percent(payload))

@@ -30,3 +30,22 @@ class AuthVerifyIn(BaseModel):
     username: str
     challenge: str
     assertion: dict[str, Any]
+
+class PasswordLoginIn(BaseModel):
+    username: str
+    password: str
+
+class UserCreateIn(BaseModel):
+    username: str
+    password: str = Field(min_length=10)
+    role: Literal['ADMIN','READONLY'] = 'READONLY'
+
+class PairingKeyCreateIn(BaseModel):
+    label: str
+    target_type: Literal['HCM_SCREEN','PNL','RCM','LCM','SIM','RMC','OTHER']
+    ttl_minutes: int = Field(default=30, ge=1, le=1440)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+class PairingKeyVerifyIn(BaseModel):
+    pairing_key: str
+    used_by: str | None = None

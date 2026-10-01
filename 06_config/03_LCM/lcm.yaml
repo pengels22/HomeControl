@@ -3,8 +3,29 @@ hcm_host: 192.168.60.1
 hcm_port: 6501
 heartbeat_seconds: 5
 software_version: 0.1.0
+io:
+  mode: auto
 tls:
   enabled: false
 capabilities: [relay-32, analog-out-8, lighting]
 identity_path: ./runtime/lcm_identity.json
 analog_outputs: [10-1,10-2,10-3,10-4,10-5,10-6,10-7,10-8]
+web:
+  enabled: true
+  host: 0.0.0.0
+  port: 8093
+  hcm_api_url: http://192.168.60.1:8080/api/v1
+i2c:
+  enabled: false
+  bus: 1
+  mux_address: 0x70
+  dac_address: 0x60
+  lv_dimmers:
+    10-1: {mux_channel: 0, dac_address: 0x60}
+    10-2: {mux_channel: 1, dac_address: 0x60}
+    10-3: {mux_channel: 2, dac_address: 0x60}
+    10-4: {mux_channel: 3, dac_address: 0x60}
+    10-5: {mux_channel: 4, dac_address: 0x60}
+    10-6: {mux_channel: 5, dac_address: 0x60}
+    10-7: {mux_channel: 6, dac_address: 0x60}
+    10-8: {mux_channel: 7, dac_address: 0x60}
