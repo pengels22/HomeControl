@@ -4,6 +4,7 @@
 //
 
 import AVFoundation
+import CoreImage
 import SwiftUI
 import UIKit
 
@@ -19,18 +20,21 @@ struct CircularCodeCameraView: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: CircularCodeCameraViewController, context: Context) {}
 }
 
-final class CircularCodeCameraViewController: UIViewController, AVCapturePhotoCaptureDelegate {
+final class CircularCodeCameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDelegate {
     var onImage: ((UIImage) -> Void)?
 
     private let session = AVCaptureSession()
-    private let photoOutput = AVCapturePhotoOutput()
+    private let videoOutput = AVCaptureVideoDataOutput()
+    private let ciContext = CIContext()
     private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var didScan = false
+    private var lastAttempt = Date.distantPast
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
         configureSession()
-        addCaptureButton()
+        addGuideLabel()
     }
 
     override func viewDidLayoutSubviews() {
@@ -53,15 +57,21 @@ final class CircularCodeCameraViewController: UIViewController, AVCapturePhotoCa
     }
 
     private func configureSession() {
-        session.sessionPreset = .photo
+        session.sessionPreset = .hd1280x720
         guard let device = AVCaptureDevice.default(for: .video),
               let input = try? AVCaptureDeviceInput(device: device),
               session.canAddInput(input),
-              session.canAddOutput(photoOutput) else {
+              session.canAddOutput(videoOutput) else {
+            showMessage("Camera is not available. Use Load Simulator when running in the iOS Simulator.")
             return
         }
         session.addInput(input)
-        session.addOutput(photoOutput)
+        videoOutput.alwaysDiscardsLateVideoFrames = true
+        videoOutput.videoSettings = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+        ]
+        videoOutput.setSampleBufferDelegate(self, queue: DispatchQueue(label: "homecontrol.circular-code.scan"))
+        session.addOutput(videoOutput)
 
         let layer = AVCaptureVideoPreviewLayer(session: session)
         layer.videoGravity = .resizeAspectFill
@@ -69,34 +79,66 @@ final class CircularCodeCameraViewController: UIViewController, AVCapturePhotoCa
         previewLayer = layer
     }
 
-    private func addCaptureButton() {
-        let button = UIButton(type: .system)
-        button.setTitle("Capture Circular Code", for: .normal)
-        button.setTitleColor(.black, for: .normal)
-        button.backgroundColor = .white
-        button.layer.cornerRadius = 22
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.addTarget(self, action: #selector(capture), for: .touchUpInside)
-        view.addSubview(button)
+    private func addGuideLabel() {
+        let label = UILabel()
+        label.text = "Center the circular HCM code"
+        label.textColor = .black
+        label.textAlignment = .center
+        label.backgroundColor = .white
+        label.layer.cornerRadius = 18
+        label.layer.masksToBounds = true
+        label.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(label)
 
         NSLayoutConstraint.activate([
-            button.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            button.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -24),
-            button.heightAnchor.constraint(equalToConstant: 44),
-            button.widthAnchor.constraint(greaterThanOrEqualToConstant: 210)
+            label.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            label.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -24),
+            label.heightAnchor.constraint(equalToConstant: 40),
+            label.widthAnchor.constraint(greaterThanOrEqualToConstant: 240)
         ])
     }
 
-    @objc private func capture() {
-        photoOutput.capturePhoto(with: AVCapturePhotoSettings(), delegate: self)
+    private func showMessage(_ message: String) {
+        let label = UILabel()
+        label.text = message
+        label.textColor = .white
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(label)
+
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            label.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            label.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
     }
 
-    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        guard error == nil,
-              let data = photo.fileDataRepresentation(),
-              let image = UIImage(data: data) else {
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        guard !didScan,
+              Date().timeIntervalSince(lastAttempt) > 0.18,
+              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
             return
         }
-        onImage?(image)
+        lastAttempt = Date()
+
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else { return }
+
+        do {
+            _ = try CircularGlyphImageDecoder.decode(cgImage: cgImage)
+            didScan = true
+            let image = UIImage(cgImage: cgImage)
+            DispatchQueue.main.async {
+                self.session.stopRunning()
+                self.onImage?(image)
+            }
+        } catch {
+            return
+        }
     }
 }

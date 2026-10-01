@@ -116,22 +116,22 @@ struct ContentView: View {
             Text("Code")
                 .font(.headline)
             Button {
-                showingScanner = true
+                showingCircularCamera = true
             } label: {
-                Label("Scan Standard Code", systemImage: "viewfinder")
+                Label("Scan HCM Circular Code", systemImage: "camera.viewfinder")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
 
             Button {
-                showingCircularCamera = true
+                showingScanner = true
             } label: {
-                Label("Capture Circular Code", systemImage: "camera.metering.center.weighted")
+                Label("Scan Standard Code", systemImage: "viewfinder")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
 
-            TextField("Paste HC1:HCM01:482913 or a module id", text: $manualCode)
+            TextField("Paste HC2 token, HC1 code, or module id", text: $manualCode)
                 .textInputAutocapitalization(.characters)
                 .textFieldStyle(.roundedBorder)
             HStack {

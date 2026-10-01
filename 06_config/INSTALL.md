@@ -83,6 +83,44 @@ PNL agents in dry mode, injects RMC CAN telemetry using the `06_RMC/RMC.ino`
 frame layout, and provides functional HCM/HVAC, relay, dimmer, panel, and RMC
 test actions without touching real GPIO, I2C, CAN, PostgreSQL, or systemd.
 
+The HCM screen mockup displays the current secure circular pairing code. The
+pairing endpoint returns a `33x33` `HC2:...` opaque payload:
+
+```bash
+curl http://127.0.0.1:8088/api/pairing-glyph
+```
+
+To verify the pairing exchange manually:
+
+```bash
+PAYLOAD=$(curl -sS http://127.0.0.1:8088/api/pairing-glyph \
+  | .venv/bin/python -c 'import json,sys; print(json.load(sys.stdin)["payload"])')
+curl -sS -X POST http://127.0.0.1:8088/api/pairing-glyph/compare \
+  -H 'Content-Type: application/json' \
+  -d "{\"payload\":\"$PAYLOAD\"}"
+```
+
+The response should include `ok: true` and a session token.
+
+## iOS Companion App
+
+The iOS project is in `12_IOS/Home Control`.
+
+The primary pairing path is:
+
+1. HCM displays the circular optical code.
+2. The app scans the circular code using the camera.
+3. The app decodes the fixed HomeControl optical format into an opaque `HC2`
+   payload.
+4. The app posts that payload to HCM.
+5. HCM verifies/decrypts the payload using its local secret.
+6. HCM returns an app session token and the app loads the HCM configuration page.
+
+The HCM pairing secret is not stored in the iOS app. The iOS Simulator has no
+real camera; use the app's `Load Simulator` action while developing against
+`http://127.0.0.1:8088`. A physical iPhone must point the HCM URL at the HCM or
+Mac simulator address reachable from the phone, not `127.0.0.1`.
+
 ## IO Mode
 
 Modules use the same code for real hardware and simulation. IO mode is selected
