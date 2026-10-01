@@ -43,25 +43,22 @@ final class HomeControlViewModel {
 
         do {
             let decoded = try CircularGlyphImageDecoder.decode(image: image)
-            pendingCircularPayload = decoded.opaqueToken
-            selectedTarget = ScannedTarget(
-                rawValue: decoded.opaqueToken,
-                hcmId: nil,
-                targetId: "HCM01",
-                pairingCode: nil
-            )
-            let comparison = try await client(includeToken: false).comparePairingPayload(decoded.opaqueToken)
-            circularCompareOK = comparison.ok
-            if let token = comparison.token {
-                authToken = token
-                session = try await client().validateSession()
-            }
-            pendingCircularPayload = nil
-            if !comparison.ok {
-                errorMessage = "The circular code did not match the token on the HCM."
-                return
-            }
-            simulatorState = try await client().simulatorState()
+            try await completeCircularPairing(payload: decoded.opaqueToken)
+        } catch HCMClientError.unauthorized {
+            needsSignIn = true
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func captureCircularPayload(_ payload: String) async {
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+
+        do {
+            let decoded = try PairingGlyphCodec.parse(payload: payload)
+            try await completeCircularPairing(payload: decoded.opaqueToken)
         } catch HCMClientError.unauthorized {
             needsSignIn = true
         } catch {
@@ -192,6 +189,28 @@ final class HomeControlViewModel {
             throw HCMClientError.unauthorized
         }
         session = try await client().validateSession()
+    }
+
+    private func completeCircularPairing(payload: String) async throws {
+        pendingCircularPayload = payload
+        selectedTarget = ScannedTarget(
+            rawValue: payload,
+            hcmId: nil,
+            targetId: "HCM01",
+            pairingCode: nil
+        )
+        let comparison = try await client(includeToken: false).comparePairingPayload(payload)
+        circularCompareOK = comparison.ok
+        if let token = comparison.token {
+            authToken = token
+            session = try await client().validateSession()
+        }
+        pendingCircularPayload = nil
+        if !comparison.ok {
+            errorMessage = "The circular code did not match the token on the HCM."
+            return
+        }
+        simulatorState = try await client().simulatorState()
     }
 
     private func client(includeToken: Bool = true) throws -> HCMClient {

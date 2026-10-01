@@ -64,6 +64,9 @@ struct ContentView: View {
                     CircularCodeCameraView { image in
                         showingCircularCamera = false
                         Task { await model.captureCircularCode(image: image) }
+                    } onCode: { payload in
+                        showingCircularCamera = false
+                        Task { await model.captureCircularPayload(payload) }
                     }
                     .ignoresSafeArea()
                     .navigationTitle("Circular Code")

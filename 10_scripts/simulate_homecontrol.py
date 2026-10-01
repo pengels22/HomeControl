@@ -551,10 +551,13 @@ function screenMockup(kind){
 }
 function pairingScreenFace(){
   const pairing=appState.hcm.pairing;
+  const useQr=pairing.qr_matrix && pairing.qr_matrix.length;
+  const visualSize=useQr ? pairing.qr_size + 8 : pairing.size;
+  const cells=useQr ? qrCells(pairing.qr_matrix) : pairGlyphCells(pairing.matrix);
   return `<div class="screen pairing-screen">
     <div class="pairing-content">
       <div class="pair-title">PAIRING MODE</div>
-      <div class="pair-code-glyph" aria-label="Circular optical pairing code" style="grid-template-columns:repeat(${pairing.size},1fr);grid-template-rows:repeat(${pairing.size},1fr)">${pairGlyphCells(pairing.matrix)}</div>
+      <div class="pair-code-glyph" aria-label="Circular optical pairing code" style="grid-template-columns:repeat(${visualSize},1fr);grid-template-rows:repeat(${visualSize},1fr)">${cells}</div>
       <div class="pair-code">${pairing.code.replace(/(\\d{3})(\\d{3})/,'$1 $2')}</div>
       <div class="pair-help">Scan from HomeControl setup</div>
     </div>

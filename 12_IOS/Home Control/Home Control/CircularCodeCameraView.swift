@@ -10,20 +10,24 @@ import UIKit
 
 struct CircularCodeCameraView: UIViewControllerRepresentable {
     let onImage: (UIImage) -> Void
+    let onCode: (String) -> Void
 
     func makeUIViewController(context: Context) -> CircularCodeCameraViewController {
         let controller = CircularCodeCameraViewController()
         controller.onImage = onImage
+        controller.onCode = onCode
         return controller
     }
 
     func updateUIViewController(_ uiViewController: CircularCodeCameraViewController, context: Context) {}
 }
 
-final class CircularCodeCameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDelegate {
+final class CircularCodeCameraViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate, AVCaptureVideoDataOutputSampleBufferDelegate {
     var onImage: ((UIImage) -> Void)?
+    var onCode: ((String) -> Void)?
 
     private let session = AVCaptureSession()
+    private let metadataOutput = AVCaptureMetadataOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
     private let ciContext = CIContext()
     private let scanQueue = DispatchQueue(label: "homecontrol.circular-code.scan")
@@ -80,6 +84,12 @@ final class CircularCodeCameraViewController: UIViewController, AVCaptureVideoDa
         videoOutput.setSampleBufferDelegate(self, queue: scanQueue)
         session.addOutput(videoOutput)
         applyPortraitOrientation(to: videoOutput.connection(with: .video))
+
+        if session.canAddOutput(metadataOutput) {
+            session.addOutput(metadataOutput)
+            metadataOutput.setMetadataObjectsDelegate(self, queue: .main)
+            metadataOutput.metadataObjectTypes = [.qr]
+        }
 
         let layer = AVCaptureVideoPreviewLayer(session: session)
         layer.videoGravity = .resizeAspectFill
@@ -188,6 +198,23 @@ final class CircularCodeCameraViewController: UIViewController, AVCaptureVideoDa
         }
 
         _ = tryDecode(cgImage: cgImage)
+    }
+
+    func metadataOutput(
+        _ output: AVCaptureMetadataOutput,
+        didOutput metadataObjects: [AVMetadataObject],
+        from connection: AVCaptureConnection
+    ) {
+        guard !didScan,
+              let object = metadataObjects.compactMap({ $0 as? AVMetadataMachineReadableCodeObject }).first,
+              let value = object.stringValue,
+              value.hasPrefix("HC2:") else {
+            return
+        }
+        didScan = true
+        guideOverlay?.setScanningComplete()
+        session.stopRunning()
+        onCode?(value)
     }
 
     private func tryDecode(cgImage: CGImage) -> Bool {
