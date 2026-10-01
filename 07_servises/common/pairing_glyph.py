@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from secrets import token_bytes
 from zlib import crc32
 
+import qrcode
+
 SIZE = 17
 CENTER = 8
 RADIUS = 8.2
@@ -194,6 +196,19 @@ def _xor_stream(data: bytes, key: bytes, nonce: bytes) -> bytes:
 
 
 def encode_qr_v1_l(payload: str) -> list[str]:
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=1,
+        border=0,
+    )
+    qr.add_data(payload)
+    qr.make(fit=False)
+    matrix = qr.get_matrix()
+    return ["".join("1" if cell else "0" for cell in row) for row in matrix]
+
+
+def encode_qr_v1_l_legacy(payload: str) -> list[str]:
     data = payload.encode("iso-8859-1")
     if len(data) > 17:
         raise ValueError("payload is too large for QR version 1-L byte mode")
