@@ -13,14 +13,6 @@ enum CircularGlyphImageDecoder {
     }
 
     static func decode(cgImage: CGImage) throws -> PairingPayload {
-        let cropScales = [
-            HomeControlCircularPairingCodeSpec.centeredPhotoCropScale,
-            0.62,
-            0.68,
-            0.76,
-            0.84,
-            0.92
-        ]
         let thresholds = [
             HomeControlCircularPairingCodeSpec.darkLumaThreshold,
             110.0,
@@ -32,12 +24,18 @@ enum CircularGlyphImageDecoder {
 
         var lastError: Error = PairingGlyphError.invalidMatrix
         let sampler = try PixelSampler(cgImage: cgImage)
-        for cropScale in cropScales {
+        for crop in candidateCrops(from: sampler) {
             for threshold in thresholds {
                 do {
-                    let matrix = sampleMatrix(from: sampler, cropScale: cropScale, threshold: threshold)
-                    let payload = try PairingGlyphCodec.decode(matrix: matrix)
-                    return try PairingGlyphCodec.parse(payload: payload)
+                    let matrix = sampleMatrix(from: sampler, crop: crop, threshold: threshold)
+                    for orientedMatrix in matrixOrientations(matrix) {
+                        do {
+                            let payload = try PairingGlyphCodec.decode(matrix: orientedMatrix)
+                            return try PairingGlyphCodec.parse(payload: payload)
+                        } catch {
+                            lastError = error
+                        }
+                    }
                 } catch {
                     lastError = error
                 }
@@ -46,12 +44,65 @@ enum CircularGlyphImageDecoder {
         throw lastError
     }
 
-    private static func sampleMatrix(from sampler: PixelSampler, cropScale: Double, threshold: Double) -> [String] {
+    private static func candidateCrops(from sampler: PixelSampler) -> [CGRect] {
+        var crops: [CGRect] = []
+        if let detected = brightCodeCrop(from: sampler) {
+            crops.append(detected)
+            crops.append(detected.insetBy(dx: -detected.width * 0.06, dy: -detected.height * 0.06))
+            crops.append(detected.insetBy(dx: detected.width * 0.05, dy: detected.height * 0.05))
+        }
+
+        for scale in [0.48, 0.56, 0.64, HomeControlCircularPairingCodeSpec.centeredPhotoCropScale, 0.80, 0.92] {
+            let side = Double(min(sampler.width, sampler.height)) * scale
+            crops.append(CGRect(
+                x: (Double(sampler.width) - side) / 2,
+                y: (Double(sampler.height) - side) / 2,
+                width: side,
+                height: side
+            ))
+        }
+
+        return crops.map { clampSquare($0, width: sampler.width, height: sampler.height) }
+    }
+
+    private static func brightCodeCrop(from sampler: PixelSampler) -> CGRect? {
+        let step = max(3, min(sampler.width, sampler.height) / 180)
+        let marginX = sampler.width / 10
+        let marginY = sampler.height / 10
+        var minX = sampler.width
+        var minY = sampler.height
+        var maxX = 0
+        var maxY = 0
+        var hits = 0
+
+        for y in stride(from: marginY, to: sampler.height - marginY, by: step) {
+            for x in stride(from: marginX, to: sampler.width - marginX, by: step) {
+                guard sampler.luma(atX: x, y: y) > 215 else { continue }
+                minX = min(minX, x)
+                minY = min(minY, y)
+                maxX = max(maxX, x)
+                maxY = max(maxY, y)
+                hits += 1
+            }
+        }
+
+        guard hits > 24, maxX > minX, maxY > minY else { return nil }
+        let centerX = Double(minX + maxX) / 2
+        let centerY = Double(minY + maxY) / 2
+        let side = Double(max(maxX - minX, maxY - minY)) * 1.12
+        return CGRect(x: centerX - side / 2, y: centerY - side / 2, width: side, height: side)
+    }
+
+    private static func clampSquare(_ rect: CGRect, width: Int, height: Int) -> CGRect {
+        let side = min(rect.width, rect.height, Double(width), Double(height))
+        let x = min(max(rect.midX - side / 2, 0), Double(width) - side)
+        let y = min(max(rect.midY - side / 2, 0), Double(height) - side)
+        return CGRect(x: x, y: y, width: side, height: side)
+    }
+
+    private static func sampleMatrix(from sampler: PixelSampler, crop: CGRect, threshold: Double) -> [String] {
         let size = HomeControlCircularPairingCodeSpec.matrixSize
-        let side = Int(Double(min(sampler.width, sampler.height)) * cropScale)
-        let originX = (sampler.width - side) / 2
-        let originY = (sampler.height - side) / 2
-        let cell = Double(side) / Double(size)
+        let cell = crop.width / Double(size)
 
         var rows: [String] = []
         for y in 0..<size {
@@ -61,14 +112,30 @@ enum CircularGlyphImageDecoder {
                     row.append(" ")
                     continue
                 }
-                let sampleX = originX + Int((Double(x) + 0.5) * cell)
-                let sampleY = originY + Int((Double(y) + 0.5) * cell)
+                let sampleX = Int(crop.minX + (Double(x) + 0.5) * cell)
+                let sampleY = Int(crop.minY + (Double(y) + 0.5) * cell)
                 let isDark = sampler.luma(atX: sampleX, y: sampleY) < threshold
                 row.append(isDark ? "1" : "0")
             }
             rows.append(row)
         }
         return rows
+    }
+
+    private static func matrixOrientations(_ matrix: [String]) -> [[String]] {
+        let once = rotateClockwise(matrix)
+        let twice = rotateClockwise(once)
+        let third = rotateClockwise(twice)
+        return [matrix, once, twice, third]
+    }
+
+    private static func rotateClockwise(_ matrix: [String]) -> [String] {
+        let rows = matrix.map(Array.init)
+        let size = rows.count
+        guard size > 0 else { return matrix }
+        return (0..<size).map { x in
+            String((0..<size).reversed().map { y in rows[y][x] })
+        }
     }
 
     private static func normalizedCGImage(from image: UIImage) -> CGImage? {

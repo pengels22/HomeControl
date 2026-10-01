@@ -83,6 +83,9 @@ Open `http://127.0.0.1:8088` on the Mac running the simulator, or
 PNL agents in dry mode, injects RMC CAN telemetry using the `06_RMC/RMC.ino`
 frame layout, and provides functional HCM/HVAC, relay, dimmer, panel, and RMC
 test actions without touching real GPIO, I2C, CAN, PostgreSQL, or systemd.
+The simulator binds to `100.71.53.54` by default so the iOS app can reach it;
+set `HC_SIM_HOST=127.0.0.1` for localhost-only development or another address
+for a different host network.
 
 The HCM screen mockup displays the current secure circular pairing code. The
 pairing endpoint returns a `33x33` `HC2:...` opaque payload:

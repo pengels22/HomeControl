@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -281,7 +282,7 @@ async def index():
     .lcm-dimmer{grid-template-columns:54px minmax(130px,1fr) 54px}
     .name-input{grid-column:1 / -1;padding:.45rem}
     .channel .on{color:#8ee0be}.channel .off{color:#aab2ae}.channel .locked-label{color:#ffca8a}
-    .screen-wrap{display:grid;grid-template-columns:minmax(260px,380px) 1fr;gap:16px;align-items:start;margin-top:14px}
+    .screen-wrap{display:grid;grid-template-columns:minmax(300px,460px) 1fr;gap:16px;align-items:start;margin-top:14px}
     .screen-bezel{background:#050607;border:1px solid #32383d;border-radius:8px;padding:12px;box-shadow:inset 0 0 0 2px #0c0f11}
     .screen{aspect-ratio:4/3;background:#d8ecdf;color:#17201b;border-radius:4px;padding:12px;display:grid;grid-template-rows:auto 1fr auto;gap:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
     .screen-top,.screen-bottom{display:flex;justify-content:space-between;align-items:center;font-size:.78rem}
@@ -293,12 +294,12 @@ async def index():
     .screen-action{border:1px solid rgba(23,32,27,.35);border-radius:4px;padding:6px;text-align:center;font-size:.68rem;background:rgba(255,255,255,.24)}
     .pairing-screen{background:#080d0b;color:#ecfff4;place-items:center;text-align:center;overflow:hidden;position:relative}
     .pairing-screen:before{content:"";position:absolute;inset:-20%;background:radial-gradient(circle at 50% 45%,rgba(68,197,137,.24),transparent 36%),radial-gradient(circle at 35% 70%,rgba(141,229,186,.12),transparent 28%);animation:pairGlow 5s ease-in-out infinite alternate}
-    .pairing-content{position:relative;z-index:1;display:grid;gap:9px;justify-items:center}
-    .pair-code-glyph{width:168px;height:168px;display:grid;gap:1px;padding:12px;background:#fff;border-radius:50%;overflow:hidden;box-shadow:0 0 0 1px rgba(236,255,244,.35),0 0 34px rgba(68,197,137,.35);animation:pairBreathe 3.5s ease-in-out infinite}
+    .pairing-content{position:relative;z-index:1;display:grid;gap:8px;justify-items:center}
+    .pair-code-glyph{width:220px;height:220px;display:grid;gap:1px;padding:14px;background:#fff;border-radius:50%;overflow:hidden;box-shadow:0 0 0 1px rgba(236,255,244,.35),0 0 34px rgba(68,197,137,.35);animation:pairBreathe 3.5s ease-in-out infinite}
     .pair-dot{background:transparent;border-radius:2px}
     .pair-dot.on,.pair-dot.eye{background:#000}
     .pair-dot.soft{background:#d9efe3}
-    .pair-title{font-weight:700;letter-spacing:.08em;font-size:.74rem}.pair-code{font-size:1.02rem;font-weight:700;letter-spacing:.08em}.pair-help{font-size:.62rem;color:#a7d8bf}
+    .pair-title{font-weight:700;letter-spacing:.08em;font-size:.7rem}.pair-code{font-size:.92rem;font-weight:700;letter-spacing:.08em}.pair-help{font-size:.58rem;color:#a7d8bf}
     @keyframes pairBreathe{0%,100%{transform:scale(.985);filter:saturate(.9)}50%{transform:scale(1.015);filter:saturate(1.25)}}
     @keyframes pairTwinkle{0%,100%{opacity:.72}50%{opacity:1}}
     @keyframes pairGlow{from{transform:translate3d(-2%,0,0)}to{transform:translate3d(2%,1%,0)}}
@@ -724,4 +725,4 @@ async def sim_rmc_tick():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8088)
+    uvicorn.run(app, host=os.environ.get("HC_SIM_HOST", "100.71.53.54"), port=8088)
