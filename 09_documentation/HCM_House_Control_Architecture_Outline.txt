@@ -1,0 +1,194 @@
+HCM HOUSE CONTROL SYSTEM - PINNED ARCHITECTURE OUTLINE
+
+Version: Design baseline
+
+1. CORE ARCHITECTURE
+
+HCM (House Control Module) is the central controller.
+
+Responsibilities: - Device management - PostgreSQL database - Rules
+engine - Authentication - Fault management - Updates - Backups - Web
+UI - Zigbee2MQTT integration - Media control - Wall panel management -
+Life safety orchestration
+
+Module types: - RCM: Relay Control Module - LCM: Lighting Control
+Module - SIM: Sensor Interface Module - RMC: Room Monitoring Cluster -
+PNL: PoE wall panel
+
+2. NETWORKING
+
+Dedicated control network for HCM devices.
+
+HCM provides: - DHCP - device discovery - hostname assignment -
+authentication services
+
+New modules boot with generic names: - RCM - LCM - SIM - PNL
+
+HCM assigns numbered hostnames and reservations.
+
+3. MODULE COMMUNICATION
+
+Persistent TCP connection.
+
+Protocol: - TCP - TLS authentication - Length-prefixed JSON messages
+
+Health layers: 1. TCP connection health 2. Module heartbeat 3. HCM
+heartbeat acknowledgement
+
+Messages: - identify - heartbeat - state - fault - command - command
+acknowledgement
+
+4. DATABASE DESIGN
+
+PostgreSQL is the authoritative database.
+
+Uses: - modules - rooms - logical devices - bindings - faults - users -
+rules - scenes - wall panels - media - configuration history
+
+All automation uses logical names, never physical addresses.
+
+5. AUTHENTICATION
+
+Central HCM authentication database.
+
+Roles: - ADMIN - READONLY - KIOSK
+
+Authentication uses: - shared user database - short-lived
+sessions/tokens - centralized permissions
+
+All device management pages require authentication.
+
+6. RULES ENGINE
+
+Triggers: - State change - Threshold - Schedule - Timer - Fault -
+Heartbeat/health
+
+Conditions: - Occupancy - Time - Device state - Module health - Mode
+
+Actions: - Set device state - Run scene - Send alert - TTS - Change mode
+
+Rules evaluate continuously and log: - what fired - why - action taken
+
+7. OUTPUT PRIORITY
+
+Final priority order:
+
+1.  Maintenance Lock
+2.  Life Safety
+3.  Local Override
+4.  HCM Rules/User Commands
+
+Maintenance locks: - freeze output - survive reboot - admin only clear -
+fully logged
+
+8. FLOORPLAN / HOUSE MODEL
+
+Upload: - PDF - PNG - JPG
+
+HCM attempts to infer: - floors - rooms - room tables - labels -
+dimensions - walls - doors - adjacency - exits
+
+User reviews before committing.
+
+Room dimensions: - User enters feet/inches - Whole inches only - Backend
+stores total inches
+
+9. WALL PANELS
+
+Permanent panels:
+
+-   Orange Pi Zero
+-   7 inch touchscreen
+-   PoE power/network
+-   Linux kiosk
+-   Chromium
+-   Panel agent
+
+Boot: PNL
+
+HCM provisions: - hostname - software - token - dashboard URL - DHCP
+reservation
+
+No coding required by user.
+
+Room URLs: - /kitchen - /living-room - /bedroom - /garage
+
+Panel features: - Light controls - Dimmer sliders - Scenes - Media
+control - Dark/light modes - Screen-off mode - HMI wake
+
+10. ZIGBEE
+
+Zigbee2MQTT integration.
+
+Workflow: Add Device -> Permit Join -> Detect -> Assign Room -> Assign
+Logical Name
+
+Designed to feel like Home Assistant onboarding.
+
+11. MEDIA SYSTEM
+
+Primary whole-house audio: Juke multi-zone amplifier/controller.
+
+Pinned features: - Multi-zone audio - AirPlay 2 - HomeKit support -
+Pandora - Network control - Room grouping
+
+Persistent groups: - Upstairs - Downstairs - Basement - Whole House
+
+Dynamic groups: - Kitchen + Living Room - Bedroom + Bathroom
+
+Media UI: - Select source - Select rooms/groups - Playback controls -
+TTS input - Fallback to Juke UI
+
+12. TTS
+
+Normal TTS: - timers - laundry - reminders
+
+Behavior: - Duck music - Play announcement - Restore playback
+
+Fire is the only critical TTS exception.
+
+13. LIFE SAFETY / FIRE
+
+Dedicated wired fire relay input.
+
+Logic: HIGH = normal LOW = fire active
+
+Fire response: - Enter life safety mode - Turn on all available lights -
+Stop HVAC through software command - Hard cut HVAC thermostat lines -
+Send critical app notification - Announce fire warning - Log and latch
+event
+
+Life safety is isolated from normal automation.
+
+14. LOGGING AND BACKUPS
+
+HCM handles logging.
+
+Retention: - Operational logs: 7 days - Sensor trends: 3 days
+
+Backups: - Local snapshots - Optional USB export - Timestamped filenames
+
+Full restore supported.
+
+15. UPDATE SYSTEM
+
+Every device has update service.
+
+Port: 6503
+
+HCM: - updates one device - waits for heartbeat - verifies return -
+continues
+
+No user coding required.
+
+16. DESIGN PHILOSOPHY
+
+-   Local first
+-   No-code administration
+-   Logical devices over hardware addresses
+-   Centralized management
+-   Modular hardware
+-   Fault aware
+-   Serviceable
+-   Life safety separated from convenience automation
+-   User configuration through UI only
