@@ -144,6 +144,13 @@ enum HCMClientError: Error, LocalizedError {
 struct HCMClient {
     var baseURL: URL
     var token: String?
+    private static let session: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 8
+        configuration.timeoutIntervalForResource = 12
+        configuration.waitsForConnectivity = false
+        return URLSession(configuration: configuration)
+    }()
 
     func validateSession() async throws -> AuthSession {
         try await request("/api/v1/auth/session")
@@ -197,8 +204,11 @@ struct HCMClient {
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONEncoder().encode(AnyEncodable(body))
+        } else if method != "GET" {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = Data()
         }
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw HCMClientError.server(-1) }
         if http.statusCode == 401 || http.statusCode == 403 { throw HCMClientError.unauthorized }
         guard 200..<300 ~= http.statusCode else { throw HCMClientError.server(http.statusCode) }

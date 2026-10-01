@@ -31,6 +31,11 @@ final class HomeControlViewModel {
     }
 
     func scan(rawCode: String) async {
+        if let payload = try? PairingGlyphCodec.securePayload(from: rawCode) {
+            await captureCircularPayload(payload)
+            return
+        }
+
         selectedTarget = ScannedCodeParser.parse(rawCode)
         circularCompareOK = nil
         await openSelectedTarget()
@@ -225,6 +230,10 @@ private extension HCMClient {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if method != "GET" {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = Data()
+        }
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw HCMClientError.server(-1) }
         guard 200..<300 ~= http.statusCode else { throw HCMClientError.server(http.statusCode) }

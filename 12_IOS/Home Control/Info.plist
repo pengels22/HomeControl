@@ -22,6 +22,8 @@
 	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
+		<key>NSAllowsArbitraryLoadsInLocalNetworking</key>
+		<true/>
 		<key>NSExceptionDomains</key>
 		<dict>
 			<key>100.71.53.54</key>
@@ -43,6 +45,8 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Scan HomeControl pairing and module codes.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Connect to the local HomeControl HCM or simulator during setup.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
