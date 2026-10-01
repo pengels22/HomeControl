@@ -8,7 +8,7 @@ import UIKit
 
 @Observable
 final class HomeControlViewModel {
-    var hcmURL = "http://127.0.0.1:8088"
+    var hcmURL = "http://100.71.53.54:8088"
     var authToken = ""
     var username = ""
     var password = ""

@@ -78,7 +78,8 @@ Run the local simulator on macOS:
 .venv/bin/python 10_scripts/simulate_homecontrol.py
 ```
 
-Open `http://127.0.0.1:8088`. The simulator instantiates SIM, LCM, RCM, and
+Open `http://127.0.0.1:8088` on the Mac running the simulator, or
+`http://100.71.53.54:8088` from the iOS app/device network. The simulator instantiates SIM, LCM, RCM, and
 PNL agents in dry mode, injects RMC CAN telemetry using the `06_RMC/RMC.ino`
 frame layout, and provides functional HCM/HVAC, relay, dimmer, panel, and RMC
 test actions without touching real GPIO, I2C, CAN, PostgreSQL, or systemd.
@@ -118,8 +119,8 @@ The primary pairing path is:
 
 The HCM pairing secret is not stored in the iOS app. The iOS Simulator has no
 real camera; use the app's `Load Simulator` action while developing against
-`http://127.0.0.1:8088`. A physical iPhone must point the HCM URL at the HCM or
-Mac simulator address reachable from the phone, not `127.0.0.1`.
+`http://100.71.53.54:8088`. A physical iPhone must point the HCM URL at the HCM
+or Mac simulator address reachable from the phone, not `127.0.0.1`.
 
 ## IO Mode
 
