@@ -1,0 +1,11 @@
+config_version: 1
+hcm_host: 192.168.60.1
+hcm_port: 6501
+heartbeat_seconds: 5
+software_version: 0.1.0
+tls:
+  enabled: false
+capabilities: [panel,kiosk]
+identity_path: ./runtime/pnl_identity.json
+room: null
+dashboard_url: http://192.168.60.1:8080/

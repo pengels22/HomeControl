@@ -1,0 +1,10 @@
+config_version: 1
+hcm_host: 192.168.60.1
+hcm_port: 6501
+heartbeat_seconds: 5
+software_version: 0.1.0
+tls:
+  enabled: false
+capabilities: [relay-32, analog-out-8, lighting]
+identity_path: ./runtime/lcm_identity.json
+analog_outputs: [10-1,10-2,10-3,10-4,10-5,10-6,10-7,10-8]

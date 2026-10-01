@@ -1,0 +1,22 @@
+config_version: 1
+network:
+  vlan60:
+    address: 192.168.60.1/24
+    rcm_pool: 192.168.60.20-29
+    lcm_pool: 192.168.60.30-39
+    sim_pool: 192.168.60.40-49
+    pnl_pool: 192.168.60.50-89
+services:
+  module_tcp_port: 6501
+  update_port: 6503
+  ntp: local
+hvac:
+  global_setpoint_f: 70
+  deadband_f: 1
+  damper_lead_ms: 500
+  fan_lead_ms: 500
+  fan_postrun_seconds: 60
+  cool_min_run_seconds: 120
+  heat_min_run_seconds: 60
+  cool_restart_lockout_seconds: 300
+  heat_restart_lockout_seconds: 300

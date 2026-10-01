@@ -1,0 +1,15 @@
+[Unit]
+Description=HomeControl HCM
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/HomeControl
+Environment=PYTHONPATH=/opt/HomeControl:/opt/HomeControl/01_HCM
+ExecStart=/opt/HomeControl/.venv/bin/uvicorn hcm.main:app --app-dir /opt/HomeControl/01_HCM --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
