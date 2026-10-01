@@ -24,7 +24,7 @@ struct ContentView: View {
                     }
 
                     if let state = model.simulatorState, let target = model.selectedTarget {
-                        DeviceConfigView(target: target, device: model.selectedDevice, state: state)
+                        DeviceConfigView(target: target, device: model.selectedDevice, state: state, hcmURL: model.hcmURL)
                     }
 
                     if let error = model.errorMessage {
@@ -213,6 +213,7 @@ private struct DeviceConfigView: View {
     let target: ScannedTarget
     let device: HCMDevice?
     let state: SimulatorState
+    let hcmURL: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -227,7 +228,7 @@ private struct DeviceConfigView: View {
 
             switch device?.type ?? target.targetId.prefix(3).uppercased() {
             case "HCM":
-                hcmConfig
+                hcmWebConfig
             case "RCM":
                 rcmConfig
             case "LCM":
@@ -243,6 +244,19 @@ private struct DeviceConfigView: View {
         }
         .padding()
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var hcmWebConfig: some View {
+        Group {
+            if let url = URL(string: hcmURL) {
+                HCMWebView(url: url)
+                    .frame(minHeight: 720)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                Text("The HCM URL is invalid.")
+                    .foregroundStyle(.red)
+            }
+        }
     }
 
     private var hcmConfig: some View {

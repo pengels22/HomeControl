@@ -36,6 +36,10 @@ enum ScannedCodeParser {
             return ScannedTarget(rawValue: trimmed, hcmId: hcmId, targetId: targetId, pairingCode: pairingCode)
         }
 
+        if trimmed.count == 6, trimmed.allSatisfy(\.isNumber) {
+            return ScannedTarget(rawValue: trimmed, hcmId: "HCM01", targetId: "HCM01", pairingCode: trimmed)
+        }
+
         return ScannedTarget(rawValue: trimmed, hcmId: nil, targetId: trimmed, pairingCode: nil)
     }
 }
