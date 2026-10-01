@@ -13,6 +13,18 @@ enum CircularGlyphImageDecoder {
     }
 
     static func decode(cgImage: CGImage) throws -> PairingPayload {
+        var lastError: Error = PairingGlyphError.invalidMatrix
+        for image in imageOrientations(cgImage) {
+            do {
+                return try decodeSingleOrientation(cgImage: image)
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError
+    }
+
+    private static func decodeSingleOrientation(cgImage: CGImage) throws -> PairingPayload {
         let thresholds = [
             HomeControlCircularPairingCodeSpec.darkLumaThreshold,
             110.0,
@@ -48,14 +60,18 @@ enum CircularGlyphImageDecoder {
             crops.append(detected.insetBy(dx: detected.width * 0.05, dy: detected.height * 0.05))
         }
 
-        for scale in [0.48, 0.56, 0.64, HomeControlCircularPairingCodeSpec.centeredPhotoCropScale, 0.80, 0.92] {
+        for scale in [0.36, 0.42, 0.48, 0.56, 0.64, HomeControlCircularPairingCodeSpec.centeredPhotoCropScale, 0.80, 0.92] {
             let side = Double(min(sampler.width, sampler.height)) * scale
-            crops.append(CGRect(
-                x: (Double(sampler.width) - side) / 2,
-                y: (Double(sampler.height) - side) / 2,
-                width: side,
-                height: side
-            ))
+            for offsetY in [-0.12, -0.06, 0.0, 0.06, 0.12] {
+                for offsetX in [-0.08, 0.0, 0.08] {
+                    crops.append(CGRect(
+                        x: (Double(sampler.width) - side) / 2 + Double(sampler.width) * offsetX,
+                        y: (Double(sampler.height) - side) / 2 + Double(sampler.height) * offsetY,
+                        width: side,
+                        height: side
+                    ))
+                }
+            }
         }
 
         return crops.map { clampSquare($0, width: sampler.width, height: sampler.height) }
@@ -143,6 +159,41 @@ enum CircularGlyphImageDecoder {
             image.draw(in: CGRect(origin: .zero, size: image.size))
         }
         return normalized.cgImage
+    }
+
+    private static func imageOrientations(_ image: CGImage) -> [CGImage] {
+        var images = [image]
+        var current = image
+        for _ in 0..<3 {
+            guard let rotated = rotateImageClockwise(current) else { break }
+            images.append(rotated)
+            current = rotated
+        }
+        return images
+    }
+
+    private static func rotateImageClockwise(_ image: CGImage) -> CGImage? {
+        let width = image.width
+        let height = image.height
+        let bytesPerPixel = 4
+        let bytesPerRow = height * bytesPerPixel
+        var buffer = [UInt8](repeating: 255, count: width * bytesPerRow)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: &buffer,
+            width: height,
+            height: width,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return nil
+        }
+        context.translateBy(x: CGFloat(height), y: 0)
+        context.rotate(by: .pi / 2)
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
     }
 }
 

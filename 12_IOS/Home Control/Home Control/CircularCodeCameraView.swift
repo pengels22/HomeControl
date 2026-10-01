@@ -79,11 +79,20 @@ final class CircularCodeCameraViewController: UIViewController, AVCaptureVideoDa
         ]
         videoOutput.setSampleBufferDelegate(self, queue: scanQueue)
         session.addOutput(videoOutput)
+        applyPortraitOrientation(to: videoOutput.connection(with: .video))
 
         let layer = AVCaptureVideoPreviewLayer(session: session)
         layer.videoGravity = .resizeAspectFill
         view.layer.addSublayer(layer)
         previewLayer = layer
+        applyPortraitOrientation(to: layer.connection)
+    }
+
+    private func applyPortraitOrientation(to connection: AVCaptureConnection?) {
+        guard let connection else { return }
+        if connection.isVideoRotationAngleSupported(90) {
+            connection.videoRotationAngle = 90
+        }
     }
 
     private func addGuideOverlay() {
