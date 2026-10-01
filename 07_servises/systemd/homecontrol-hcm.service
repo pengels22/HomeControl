@@ -6,8 +6,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/HomeControl
-Environment=PYTHONPATH=/opt/HomeControl:/opt/HomeControl/01_HCM
-ExecStart=/opt/HomeControl/.venv/bin/uvicorn hcm.main:app --app-dir /opt/HomeControl/01_HCM --host 0.0.0.0 --port 8080
+Environment=PYTHONPATH=/opt/HomeControl
+ExecStart=/opt/HomeControl/.venv/bin/uvicorn 01_HCM.main:app --host 0.0.0.0 --port 8080
 Restart=on-failure
 RestartSec=3
 

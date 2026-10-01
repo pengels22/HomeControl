@@ -53,6 +53,8 @@ app = FastAPI(title='HomeControl HCM', version='0.1.0', lifespan=lifespan)
 app.include_router(api.router)
 
 if __name__ == '__main__':
+    if '-dev' in sys.argv or '--dev' in sys.argv:
+        settings.dev_mode = True
     import uvicorn
     logging.basicConfig(level=logging.INFO)
-    uvicorn.run('hcm.main:app', host=settings.api_host, port=settings.api_port, reload=False)
+    uvicorn.run('01_HCM.main:app', host=settings.api_host, port=settings.api_port, reload=False)

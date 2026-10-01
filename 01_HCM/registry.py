@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import ssl
 import time
 import uuid
 from pathlib import Path
@@ -47,8 +48,26 @@ class ModuleRegistry:
         self.server: asyncio.AbstractServer | None = None
 
     async def start(self):
-        self.server = await asyncio.start_server(self.handle_client, settings.module_host, settings.module_port)
+        self.server = await asyncio.start_server(
+            self.handle_client,
+            settings.module_host,
+            settings.module_port,
+            ssl=self._ssl_context(),
+        )
         log.info('module server listening on %s:%s', settings.module_host, settings.module_port)
+
+    def _ssl_context(self) -> ssl.SSLContext | None:
+        if not settings.tls_enabled:
+            return None
+        if not settings.tls_cert or not settings.tls_key:
+            raise RuntimeError('HCM_TLS_ENABLED requires HCM_TLS_CERT and HCM_TLS_KEY')
+        ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        ctx.load_cert_chain(settings.tls_cert, settings.tls_key)
+        if settings.tls_ca:
+            ctx.load_verify_locations(settings.tls_ca)
+        if settings.tls_require_client_cert:
+            ctx.verify_mode = ssl.CERT_REQUIRED
+        return ctx
 
     async def stop(self):
         if self.server:

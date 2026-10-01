@@ -1,0 +1,7 @@
+README.md
+pyproject.toml
+homecontrol.egg-info/PKG-INFO
+homecontrol.egg-info/SOURCES.txt
+homecontrol.egg-info/dependency_links.txt
+homecontrol.egg-info/requires.txt
+homecontrol.egg-info/top_level.txt

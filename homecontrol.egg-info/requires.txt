@@ -1,0 +1,11 @@
+fastapi<1,>=0.115
+uvicorn[standard]<1,>=0.30
+asyncpg<1,>=0.30
+pydantic<3,>=2.9
+pydantic-settings<3,>=2.5
+PyYAML<7,>=6.0
+httpx<1,>=0.27
+
+[dev]
+pytest<9,>=8
+pytest-asyncio<1,>=0.26

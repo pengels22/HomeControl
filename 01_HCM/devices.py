@@ -4,20 +4,29 @@ from typing import Any
 from . import db
 from .registry import registry
 
+class MaintenanceLockedError(PermissionError):
+    pass
+
 async def command_logical(logical_name: str, command: dict[str, Any]) -> dict[str, Any]:
     async with db.acquire() as conn:
         row = await conn.fetchrow('''
-            SELECT m.hostname, b.channel, b.binding_type, b.metadata
+            SELECT m.hostname, d.maintenance_locked, b.channel, b.binding_type, b.metadata
             FROM logical_devices d
             JOIN device_bindings b ON b.logical_device_id=d.id
             JOIN modules m ON m.id=b.module_id
-            WHERE d.logical_name=$1 AND b.enabled=true
+            WHERE d.logical_name=$1 AND d.enabled=true AND b.enabled=true
             ORDER BY b.id
             LIMIT 1
         ''', logical_name)
     if not row:
         raise KeyError(f'no binding for {logical_name}')
-    payload = dict(command)
+    if row['maintenance_locked']:
+        raise MaintenanceLockedError(f'{logical_name} is maintenance locked')
+    metadata = row['metadata'] or {}
+    if isinstance(metadata, str):
+        metadata = json.loads(metadata)
+    payload = dict(metadata) if isinstance(metadata, dict) else {}
+    payload.update(command)
     if 'channel' not in payload and row['channel']:
         payload['channel'] = row['channel']
     return await registry.command_by_hostname(row['hostname'], payload)

@@ -1,8 +1,12 @@
 import sys
 from pathlib import Path
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'01_HCM'))
+from importlib import import_module
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import pytest
-from hcm.hvac import HVACController, RoomReading, Mode
+hvac = import_module('01_HCM.hvac')
+HVACController = hvac.HVACController
+RoomReading = hvac.RoomReading
+Mode = hvac.Mode
 
 @pytest.mark.asyncio
 async def test_cool_sequence(monkeypatch):
