@@ -58,6 +58,20 @@ Messages:
 - command
 - command acknowledgement
 
+## Authentication and pairing
+
+HCM remains the central authentication authority.
+
+- Usernames and password hashes live on HCM, backed by PostgreSQL.
+- Passwords are not stored in plain text.
+- Module web UIs require HCM-issued bearer tokens.
+- The iOS app talks to HCM only; it does not create direct app-to-module control paths.
+- HCM local-screen pairing uses a custom circular optical code.
+- The circular code carries an opaque `HC2:...` signed/encrypted pairing payload.
+- The iOS app decodes the optical pattern but does not hold the HCM pairing secret.
+- HCM verifies/decrypts the opaque pairing payload against its active pairing record.
+- A valid pairing payload can be exchanged for an app session token.
+
 ## Output priority
 
 1. Maintenance Lock
@@ -69,10 +83,18 @@ Messages:
 
 - 8 hardwired 0-10 V outputs
 - `10-1` through `10-8`
+- backend fade time target: 3 seconds for slider-originated low-voltage dimming commands
 - 8 x 24 AWG / 2C pairs through C3
 - I2C multiplexer
 - 8 MCP4725-based 0-10 V modules
 - hardwired directly to corresponding LED drivers
+
+## LCM high-voltage dimming
+
+- 4 high-voltage dimmer channels
+- channels are labeled `HV-1` through `HV-4`
+- hardware target is two Shelly Dimmer Pro 2-channel modules
+- UI displays values as 0-100 percent
 
 ## RCM relay layout
 
@@ -147,4 +169,5 @@ Future remote access may use Tailscale.
 - media controls
 - ADMIN and READONLY roles
 - app talks only to HCM
+- circular pairing capture posts opaque payloads to HCM for verification
 - UniFi Protect remains responsible for camera UI

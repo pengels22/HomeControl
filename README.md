@@ -13,6 +13,9 @@ HomeControl is the source repository for the HCM (House Control Module) system a
 - `07_servises` — Shared/system services used by HCM and modules
 - `08_database` — PostgreSQL schema, migrations, seed data, and database tooling
 - `09_documentation` — Architecture, wiring, networking, HVAC, commissioning, and build documentation
+- `10_scripts` — Local simulator, provisioning helpers, and admin tooling
+- `11_tests` — Python test coverage for shared services, module behavior, and simulator flows
+- `12_IOS` — iOS companion app prototype
 
 ## Architecture baseline
 
@@ -60,8 +63,32 @@ configuration for that module type.
 
 ## Current implementation status
 
-This repository is intentionally a starter structure. Exact config-file schemas,
-database schema details, and implementation code will be added as they are finalized.
+This repository now contains runnable first-pass software for HCM, Linux modules,
+shared services, deployment scripts, a macOS simulator, and an iOS companion app
+prototype. Some production integrations remain intentionally abstracted until
+hardware and deployment hosts are connected.
+
+### Local simulator
+
+Run the local simulator on macOS:
+
+```bash
+.venv/bin/python 10_scripts/simulate_homecontrol.py
+```
+
+Open `http://127.0.0.1:8088`. The simulator provides the HCM dashboard, Devices,
+Service, Settings, and Users tabs. Device pages expose functional simulated RCM,
+LCM, SIM, PNL, RMC telemetry, HVAC, relay, dimmer, lock, naming, and pairing
+flows without touching physical GPIO, I2C, CAN, PostgreSQL, or systemd.
+
+### Secure circular pairing
+
+The HCM generates a custom circular optical pairing code for the 3.3-inch local
+screen. The code carries an opaque `HC2:...` pairing payload. The iOS app
+captures the circular pattern as an image, decodes the fixed HomeControl optical
+format, and posts the opaque payload to HCM. HCM verifies/decrypts it using its
+own secret and the active pairing record. On success, HCM returns the app session
+token. The HCM secret is not stored in the iOS app.
 
 ## Module details
 
@@ -88,9 +115,15 @@ update service integration, and configuration loading.
 Lighting Control Module software. Pinned hardware additions include:
 
 - 8 hardwired 0-10 V dimming outputs, labeled `10-1` through `10-8`
+- 4 high-voltage Shelly dimmer channels, labeled `HV-1` through `HV-4`
 - 8 dedicated 24 AWG / 2C pairs through C3
 - An I2C multiplexer feeding 8 MCP4725-based 0-10 V modules
 - Relay/output behavior as part of the existing LCM design
+
+The simulator UI exposes editable relay and dimmer names. Low-voltage dimmers
+use 0-100 sliders and the backend fades to the selected value over 3 seconds.
+High-voltage dimmer channels are displayed as 0-100 values without slider-based
+control in the current UI.
 
 ### 04_RCM
 
