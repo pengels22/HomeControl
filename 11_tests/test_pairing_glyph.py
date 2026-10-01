@@ -6,7 +6,7 @@ pairing = import_module('07_servises.common.pairing_glyph')
 def test_pairing_glyph_round_trips_payload():
     glyph = pairing.encode_pairing_glyph('HCM01', '482913', 'test-secret')
 
-    assert glyph.size == 33
+    assert glyph.size == 17
     assert glyph.payload.startswith('HC2:')
     assert pairing.decode_pairing_glyph(glyph.matrix) == glyph.payload
     assert pairing.verify_secure_pairing_payload(glyph.payload, 'HCM01', '482913', 'test-secret')

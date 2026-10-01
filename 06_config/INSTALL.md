@@ -88,7 +88,7 @@ set `HC_SIM_HOST=127.0.0.1` for localhost-only development or another address
 for a different host network.
 
 The HCM screen mockup displays the current secure circular pairing code. The
-pairing endpoint returns a `33x33` `HC2:...` opaque payload:
+pairing endpoint returns a camera-friendly `17x17` `HC2:...` opaque payload:
 
 ```bash
 curl http://127.0.0.1:8088/api/pairing-glyph

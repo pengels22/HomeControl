@@ -8,11 +8,11 @@ from dataclasses import dataclass
 from secrets import token_bytes
 from zlib import crc32
 
-SIZE = 33
-CENTER = 16
-RADIUS = 16.2
-EYE_CENTERS = ((8, 8), (24, 8), (8, 24))
-EYE_HALF_WIDTH = 2
+SIZE = 17
+CENTER = 8
+RADIUS = 8.2
+EYE_CENTERS = ((4, 4), (12, 4), (4, 12))
+EYE_HALF_WIDTH = 1
 SECURE_PREFIX = "HC2"
 
 
@@ -73,12 +73,11 @@ def build_secure_pairing_payload(
     nonce: bytes | None = None,
 ) -> str:
     key = _secret_bytes(secret)
-    nonce = nonce or token_bytes(8)
+    nonce = nonce or token_bytes(4)
     issued = int(issued_at if issued_at is not None else time.time())
-    plaintext = f"{hcm_id}|{pairing_code}|{issued}".encode("ascii")
-    ciphertext = _xor_stream(plaintext, key, nonce)
-    tag = hmac.new(key, b"HC2-TAG" + nonce + ciphertext, hashlib.sha256).digest()[:16]
-    token = _b64url(nonce + ciphertext + tag)
+    bucket = issued // 300
+    tag = hmac.new(key, f"{hcm_id}|{pairing_code}|{bucket}".encode("ascii"), hashlib.sha256).digest()[:5]
+    token = _b64url(nonce + tag)
     return f"{SECURE_PREFIX}:{token}"
 
 
@@ -96,22 +95,22 @@ def verify_secure_pairing_payload(
         if prefix != SECURE_PREFIX:
             return False
         raw = _b64url_decode(token)
-        if len(raw) < 8 + 1 + 16:
+        if len(raw) != 9:
             return False
-        nonce = raw[:8]
-        ciphertext = raw[8:-16]
-        tag = raw[-16:]
+        tag = raw[4:]
         key = _secret_bytes(secret)
-        expected_tag = hmac.new(key, b"HC2-TAG" + nonce + ciphertext, hashlib.sha256).digest()[:16]
-        if not hmac.compare_digest(tag, expected_tag):
-            return False
-        plaintext = _xor_stream(ciphertext, key, nonce).decode("ascii")
-        decoded_hcm, decoded_code, issued_text = plaintext.split("|", 2)
-        if decoded_hcm != hcm_id or decoded_code != pairing_code:
-            return False
-        age = int(now if now is not None else time.time()) - int(issued_text)
-        return 0 <= age <= max_age_s
-    except (ValueError, UnicodeDecodeError):
+        bucket = int(now if now is not None else time.time()) // 300
+        allowed_skew = max(0, max_age_s // 300)
+        for candidate_bucket in range(bucket - allowed_skew, bucket + allowed_skew + 1):
+            expected_tag = hmac.new(
+                key,
+                f"{hcm_id}|{pairing_code}|{candidate_bucket}".encode("ascii"),
+                hashlib.sha256,
+            ).digest()[:5]
+            if hmac.compare_digest(tag, expected_tag):
+                return True
+        return False
+    except ValueError:
         return False
 
 

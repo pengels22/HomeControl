@@ -298,7 +298,7 @@ async def index():
     .pair-code-glyph{width:220px;height:220px;display:grid;gap:1px;padding:14px;background:#fff;border-radius:50%;overflow:hidden;box-shadow:0 0 0 1px rgba(236,255,244,.35),0 0 34px rgba(68,197,137,.35);animation:pairBreathe 3.5s ease-in-out infinite}
     .pair-dot{background:transparent;border-radius:2px}
     .pair-dot.on,.pair-dot.eye{background:#000}
-    .pair-dot.soft{background:#d9efe3}
+    .pair-dot.soft{background:transparent}
     .pair-title{font-weight:700;letter-spacing:.08em;font-size:.7rem}.pair-code{font-size:.92rem;font-weight:700;letter-spacing:.08em}.pair-help{font-size:.58rem;color:#a7d8bf}
     @keyframes pairBreathe{0%,100%{transform:scale(.985);filter:saturate(.9)}50%{transform:scale(1.015);filter:saturate(1.25)}}
     @keyframes pairTwinkle{0%,100%{opacity:.72}50%{opacity:1}}

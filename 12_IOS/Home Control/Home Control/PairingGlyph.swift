@@ -21,11 +21,11 @@ struct PairingPayload: Equatable {
 enum HomeControlCircularPairingCodeSpec {
     static let format = "HC-CIRCULAR-PAIR-1"
     static let protocolVersion = "HC2"
-    static let matrixSize = 33
-    static let center = 16
-    static let radius = 16.2
-    static let eyeCenters = [(x: 8, y: 8), (x: 24, y: 8), (x: 8, y: 24)]
-    static let eyeHalfWidth = 2
+    static let matrixSize = 17
+    static let center = 8
+    static let radius = 8.2
+    static let eyeCenters = [(x: 4, y: 4), (x: 12, y: 4), (x: 4, y: 12)]
+    static let eyeHalfWidth = 1
     static let centeredPhotoCropScale = 0.72
     static let darkLumaThreshold = 140.0
 
