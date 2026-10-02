@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import math
 import os
+import socket
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -17,7 +18,6 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SIM_PUBLIC_URL = os.environ.get("HC_SIM_PUBLIC_URL", "http://192.168.2.33:8088").rstrip("/")
 sys.path.insert(0, str(ROOT))
 
 common_can = import_module("07_servises.common.can")
@@ -28,6 +28,23 @@ lcm_mod = import_module("03_LCM.main")
 rcm_mod = import_module("04_RCM.main")
 sim_mod = import_module("02_SIM.main")
 pnl_mod = import_module("05_PNL.main")
+
+
+def default_public_url() -> str:
+    override = os.environ.get("HC_SIM_PUBLIC_URL")
+    if override:
+        return override.rstrip("/")
+    host = "127.0.0.1"
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("8.8.8.8", 80))
+            host = probe.getsockname()[0]
+    except OSError:
+        pass
+    return f"http://{host}:8088"
+
+
+DEFAULT_SIM_PUBLIC_URL = default_public_url()
 
 
 def cfg(path: str) -> dict[str, Any]:
@@ -260,12 +277,13 @@ async def index():
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>HomeControl Simulator</title>
   <style>
-    body{margin:0;background:#101214;color:#f4f2ec;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+    *{box-sizing:border-box}
+    body{margin:0;background:#101214;color:#f4f2ec;font-family:system-ui,-apple-system,Segoe UI,sans-serif;-webkit-text-size-adjust:100%}
     main{width:min(1260px,calc(100% - 32px));margin:0 auto;padding:24px 0}
     h1{margin:0 0 4px;font-size:1.7rem} h2{margin:0 0 12px;font-size:1.05rem} h3{margin:18px 0 8px;font-size:.95rem;color:#cbd4cf} p{margin:0;color:#aab2ae}
     section,.panel{border:1px solid #2b3035;background:#181c1f;border-radius:8px;padding:16px}
     section{margin:12px 0}
-    button,input,select{font:inherit;padding:.55rem;border-radius:6px}
+    button,input,select{font:inherit;padding:.55rem;border-radius:6px;max-width:100%}
     button{border:0;background:#2f7d68;color:white;cursor:pointer}
     button.secondary{background:#363b3f} button.warn{background:#7d5c2f} button.locked{background:#73515b}
     button:disabled{opacity:.45;cursor:not-allowed}
@@ -314,7 +332,39 @@ async def index():
     .kv span:first-child{color:#aab2ae}
     .muted{color:#aab2ae}
     pre{overflow:auto;background:#0f1113;border:1px solid #2b3035;border-radius:6px;padding:12px}
-    @media(max-width:900px){.layout{grid-template-columns:1fr}.status-grid{grid-template-columns:1fr 1fr}.channel-grid{grid-template-columns:1fr}}
+    @media(max-width:900px){
+      main{width:min(100% - 24px,760px);padding:16px 0}
+      .layout,.screen-wrap{grid-template-columns:1fr}
+      .status-grid{grid-template-columns:1fr 1fr}
+      .channel-grid,.dimmer-grid{grid-template-columns:1fr}
+    }
+    @media(max-width:640px){
+      body{font-size:15px}
+      main{width:100%;padding:12px}
+      h1{font-size:1.35rem}
+      h2{font-size:1rem}
+      section,.panel{padding:12px;border-radius:0;border-left:0;border-right:0}
+      .tabs{position:sticky;top:0;z-index:3;margin:10px -12px 12px;padding:8px 12px;background:rgba(16,18,20,.96);border-bottom:1px solid #2b3035;overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch}
+      .tabs button{white-space:nowrap;min-height:40px}
+      .status-grid{grid-template-columns:1fr}
+      .metric{padding:10px}
+      .metric strong{font-size:1.08rem}
+      .row{display:grid;grid-template-columns:1fr;align-items:stretch}
+      .row button,.row input,.row select{width:100%}
+      .nav button{min-height:42px}
+      .channel{grid-template-columns:48px minmax(0,1fr) 64px;padding:10px}
+      .lcm-channel{grid-template-columns:48px minmax(0,1fr) 70px}
+      .lcm-dimmer{grid-template-columns:48px minmax(0,1fr) 50px}
+      .screen-wrap{gap:12px}
+      .screen-bezel{padding:8px}
+      .screen{padding:10px;gap:8px}
+      .screen-grid{grid-template-columns:1fr}
+      .screen-actions{grid-template-columns:1fr}
+      .pair-code-frame{width:min(72vw,248px);height:min(72vw,248px)}
+      .pair-code-glyph{width:min(61vw,210px);height:min(61vw,210px)}
+      .kv{grid-template-columns:1fr;gap:2px}
+      pre{font-size:.78rem}
+    }
   </style>
 </head>
 <body>

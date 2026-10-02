@@ -8,7 +8,7 @@ import UIKit
 
 @Observable
 final class HomeControlViewModel {
-    var hcmURL = "http://192.168.2.33:8088"
+    var hcmURL = "http://192.168.20.50:8088"
     var authToken = ""
     var username = ""
     var password = ""
@@ -31,6 +31,7 @@ final class HomeControlViewModel {
     }
 
     func scan(rawCode: String) async {
+        applyHCMURLIfPresent(in: rawCode)
         if let payload = try? PairingGlyphCodec.securePayload(from: rawCode) {
             await captureCircularPayload(payload)
             return
@@ -62,6 +63,7 @@ final class HomeControlViewModel {
         defer { isLoading = false }
 
         do {
+            applyHCMURLIfPresent(in: payload)
             let decoded = try PairingGlyphCodec.parse(payload: payload)
             try await completeCircularPairing(payload: decoded.opaqueToken)
         } catch HCMClientError.unauthorized {
@@ -189,6 +191,16 @@ final class HomeControlViewModel {
         }
     }
 
+    func signOut() {
+        authToken = ""
+        session = nil
+        simulatorState = nil
+        selectedTarget = nil
+        pendingCircularPayload = nil
+        circularCompareOK = nil
+        needsSignIn = false
+    }
+
     private func ensureSession() async throws {
         guard !authToken.isEmpty else {
             throw HCMClientError.unauthorized
@@ -221,6 +233,19 @@ final class HomeControlViewModel {
     private func client(includeToken: Bool = true) throws -> HCMClient {
         guard let url = URL(string: hcmURL) else { throw HCMClientError.badURL }
         return HCMClient(baseURL: url, token: includeToken ? authToken : nil)
+    }
+
+    private func applyHCMURLIfPresent(in value: String) {
+        guard let components = URLComponents(string: value),
+              let scheme = components.scheme,
+              let host = components.host else {
+            return
+        }
+        var base = "\(scheme)://\(host)"
+        if let port = components.port {
+            base += ":\(port)"
+        }
+        hcmURL = base
     }
 }
 

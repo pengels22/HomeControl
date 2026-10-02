@@ -10,41 +10,57 @@ struct ContentView: View {
     @State private var showingScanner = false
     @State private var showingCircularCamera = false
     @State private var manualCode = ""
+    @State private var webViewRefreshID = UUID()
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    header
-                    hcmConnection
-                    scanActions
+            Group {
+                if model.session != nil {
+                    hcmWebInterface
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 18) {
+                            header
+                            hcmConnection
+                            scanActions
 
-                    if let target = model.selectedTarget {
-                        targetSummary(target)
-                    }
+                            if let target = model.selectedTarget {
+                                targetSummary(target)
+                            }
 
-                    if let state = model.simulatorState, let target = model.selectedTarget {
-                        DeviceConfigView(target: target, device: model.selectedDevice, state: state, hcmURL: model.hcmURL)
-                    }
-
-                    if let error = model.errorMessage {
-                        Text(error)
-                            .foregroundStyle(.red)
-                            .padding()
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                            if let error = model.errorMessage {
+                                Text(error)
+                                    .foregroundStyle(.red)
+                                    .padding()
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                            }
+                        }
+                        .padding()
                     }
                 }
-                .padding()
             }
             .navigationTitle("Home Control")
             .toolbar {
-                Button {
-                    Task { await model.refresh() }
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
+                if model.session != nil {
+                    Button {
+                        webViewRefreshID = UUID()
+                    } label: {
+                        Label("Reload", systemImage: "arrow.clockwise")
+                    }
+                    Button {
+                        model.signOut()
+                    } label: {
+                        Label("Sign Out", systemImage: "lock")
+                    }
+                } else {
+                    Button {
+                        Task { await model.refresh() }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(model.isLoading)
                 }
-                .disabled(model.isLoading)
             }
             .sheet(isPresented: $showingScanner) {
                 NavigationStack {
@@ -78,6 +94,18 @@ struct ContentView: View {
             .sheet(isPresented: $model.needsSignIn) {
                 SignInView(model: model)
                     .presentationDetents([.medium])
+            }
+        }
+    }
+
+    private var hcmWebInterface: some View {
+        Group {
+            if let url = URL(string: model.hcmURL) {
+                HCMWebView(url: url)
+                    .id(webViewRefreshID)
+                    .ignoresSafeArea(edges: .bottom)
+            } else {
+                ContentUnavailableView("Invalid HCM URL", systemImage: "network.slash")
             }
         }
     }

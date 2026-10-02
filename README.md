@@ -76,8 +76,8 @@ Run the local simulator on macOS:
 .venv/bin/python 10_scripts/simulate_homecontrol.py
 ```
 
-Open `http://127.0.0.1:8088` on the Mac running the simulator, or use
-`http://192.168.2.33:8088` from the iOS app/device network on the current Mac Wi-Fi network. The simulator
+Open `http://127.0.0.1:8088` on the Mac running the simulator, or use the
+advertised simulator URL shown in the pairing QR from the iOS app/device network. The simulator
 provides the HCM dashboard, Devices, Service, Settings, and Users tabs. Device
 pages expose functional simulated RCM, LCM, SIM, PNL, RMC telemetry, HVAC,
 relay, dimmer, lock, naming, and pairing flows without touching physical GPIO,

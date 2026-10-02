@@ -36,7 +36,8 @@ def test_pairing_qr_payload_is_actionable_url_with_secure_payload():
     payload = parse_qs(parsed.query)['payload'][0]
 
     assert parsed.scheme == 'http'
-    assert parsed.netloc == '192.168.2.33:8088'
+    assert parsed.hostname not in (None, '0.0.0.0')
+    assert parsed.port == 8088
     assert parsed.path == '/pair'
     assert payload == pairing['payload']
     assert payload.startswith('HC2:')

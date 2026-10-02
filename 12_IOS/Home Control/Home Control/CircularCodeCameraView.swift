@@ -208,13 +208,13 @@ final class CircularCodeCameraViewController: UIViewController, AVCaptureMetadat
         guard !didScan,
               let object = metadataObjects.compactMap({ $0 as? AVMetadataMachineReadableCodeObject }).first,
               let value = object.stringValue,
-              let payload = try? PairingGlyphCodec.securePayload(from: value) else {
+              (try? PairingGlyphCodec.securePayload(from: value)) != nil else {
             return
         }
         didScan = true
         guideOverlay?.setScanningComplete()
         session.stopRunning()
-        onCode?(payload)
+        onCode?(value)
     }
 
     private func tryDecode(cgImage: CGImage) -> Bool {
