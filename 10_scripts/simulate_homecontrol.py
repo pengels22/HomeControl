@@ -610,10 +610,10 @@ function renderSim(id){
     <span>Expected ${esc(port.expected || '-')}</span>
     <span class="${port.connected===false?'warn':'ok'}">${port.connected===false?'Missing':'Ready / simulated'}</span>
   </div>`).join('');
-  const switchRows=Object.entries(hexa.switching_24v || {}).map(([key,ch])=>`<div class="io-card">
+  const switchRows=Object.entries(hexa.switching_12v || {}).map(([key,ch])=>`<div class="io-card">
     <strong>${esc(ch.label || key)}</strong>
-    <span>24V switched output / ${ch.value?'ON':'OFF'}</span>
-    <button class="${ch.value?'':'secondary'}" onclick="toggleHexa24v('${key}',${!ch.value})">${ch.value?'ON':'OFF'}</button>
+    <span>12V switched output / ${ch.value?'ON':'OFF'}</span>
+    <button class="${ch.value?'':'secondary'}" onclick="toggleHexa12v('${key}',${!ch.value})">${ch.value?'ON':'OFF'}</button>
   </div>`).join('');
   const canRows=Object.entries(hexa.can || appState.sim.can || {}).map(([key,c])=>`<div class="io-card">
     <strong>${esc(c.label || key)}</strong>
@@ -631,8 +631,8 @@ function renderSim(id){
     <div class="io-grid">${usbRows || '<p class="muted">No USB manifest loaded.</p>'}</div>
     <h3>Hexa CAN Links</h3>
     <div class="io-grid">${canRows || '<p class="muted">No CAN manifest loaded.</p>'}</div>
-    <h3>Hexa 24V Switching</h3>
-    <div class="io-grid">${switchRows || '<p class="muted">No 24V switching manifest loaded.</p>'}</div>
+    <h3>Hexa 12V Switching</h3>
+    <div class="io-grid">${switchRows || '<p class="muted">No 12V switching manifest loaded.</p>'}</div>
     <h3>Supported RMC Sensors</h3>
     ${sensorRows || '<p class="muted">No sensor manifest loaded.</p>'}
     <h3>RMC Nodes</h3>
@@ -734,7 +734,7 @@ async function saveRcmName(channel,name){editingName=false; await post('/api/rcm
 async function toggleLcmRelay(channel,value){await post('/api/lcm/relay',{channel,value})}
 async function saveLcmName(channel,name){editingName=false; await post('/api/lcm/name',{channel,name})}
 async function toggleHexaDio(channel,value){await post('/api/sim/hexa/dio',{channel,value})}
-async function toggleHexa24v(channel,value){await post('/api/sim/hexa/24v',{channel,value})}
+async function toggleHexa12v(channel,value){await post('/api/sim/hexa/12v',{channel,value})}
 async function commitDimmer(channel,percent){
   const target=Number(percent);
   slidingDimmer=false;
@@ -879,9 +879,9 @@ async def sim_hexa_dio(body: dict[str, Any]):
     return await sim.sim.apply_command({"op": "set_hexa_dio", "channel": body["channel"], "value": body["value"]})
 
 
-@app.post("/api/sim/hexa/24v")
-async def sim_hexa_24v(body: dict[str, Any]):
-    return await sim.sim.apply_command({"op": "set_hexa_24v", "channel": body["channel"], "value": body["value"]})
+@app.post("/api/sim/hexa/12v")
+async def sim_hexa_12v(body: dict[str, Any]):
+    return await sim.sim.apply_command({"op": "set_hexa_12v", "channel": body["channel"], "value": body["value"]})
 
 
 if __name__ == "__main__":

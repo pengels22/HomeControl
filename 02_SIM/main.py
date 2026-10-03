@@ -18,7 +18,7 @@ class SIMAgent(common_agent.ModuleAgent):
         self.rmc_sensor_stack = config.get('rmc_sensor_stack', common_can.RMC_SENSOR_DEFINITIONS)
         self.hexa_board = config.get('hexa_board', {})
         self.hexa_dio_state = self._initial_output_state('dio', 'channels')
-        self.hexa_switching_state = self._initial_output_state('switching_24v', 'outputs')
+        self.hexa_switching_state = self._initial_output_state('switching_12v', 'outputs')
         self.rmc_firmware_cfg = config.get('rmc_firmware_updates', {})
         self.firmware_staging_root = Path(self.rmc_firmware_cfg.get('staging_root', '/var/lib/hcm/firmware-staging'))
         self.compatible_rmc_hardware = list(self.rmc_firmware_cfg.get('compatible_hardware', ['RMC-NANO-ATMEGA328P']))
@@ -50,7 +50,7 @@ class SIMAgent(common_agent.ModuleAgent):
     def hexa_state(self):
         aio = self._hexa_section('aio').get('channels', {})
         dio = self._hexa_section('dio').get('channels', {})
-        switching = self._hexa_section('switching_24v').get('outputs', {})
+        switching = self._hexa_section('switching_12v').get('outputs', {})
         usb = self._hexa_section('usb').get('ports', {})
         analog = {name: self._analog_value_status(item) for name, item in aio.items()}
         return {
@@ -73,7 +73,7 @@ class SIMAgent(common_agent.ModuleAgent):
                 }
                 for name, item in usb.items()
             },
-            'switching_24v': {
+            'switching_12v': {
                 name: {
                     'label': item.get('label'),
                     'value': self.hexa_switching_state.get(name, bool(item.get('simulated', False))),
@@ -231,10 +231,10 @@ class SIMAgent(common_agent.ModuleAgent):
                 return {'ok': False, 'error': 'unknown_hexa_dio_channel'}
             self.hexa_dio_state[channel] = bool(payload.get('value', False))
             return {'ok': True, 'channel': channel, 'value': self.hexa_dio_state[channel]}
-        if payload.get('op') == 'set_hexa_24v':
+        if payload.get('op') == 'set_hexa_12v':
             channel = str(payload['channel'])
             if channel not in self.hexa_switching_state:
-                return {'ok': False, 'error': 'unknown_hexa_24v_channel'}
+                return {'ok': False, 'error': 'unknown_hexa_12v_channel'}
             self.hexa_switching_state[channel] = bool(payload.get('value', False))
             return {'ok': True, 'channel': channel, 'value': self.hexa_switching_state[channel]}
         if payload.get('op') == 'rmc_firmware_update':

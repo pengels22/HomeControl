@@ -7,7 +7,7 @@ io:
   mode: auto
 tls:
   enabled: false
-capabilities: [rmc-can, telemetry, faults, hexa-aio, hexa-dio, hexa-usb, hexa-can, hexa-24v-switching]
+capabilities: [rmc-can, telemetry, faults, hexa-aio, hexa-dio, hexa-usb, hexa-can, hexa-12v-switching]
 rmc_firmware_updates:
   enabled: true
   staging_root: /var/lib/hcm/firmware-staging
@@ -75,11 +75,11 @@ hexa_board:
         usb1: {label: OPI3 host link, expected: connected}
         usb2: {label: UCAN loop B, expected: connected}
         usb3: {label: UCAN loop C, expected: connected}
-    switching_24v:
+    switching_12v:
       enabled: true
       outputs:
-        sw1: {label: 24V switched output 1, simulated: false}
-        sw2: {label: 24V switched output 2, simulated: false}
+        sw1: {label: 12V switched output 1, simulated: false}
+        sw2: {label: 12V switched output 2, simulated: false}
 rmc_sensor_stack:
   aht21:
     label: AHT21 temperature/humidity

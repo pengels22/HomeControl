@@ -65,7 +65,7 @@ SIM state also advertises the supported RMC sensor stack from config: AHT21
 temperature/humidity, ENS160 AQI, BH1750 lux, RCWL-0516 presence, and the
 MCP2515/TJA1050 CAN interface.
 The Hexa board is modeled as a SIM capability manifest covering AIO, DIO, USB,
-CAN, and 24V switching. ADC1 monitors the 3.3V bus, ADC2 monitors the 5V bus,
+CAN, and 12V switching. ADC1 monitors the 3.3V bus, ADC2 monitors the 5V bus,
 ADC3 monitors loop A 12V, and ADC4 monitors loop B 12V. The simulator exposes
 these states on the SIM module page so unused Hexa functions still have a stable
 configuration and API surface before full hardware drivers are attached.

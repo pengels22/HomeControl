@@ -13,7 +13,7 @@
 | B3 | UCAN2 CAN0 | CAN Loop C | 12VDC + CAN |
 | B4 | HEXA DIO | Digital IO bank | Logic IO |
 | B5 | HEXA USB | USB host/downstream links | USB |
-| B6 | HEXA 24V SW | 24V switched outputs | 24VDC |
+| B6 | HEXA 12V SW | 12V switched outputs | 12VDC |
 | B7 | Internal | SIM health / internal monitor | - |
 | B8 | Internal | Reserved Hexa expansion | - |
 
@@ -53,7 +53,7 @@ Hexa board support manifest:
 - DIO is represented by `hexa_board.interfaces.dio` and can be simulated from the SIM page.
 - USB links are represented by `hexa_board.interfaces.usb`.
 - CAN links are represented by the existing SocketCAN `can0`, `can1`, and `can2` setup.
-- 24V switching is represented by `hexa_board.interfaces.switching_24v` and can be simulated from the SIM page.
+- 12V switching is represented by `hexa_board.interfaces.switching_12v` and can be simulated from the SIM page.
 - ADC1 monitors the 3.3V bus, ADC2 monitors the 5V bus, ADC3 monitors loop A 12V, and ADC4 monitors loop B 12V.
 
 OPI3 / Linux CAN bring-up:
