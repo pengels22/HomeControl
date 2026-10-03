@@ -410,13 +410,14 @@ let editingName=false;
 let slidingDimmer=false;
 let pendingDimmerTargets={};
 let selectedLoopPowerSwitch='sw1';
+let selectingLoopPower=false;
 async function post(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(!r.ok) throw new Error(await r.text()); await refresh()}
 async function postNoRefresh(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(!r.ok) throw new Error(await r.text()); return await r.json()}
 async function refresh(){
   const r=await fetch('/api/state');
   appState=await r.json();
   reconcilePendingDimmers();
-  if(!editingName && !slidingDimmer) render();
+  if(!editingName && !slidingDimmer && !selectingLoopPower) render();
 }
 function reconcilePendingDimmers(){
   if(!appState?.lcm) return;
@@ -637,7 +638,7 @@ function renderSim(id){
     <h3>Hexa 12V Switching</h3>
     <div class="mini-grid">${activeSwitchRows || '<p class="muted">No loop power switches are on.</p>'}</div>
     <div class="row" style="margin-top:8px">
-      <select id="loop-power-switch" onchange="selectedLoopPowerSwitch=this.value">${switchOptions || '<option value="">No switches</option>'}</select>
+      <select id="loop-power-switch" onpointerdown="selectingLoopPower=true" onfocus="selectingLoopPower=true" oninput="selectedLoopPowerSwitch=this.value" onchange="selectedLoopPowerSwitch=this.value; selectingLoopPower=false" onblur="selectingLoopPower=false">${switchOptions || '<option value="">No switches</option>'}</select>
       <button onclick="setHexa12v(true)">On</button>
       <button class="secondary" onclick="setHexa12v(false)">Off</button>
       <button class="warn" onclick="restartHexa12v()">Restart</button>
