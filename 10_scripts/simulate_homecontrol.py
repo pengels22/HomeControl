@@ -609,21 +609,18 @@ function renderSim(id){
     <span>${esc(ch.direction || 'input')} / ${ch.value?'ON':'OFF'}</span>
     <button class="${ch.value?'':'secondary'}" onclick="toggleHexaDio('${key}',${!ch.value})">${ch.value?'ON':'OFF'}</button>
   </div>`).join('');
-  const usbRows=Object.entries(hexa.usb || {}).map(([key,port])=>`<div class="io-card">
-    <strong>${esc(port.label || key)}</strong>
-    <span>Expected ${esc(port.expected || '-')}</span>
-    <span class="${port.connected===false?'warn':'ok'}">${port.connected===false?'Missing':'Ready / simulated'}</span>
-  </div>`).join('');
+  const usb=hexa.usb || {};
+  const linkedUsb=(usb.linked_devices || []).map(link=>`<div class="mini-row"><strong>${esc(link.name)}</strong><span>${esc(link.port_label || link.port)}</span><button class="secondary" onclick="disconnectHexaUsb('${esc(link.id)}')">Disconnect</button></div>`).join('');
+  const usbOptions=(usb.available_ports || []).map(port=>`<option value="${esc(port.id)}">${esc(port.label || port.id)}</option>`).join('');
   const switchRows=Object.entries(hexa.switching_12v || {}).map(([key,ch])=>`<div class="io-card">
     <strong>${esc(ch.label || key)}</strong>
     <span>12V switched output / ${ch.value?'ON':'OFF'}</span>
     <button class="${ch.value?'':'secondary'}" onclick="toggleHexa12v('${key}',${!ch.value})">${ch.value?'ON':'OFF'}</button>
   </div>`).join('');
-  const canRows=Object.entries(hexa.can || appState.sim.can || {}).map(([key,c])=>`<div class="io-card">
-    <strong>${esc(c.label || key)}</strong>
-    <span>${esc(key)} / ${c.enabled?'enabled':'disabled'} / ${c.bitrate} bps</span>
-    <span>TX ${c.tx_count ?? 0} / RX ${c.rx_count ?? 0}</span>
-  </div>`).join('');
+  const canRows=Object.entries(hexa.can || appState.sim.can || {}).map(([key,c])=>{
+    const status=c.enabled ? 'OK' : 'FAULT';
+    return `<div class="mini-row" title="${esc(key)} / ${c.bitrate} bps / TX ${c.tx_count ?? 0} / RX ${c.rx_count ?? 0}"><strong>${esc(c.label || key)}</strong><span class="chip ${status==='FAULT'?'fault':''}">${status}</span></div>`
+  }).join('');
   devicePage.innerHTML=`<h2>${id} Sensor Interface Configuration</h2>
     ${kv('Module type','SIM')}${kv('IO mode',appState.sim.io_mode)}${kv('CAN interfaces',Object.keys(appState.sim.can).join(', '))}
     ${kv('Hexa board',hexa.model || 'not configured')}${kv('Power',hexa.all_bus_monitors_ok ? 'OK' : 'Warning')}
@@ -636,9 +633,14 @@ function renderSim(id){
     <h3>Hexa DIO</h3>
     <div class="io-grid">${dioRows || '<p class="muted">No DIO manifest loaded.</p>'}</div>
     <h3>Hexa USB Links</h3>
-    <div class="io-grid">${usbRows || '<p class="muted">No USB manifest loaded.</p>'}</div>
+    <div class="mini-grid">${linkedUsb || '<p class="muted">No linked USB devices.</p>'}</div>
+    <div class="row" style="margin-top:8px">
+      <input id="usb-link-name" placeholder="Device name">
+      <select id="usb-link-port">${usbOptions || '<option value="">No ports available</option>'}</select>
+      <button onclick="linkHexaUsb()">Link</button>
+    </div>
     <h3>Hexa CAN Links</h3>
-    <div class="io-grid">${canRows || '<p class="muted">No CAN manifest loaded.</p>'}</div>
+    <div class="mini-grid">${canRows || '<p class="muted">No CAN manifest loaded.</p>'}</div>
     <h3>Hexa 12V Switching</h3>
     <div class="io-grid">${switchRows || '<p class="muted">No 12V switching manifest loaded.</p>'}</div>
     <h3>RMC Nodes</h3>
@@ -741,6 +743,16 @@ async function toggleLcmRelay(channel,value){await post('/api/lcm/relay',{channe
 async function saveLcmName(channel,name){editingName=false; await post('/api/lcm/name',{channel,name})}
 async function toggleHexaDio(channel,value){await post('/api/sim/hexa/dio',{channel,value})}
 async function toggleHexa12v(channel,value){await post('/api/sim/hexa/12v',{channel,value})}
+async function linkHexaUsb(){
+  const name=document.getElementById('usb-link-name')?.value || '';
+  const port=document.getElementById('usb-link-port')?.value || '';
+  if(!name.trim() || !port) return;
+  await post('/api/sim/hexa/usb/link',{name,port});
+}
+async function disconnectHexaUsb(id){
+  if(!confirm('Disconnect this USB device?')) return;
+  await post('/api/sim/hexa/usb/disconnect',{id});
+}
 async function commitDimmer(channel,percent){
   const target=Number(percent);
   slidingDimmer=false;
@@ -888,6 +900,16 @@ async def sim_hexa_dio(body: dict[str, Any]):
 @app.post("/api/sim/hexa/12v")
 async def sim_hexa_12v(body: dict[str, Any]):
     return await sim.sim.apply_command({"op": "set_hexa_12v", "channel": body["channel"], "value": body["value"]})
+
+
+@app.post("/api/sim/hexa/usb/link")
+async def sim_hexa_usb_link(body: dict[str, Any]):
+    return await sim.sim.apply_command({"op": "link_hexa_usb", "name": body.get("name", ""), "port": body.get("port", "")})
+
+
+@app.post("/api/sim/hexa/usb/disconnect")
+async def sim_hexa_usb_disconnect(body: dict[str, Any]):
+    return await sim.sim.apply_command({"op": "disconnect_hexa_usb", "id": body.get("id", "")})
 
 
 if __name__ == "__main__":

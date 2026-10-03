@@ -1,5 +1,5 @@
 from __future__ import annotations
-import asyncio, logging, sys, time
+import asyncio, logging, sys, time, uuid
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from importlib import import_module
@@ -19,6 +19,7 @@ class SIMAgent(common_agent.ModuleAgent):
         self.hexa_board = config.get('hexa_board', {})
         self.hexa_dio_state = self._initial_output_state('dio', 'channels')
         self.hexa_switching_state = self._initial_output_state('switching_12v', 'outputs')
+        self.hexa_usb_links = {}
         self.rmc_firmware_cfg = config.get('rmc_firmware_updates', {})
         self.firmware_staging_root = Path(self.rmc_firmware_cfg.get('staging_root', '/var/lib/hcm/firmware-staging'))
         self.compatible_rmc_hardware = list(self.rmc_firmware_cfg.get('compatible_hardware', ['RMC-NANO-ATMEGA328P']))
@@ -80,14 +81,7 @@ class SIMAgent(common_agent.ModuleAgent):
                 }
                 for name, item in dio.items()
             },
-            'usb': {
-                name: {
-                    'label': item.get('label'),
-                    'expected': item.get('expected'),
-                    'connected': item.get('expected') == 'connected' if self.io_mode == 'simulated' else None,
-                }
-                for name, item in usb.items()
-            },
+            'usb': self.hexa_usb_state(usb),
             'switching_12v': {
                 name: {
                     'label': item.get('label'),
@@ -98,6 +92,49 @@ class SIMAgent(common_agent.ModuleAgent):
             'can': self.can_network.snapshot(),
             'all_bus_monitors_ok': all(item['status'] in ('OK', 'OFF') for item in {**bus, **loops}.values()),
         }
+
+    def hexa_usb_state(self, ports):
+        linked_ports = {item['port'] for item in self.hexa_usb_links.values()}
+        return {
+            'ports': {
+                name: {
+                    'label': item.get('label', name),
+                    'available': name not in linked_ports,
+                }
+                for name, item in ports.items()
+            },
+            'available_ports': [
+                {'id': name, 'label': item.get('label', name)}
+                for name, item in ports.items()
+                if name not in linked_ports
+            ],
+            'linked_devices': list(self.hexa_usb_links.values()),
+        }
+
+    def link_hexa_usb(self, name, port):
+        ports = self._hexa_section('usb').get('ports', {})
+        if port not in ports:
+            return {'ok': False, 'error': 'unknown_hexa_usb_port'}
+        if any(item['port'] == port for item in self.hexa_usb_links.values()):
+            return {'ok': False, 'error': 'hexa_usb_port_already_linked'}
+        clean_name = str(name).strip()[:80]
+        if not clean_name:
+            return {'ok': False, 'error': 'missing_device_name'}
+        link_id = str(uuid.uuid4())
+        link = {
+            'id': link_id,
+            'name': clean_name,
+            'port': port,
+            'port_label': ports[port].get('label', port),
+        }
+        self.hexa_usb_links[link_id] = link
+        return {'ok': True, 'link': link}
+
+    def disconnect_hexa_usb(self, link_id):
+        link = self.hexa_usb_links.pop(str(link_id), None)
+        if not link:
+            return {'ok': False, 'error': 'unknown_hexa_usb_link'}
+        return {'ok': True, 'disconnected': link}
 
     def _record_rmc_frame(self, interface, arbitration_id, data):
         self.can_network.record_frame(interface, arbitration_id, data)
@@ -252,6 +289,10 @@ class SIMAgent(common_agent.ModuleAgent):
                 return {'ok': False, 'error': 'unknown_hexa_12v_channel'}
             self.hexa_switching_state[channel] = bool(payload.get('value', False))
             return {'ok': True, 'channel': channel, 'value': self.hexa_switching_state[channel]}
+        if payload.get('op') == 'link_hexa_usb':
+            return self.link_hexa_usb(payload.get('name', ''), str(payload.get('port', '')))
+        if payload.get('op') == 'disconnect_hexa_usb':
+            return self.disconnect_hexa_usb(payload.get('id', ''))
         if payload.get('op') == 'rmc_firmware_update':
             return await self.perform_rmc_firmware_update(payload)
         return await super().apply_command(payload)

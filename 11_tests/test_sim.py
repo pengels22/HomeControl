@@ -70,7 +70,8 @@ async def test_sim_exposes_hexa_board_capabilities_and_adc_bus_monitors():
     assert hexa['aio']['analog_inputs']['a1']['label'] == 'A1'
     assert hexa['aio']['analog_inputs']['a8']['source'] == 'ADS 0x49 CH3'
     assert hexa['all_bus_monitors_ok'] is True
-    assert hexa['usb']['usb2']['label'] == 'UCAN loop B'
+    assert hexa['usb']['available_ports'][1]['label'] == 'UCAN loop B'
+    assert hexa['usb']['linked_devices'] == []
     assert set(hexa['switching_12v']) == {'sw1', 'sw2'}
 
 
@@ -87,6 +88,27 @@ async def test_sim_can_toggle_hexa_dio_and_12v_switch_outputs():
     assert switch_result == {'ok': True, 'channel': 'sw1', 'value': True}
     assert state['hexa_board']['dio']['dio3']['value'] is True
     assert state['hexa_board']['switching_12v']['sw1']['value'] is True
+
+
+@pytest.mark.asyncio
+async def test_sim_can_link_and_disconnect_hexa_usb_device_by_id():
+    cfg = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+    agent = sim.SIMAgent(cfg)
+
+    linked = await agent.apply_command({'op': 'link_hexa_usb', 'name': 'UCAN B', 'port': 'usb2'})
+    state = await agent.collect_state()
+    link_id = linked['link']['id']
+
+    assert linked['ok'] is True
+    assert state['hexa_board']['usb']['linked_devices'][0]['id'] == link_id
+    assert [p['id'] for p in state['hexa_board']['usb']['available_ports']] == ['usb1', 'usb3']
+
+    disconnected = await agent.apply_command({'op': 'disconnect_hexa_usb', 'id': link_id})
+    state = await agent.collect_state()
+
+    assert disconnected['ok'] is True
+    assert state['hexa_board']['usb']['linked_devices'] == []
+    assert [p['id'] for p in state['hexa_board']['usb']['available_ports']] == ['usb1', 'usb2', 'usb3']
 
 
 @pytest.mark.asyncio
