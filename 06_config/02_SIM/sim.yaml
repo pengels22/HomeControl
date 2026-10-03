@@ -41,24 +41,28 @@ web:
   host: 0.0.0.0
   port: 8092
   hcm_api_url: http://192.168.60.1:8080/api/v1
-can_enabled: false
+can_enabled: true
 can_bitrate: 125000
+can_kernel_modules: [can, can_raw, gs_usb]
 can_interfaces:
   - name: can0
     label: CAN A
     hardware: FYSETC Hexa CAN0
+    driver: gs_usb
     connector: Hexa Port 1
     bitrate: 125000
     enabled: true
   - name: can1
     label: CAN B
     hardware: UCAN1
+    driver: gs_usb
     connector: Hexa Port 2
     bitrate: 125000
     enabled: true
   - name: can2
     label: CAN C
     hardware: UCAN2
+    driver: gs_usb
     connector: Hexa Port 3
     bitrate: 125000
     enabled: true

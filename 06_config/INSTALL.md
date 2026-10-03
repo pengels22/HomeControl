@@ -57,6 +57,10 @@ bus number and mux/DAC addresses are confirmed.
 SIM config includes three SocketCAN loops: CAN A on `can0`, CAN B on `can1`,
 and CAN C on `can2`. The SIM installer runs `02_SIM/post_install.sh`, which
 adds `homecontrol-sim-can.service` so the CAN links are configured at boot.
+The OPI3 loads `can`, `can_raw`, and `gs_usb`; FYSETC Hexa/UCAN candleLight
+USB-to-CAN interfaces should then enumerate as SocketCAN `can*` links. The
+service applies the configured bitrate and runs `setup_can.py --check` to catch
+missing enabled interfaces before the SIM service starts.
 SIM state also advertises the supported RMC sensor stack from config: AHT21
 temperature/humidity, ENS160 AQI, BH1750 lux, RCWL-0516 presence, and the
 MCP2515/TJA1050 CAN interface.

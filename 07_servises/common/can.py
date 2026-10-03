@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -105,6 +106,19 @@ class SocketCANNetwork:
             for name, iface in self.interfaces.items()
         }
 
+    def setup_plan(self) -> dict[str, Any]:
+        return socketcan_setup_plan({
+            "can_interfaces": [
+                {
+                    "name": iface.name,
+                    "label": iface.label,
+                    "bitrate": iface.bitrate,
+                    "enabled": iface.enabled,
+                }
+                for iface in self.interfaces.values()
+            ]
+        })
+
     def record_frame(self, interface: str, arbitration_id: int, data: list[int]) -> None:
         iface = self.interfaces[interface]
         iface.rx_count += 1
@@ -116,6 +130,18 @@ class SocketCANNetwork:
 
     async def configure(self, apply: bool = False) -> dict[str, Any]:
         results: dict[str, Any] = {}
+        modules = ["can", "can_raw", "gs_usb"]
+        if apply:
+            for module in modules:
+                proc = await asyncio.create_subprocess_exec(
+                    "modprobe",
+                    module,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                out, _ = await proc.communicate()
+                if proc.returncode != 0:
+                    raise RuntimeError(f"modprobe {module} failed: {out.decode(errors='replace')}")
         for name, iface in self.interfaces.items():
             commands = [
                 ["ip", "link", "set", name, "down"],
@@ -133,7 +159,11 @@ class SocketCANNetwork:
                     if proc.returncode != 0:
                         raise RuntimeError(f"{' '.join(command)} failed: {out.decode(errors='replace')}")
                 iface.last_configured_at = time.time()
-            results[name] = {"commands": commands, "applied": apply and iface.enabled}
+            results[name] = {
+                "modules": modules,
+                "commands": commands,
+                "applied": apply and iface.enabled,
+            }
         return results
 
 
@@ -231,24 +261,66 @@ def encode_rmc_telemetry(
     return 0x100 | ((address & 0x0F) << 4), data
 
 
+def socketcan_setup_plan(config: dict[str, Any]) -> dict[str, Any]:
+    network = SocketCANNetwork.from_config(config)
+    modules = config.get("can_kernel_modules", ["can", "can_raw", "gs_usb"])
+    return {
+        name: {
+            "modules": modules,
+            "hardware": next((item.get("hardware") for item in config.get("can_interfaces", []) if item.get("name") == name), None),
+            "connector": next((item.get("connector") for item in config.get("can_interfaces", []) if item.get("name") == name), None),
+            "driver": next((item.get("driver") for item in config.get("can_interfaces", []) if item.get("name") == name), "gs_usb"),
+            "commands": [
+                ["ip", "link", "set", name, "down"],
+                ["ip", "link", "set", name, "type", "can", "bitrate", str(iface.bitrate)],
+                ["ip", "link", "set", name, "up"],
+            ],
+            "applied": False,
+        }
+        for name, iface in network.interfaces.items()
+    }
+
+
+def socketcan_status(config: dict[str, Any]) -> dict[str, Any]:
+    status: dict[str, Any] = {}
+    for item in config.get("can_interfaces", []):
+        name = item["name"]
+        sys_path = f"/sys/class/net/{name}"
+        exists = os.path.exists(sys_path)
+        driver = None
+        if exists:
+            driver_link = os.path.join(sys_path, "device", "driver")
+            if os.path.exists(driver_link):
+                driver = os.path.basename(os.path.realpath(driver_link))
+        status[name] = {
+            "exists": exists,
+            "enabled": bool(item.get("enabled", config.get("can_enabled", False))),
+            "expected_driver": item.get("driver", "gs_usb"),
+            "driver": driver,
+            "hardware": item.get("hardware"),
+            "connector": item.get("connector"),
+        }
+    return status
+
+
 def configure_sync(config: dict[str, Any], apply: bool = False) -> dict[str, Any]:
     network = SocketCANNetwork.from_config(config)
+    modules = config.get("can_kernel_modules", ["can", "can_raw", "gs_usb"])
     if not apply:
-        return {
-            name: {
-                "commands": [
-                    ["ip", "link", "set", name, "down"],
-                    ["ip", "link", "set", name, "type", "can", "bitrate", str(iface.bitrate)],
-                    ["ip", "link", "set", name, "up"],
-                ],
-                "applied": False,
-            }
-            for name, iface in network.interfaces.items()
-        }
+        return socketcan_setup_plan(config)
+    for module in modules:
+        subprocess.run(["modprobe", module], check=True)
     for name, iface in network.interfaces.items():
         if not iface.enabled:
             continue
         subprocess.run(["ip", "link", "set", name, "down"], check=False)
         subprocess.run(["ip", "link", "set", name, "type", "can", "bitrate", str(iface.bitrate)], check=True)
         subprocess.run(["ip", "link", "set", name, "up"], check=True)
-    return {name: {"applied": iface.enabled} for name, iface in network.interfaces.items()}
+    return {
+        name: {
+            "modules": modules,
+            "applied": iface.enabled,
+            "status": socketcan_status(config).get(name),
+        }
+        for name, iface in network.interfaces.items()
+    }

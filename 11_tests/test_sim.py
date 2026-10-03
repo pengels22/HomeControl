@@ -22,6 +22,19 @@ def test_sim_builds_three_can_interfaces_from_config():
     assert state['can2']['bitrate'] == 125000
 
 
+def test_sim_can_setup_plan_loads_gs_usb_for_hexa_board():
+    cfg = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+
+    plan = common_can.configure_sync(cfg, apply=False)
+
+    assert plan['can0']['hardware'] == 'FYSETC Hexa CAN0'
+    assert plan['can0']['driver'] == 'gs_usb'
+    assert plan['can0']['modules'] == ['can', 'can_raw', 'gs_usb']
+    assert ['ip', 'link', 'set', 'can0', 'type', 'can', 'bitrate', '125000'] in plan['can0']['commands']
+    assert plan['can1']['driver'] == 'gs_usb'
+    assert plan['can2']['driver'] == 'gs_usb'
+
+
 def test_sim_exposes_bom_rmc_sensor_stack_from_config():
     cfg = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
     agent = sim.SIMAgent(cfg)
@@ -48,6 +61,7 @@ async def test_sim_configure_can_dry_run_returns_ip_commands():
 
     assert result['ok'] is True
     assert result['can']['can0']['applied'] is False
+    assert result['can']['can0']['modules'] == ['can', 'can_raw', 'gs_usb']
     assert ['ip', 'link', 'set', 'can0', 'type', 'can', 'bitrate', '125000'] in result['can']['can0']['commands']
 
 

@@ -47,3 +47,9 @@
 | CAN B | UCAN1 | Hexa Port 2 | +12V / GND / CAN-H / CAN-L |
 | CAN C | UCAN2 | Hexa Port 3 | +12V / GND / CAN-H / CAN-L |
 
+OPI3 / Linux CAN bring-up:
+
+- The SIM installer loads `can`, `can_raw`, and `gs_usb`.
+- FYSETC Hexa / UCAN candleLight USB-to-CAN adapters are expected to enumerate as SocketCAN links.
+- `homecontrol-sim-can.service` applies the configured bitrate to `can0`, `can1`, and `can2`.
+- `setup_can.py --check` verifies enabled `can*` links exist before the SIM module service starts.
