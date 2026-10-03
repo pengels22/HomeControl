@@ -90,6 +90,7 @@ hexa_board:
           label: Loop D spare
           source: ADS 0x4A CH3
           unit: V
+          visible: false
           nominal_v: 12.0
           off_below_v: 3.0
           warning_low_v: 11.0
@@ -120,8 +121,9 @@ hexa_board:
     switching_12v:
       enabled: true
       outputs:
-        sw1: {label: 12V switched output 1, simulated: false}
-        sw2: {label: 12V switched output 2, simulated: false}
+        sw1: {label: Loop A power, simulated: false}
+        sw2: {label: Loop B power, simulated: false}
+        sw3: {label: Loop C power, simulated: false}
 rmc_sensor_stack:
   aht21:
     label: AHT21 temperature/humidity

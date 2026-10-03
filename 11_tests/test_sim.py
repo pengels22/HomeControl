@@ -66,13 +66,14 @@ async def test_sim_exposes_hexa_board_capabilities_and_adc_bus_monitors():
     assert hexa['aio']['loop_monitors']['loop_a']['status'] == 'OK'
     assert hexa['aio']['loop_monitors']['loop_b']['status'] == 'OK'
     assert hexa['aio']['loop_monitors']['loop_c']['status'] == 'OFF'
+    assert hexa['aio']['loop_monitors']['loop_d']['visible'] is False
     assert list(hexa['aio']['analog_inputs']) == ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8']
     assert hexa['aio']['analog_inputs']['a1']['label'] == 'A1'
     assert hexa['aio']['analog_inputs']['a8']['source'] == 'ADS 0x49 CH3'
     assert hexa['all_bus_monitors_ok'] is True
     assert hexa['usb']['available_ports'][1]['label'] == 'UCAN loop B'
     assert hexa['usb']['linked_devices'] == []
-    assert set(hexa['switching_12v']) == {'sw1', 'sw2'}
+    assert set(hexa['switching_12v']) == {'sw1', 'sw2', 'sw3'}
 
 
 @pytest.mark.asyncio
@@ -88,6 +89,19 @@ async def test_sim_can_toggle_hexa_dio_and_12v_switch_outputs():
     assert switch_result == {'ok': True, 'channel': 'sw1', 'value': True}
     assert state['hexa_board']['dio']['dio3']['value'] is True
     assert state['hexa_board']['switching_12v']['sw1']['value'] is True
+
+
+@pytest.mark.asyncio
+async def test_sim_can_restart_12v_loop_power_switch():
+    cfg = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+    agent = sim.SIMAgent(cfg)
+
+    result = await agent.apply_command({'op': 'restart_hexa_12v', 'channel': 'sw2', 'delay_s': 0})
+    state = await agent.collect_state()
+
+    assert result == {'ok': True, 'channel': 'sw2', 'value': True, 'restarted': True}
+    assert state['hexa_board']['switching_12v']['sw2']['label'] == 'Loop B power'
+    assert state['hexa_board']['switching_12v']['sw2']['value'] is True
 
 
 @pytest.mark.asyncio

@@ -46,6 +46,7 @@ class SIMAgent(common_agent.ModuleAgent):
             'unit': item.get('unit', 'V'),
             'value': value,
             'status': status,
+            'visible': bool(item.get('visible', True)),
             'nominal_v': item.get('nominal_v'),
             'off_below_v': off_below,
             'warning_low_v': low,
@@ -86,6 +87,7 @@ class SIMAgent(common_agent.ModuleAgent):
                 name: {
                     'label': item.get('label'),
                     'value': self.hexa_switching_state.get(name, bool(item.get('simulated', False))),
+                    'restart_count': int(item.get('restart_count', 0)),
                 }
                 for name, item in switching.items()
             },
@@ -289,6 +291,14 @@ class SIMAgent(common_agent.ModuleAgent):
                 return {'ok': False, 'error': 'unknown_hexa_12v_channel'}
             self.hexa_switching_state[channel] = bool(payload.get('value', False))
             return {'ok': True, 'channel': channel, 'value': self.hexa_switching_state[channel]}
+        if payload.get('op') == 'restart_hexa_12v':
+            channel = str(payload['channel'])
+            if channel not in self.hexa_switching_state:
+                return {'ok': False, 'error': 'unknown_hexa_12v_channel'}
+            self.hexa_switching_state[channel] = False
+            await asyncio.sleep(float(payload.get('delay_s', 0)))
+            self.hexa_switching_state[channel] = True
+            return {'ok': True, 'channel': channel, 'value': True, 'restarted': True}
         if payload.get('op') == 'link_hexa_usb':
             return self.link_hexa_usb(payload.get('name', ''), str(payload.get('port', '')))
         if payload.get('op') == 'disconnect_hexa_usb':

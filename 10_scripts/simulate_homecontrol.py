@@ -602,8 +602,8 @@ function renderSim(id){
   const monitorChip=ch=>`chip ${(ch.status || '').toLowerCase()==='fault'?'fault':(ch.status || '').toLowerCase()==='off'?'off':''}`;
   const voltageTitle=ch=>`${Number(ch.value ?? 0).toFixed(2)} ${ch.unit || 'V'} / ${ch.source || ''}`;
   const busRows=Object.entries(aio.bus_monitors || {}).map(([key,ch])=>`<div class="mini-row" title="${esc(voltageTitle(ch))}"><strong>${esc((ch.label || key).replace(' monitor',''))}</strong><span class="${monitorChip(ch)}">${esc(ch.status || '-')}</span></div>`).join('');
-  const loopRows=Object.entries(aio.loop_monitors || {}).map(([key,ch])=>`<div class="mini-row" title="${esc(voltageTitle(ch))}"><strong>${esc((ch.label || key).replace(' monitor',''))}</strong><span class="${monitorChip(ch)}">${esc(ch.status || '-')}</span></div>`).join('');
-  const aiRows=Object.entries(aio.analog_inputs || {}).map(([key,ch])=>`<div class="mini-row" title="${esc(ch.source || '')}"><strong>${esc(ch.label || key.toUpperCase())}</strong><span>${Number(ch.value ?? 0).toFixed(2)} ${esc(ch.unit || 'V')}</span></div>`).join('');
+  const loopRows=Object.entries(aio.loop_monitors || {}).filter(([,ch])=>ch.visible!==false).map(([key,ch])=>`<div class="mini-row" title="${esc(voltageTitle(ch))}"><strong>${esc((ch.label || key).replace(' monitor',''))}</strong><span class="${monitorChip(ch)}">${esc(ch.status || '-')}</span></div>`).join('');
+  const aiRows=Object.entries(aio.analog_inputs || {}).filter(([,ch])=>ch.visible!==false).map(([key,ch])=>`<div class="mini-row" title="${esc(ch.source || '')}"><strong>${esc(ch.label || key.toUpperCase())}</strong><span>${Number(ch.value ?? 0).toFixed(2)} ${esc(ch.unit || 'V')}</span></div>`).join('');
   const dioRows=Object.entries(hexa.dio || {}).map(([key,ch])=>`<div class="io-card">
     <strong>${esc(ch.label || key)}</strong>
     <span>${esc(ch.direction || 'input')} / ${ch.value?'ON':'OFF'}</span>
@@ -612,11 +612,9 @@ function renderSim(id){
   const usb=hexa.usb || {};
   const linkedUsb=(usb.linked_devices || []).map(link=>`<div class="mini-row"><strong>${esc(link.name)}</strong><span>${esc(link.port_label || link.port)}</span><button class="secondary" onclick="disconnectHexaUsb('${esc(link.id)}')">Disconnect</button></div>`).join('');
   const usbOptions=(usb.available_ports || []).map(port=>`<option value="${esc(port.id)}">${esc(port.label || port.id)}</option>`).join('');
-  const switchRows=Object.entries(hexa.switching_12v || {}).map(([key,ch])=>`<div class="io-card">
-    <strong>${esc(ch.label || key)}</strong>
-    <span>12V switched output / ${ch.value?'ON':'OFF'}</span>
-    <button class="${ch.value?'':'secondary'}" onclick="toggleHexa12v('${key}',${!ch.value})">${ch.value?'ON':'OFF'}</button>
-  </div>`).join('');
+  const switches=hexa.switching_12v || {};
+  const activeSwitchRows=Object.entries(switches).filter(([,ch])=>ch.value).map(([key,ch])=>`<div class="mini-row"><strong>${esc(ch.label || key)}</strong><span class="chip">ON</span></div>`).join('');
+  const switchOptions=Object.entries(switches).map(([key,ch])=>`<option value="${esc(key)}">${esc(ch.label || key)}</option>`).join('');
   const canRows=Object.entries(hexa.can || appState.sim.can || {}).map(([key,c])=>{
     const status=c.enabled ? 'OK' : 'FAULT';
     return `<div class="mini-row" title="${esc(key)} / ${c.bitrate} bps / TX ${c.tx_count ?? 0} / RX ${c.rx_count ?? 0}"><strong>${esc(c.label || key)}</strong><span class="chip ${status==='FAULT'?'fault':''}">${status}</span></div>`
@@ -642,7 +640,13 @@ function renderSim(id){
     <h3>Hexa CAN Links</h3>
     <div class="mini-grid">${canRows || '<p class="muted">No CAN manifest loaded.</p>'}</div>
     <h3>Hexa 12V Switching</h3>
-    <div class="io-grid">${switchRows || '<p class="muted">No 12V switching manifest loaded.</p>'}</div>
+    <div class="mini-grid">${activeSwitchRows || '<p class="muted">No loop power switches are on.</p>'}</div>
+    <div class="row" style="margin-top:8px">
+      <select id="loop-power-switch">${switchOptions || '<option value="">No switches</option>'}</select>
+      <button onclick="setHexa12v(true)">On</button>
+      <button class="secondary" onclick="setHexa12v(false)">Off</button>
+      <button class="warn" onclick="restartHexa12v()">Restart</button>
+    </div>
     <h3>RMC Nodes</h3>
     ${Object.keys(nodes).length?Object.entries(nodes).map(([addr,n])=>`<div class="kv"><span>RMC ${addr}</span><span>${n.temperature_f ?? '-'}°F / ${n.humidity_pct ?? '-'}% RH / ${n.lux ?? '-'} lx / AQI ${n.aqi ?? '-'} / presence ${n.presence?'yes':'no'}${n.sensor_faults?.length ? ' / faults '+n.sensor_faults.join(', ') : ''}</span></div>`).join(''):'<p class="muted">No RMC telemetry yet.</p>'}
     <h3>RMC Firmware</h3>
@@ -742,7 +746,17 @@ async function saveRcmName(channel,name){editingName=false; await post('/api/rcm
 async function toggleLcmRelay(channel,value){await post('/api/lcm/relay',{channel,value})}
 async function saveLcmName(channel,name){editingName=false; await post('/api/lcm/name',{channel,name})}
 async function toggleHexaDio(channel,value){await post('/api/sim/hexa/dio',{channel,value})}
-async function toggleHexa12v(channel,value){await post('/api/sim/hexa/12v',{channel,value})}
+function selectedLoopSwitch(){return document.getElementById('loop-power-switch')?.value || ''}
+async function setHexa12v(value){
+  const channel=selectedLoopSwitch();
+  if(!channel) return;
+  await post('/api/sim/hexa/12v',{channel,value});
+}
+async function restartHexa12v(){
+  const channel=selectedLoopSwitch();
+  if(!channel) return;
+  await post('/api/sim/hexa/12v/restart',{channel});
+}
 async function linkHexaUsb(){
   const name=document.getElementById('usb-link-name')?.value || '';
   const port=document.getElementById('usb-link-port')?.value || '';
@@ -900,6 +914,11 @@ async def sim_hexa_dio(body: dict[str, Any]):
 @app.post("/api/sim/hexa/12v")
 async def sim_hexa_12v(body: dict[str, Any]):
     return await sim.sim.apply_command({"op": "set_hexa_12v", "channel": body["channel"], "value": body["value"]})
+
+
+@app.post("/api/sim/hexa/12v/restart")
+async def sim_hexa_12v_restart(body: dict[str, Any]):
+    return await sim.sim.apply_command({"op": "restart_hexa_12v", "channel": body["channel"]})
 
 
 @app.post("/api/sim/hexa/usb/link")
