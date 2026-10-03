@@ -8,6 +8,33 @@ io:
 tls:
   enabled: false
 capabilities: [rmc-can, telemetry, faults]
+rmc_sensor_stack:
+  aht21:
+    label: AHT21 temperature/humidity
+    interface: i2c
+    address: "0x38"
+    telemetry: [temperature_c, humidity_pct]
+  ens160:
+    label: ENS160 air quality
+    interface: i2c
+    address: "0x52"
+    telemetry: [aqi]
+  bh1750:
+    label: BH1750 ambient light
+    interface: i2c
+    address: "0x23"
+    telemetry: [lux]
+  rcwl_0516:
+    label: RCWL-0516 presence
+    interface: gpio
+    pin: D3
+    telemetry: [presence]
+  mcp2515_tja1050:
+    label: MCP2515 + TJA1050 CAN interface
+    interface: spi
+    cs_pin: D10
+    int_pin: D2
+    telemetry: [can]
 identity_path: ./runtime/sim_identity.json
 web:
   enabled: true

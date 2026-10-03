@@ -14,6 +14,7 @@ class SIMAgent(common_agent.ModuleAgent):
         self.rmc_nodes = {}
         self.io_mode = common_io.io_mode(config)
         self.can_network = common_can.SocketCANNetwork.from_config(config)
+        self.rmc_sensor_stack = config.get('rmc_sensor_stack', common_can.RMC_SENSOR_DEFINITIONS)
 
     def _record_rmc_frame(self, interface, arbitration_id, data):
         self.can_network.record_frame(interface, arbitration_id, data)
@@ -33,18 +34,21 @@ class SIMAgent(common_agent.ModuleAgent):
                 'lux': decoded['lux'],
                 'aqi': decoded['aqi'],
                 'sensor_ok': decoded['sensor_ok'],
+                'sensor_faults': decoded['sensor_faults'],
                 'any_sensor_fault': decoded['any_sensor_fault'],
             })
         elif decoded['kind'] == 'heartbeat':
             node.update({
                 'protocol_version': decoded['protocol_version'],
                 'fault_mask': decoded['fault_mask'],
+                'faults': decoded['faults'],
                 'status_flags': decoded['status_flags'],
                 'uptime_s': decoded['uptime_s'],
             })
         elif decoded['kind'] in ('fault', 'fault_clear'):
             node.update({
                 'fault_mask': decoded['fault_mask'],
+                'faults': decoded['faults'],
                 'status_flags': decoded['status_flags'],
                 'fault_active': decoded['kind'] == 'fault',
             })
@@ -55,6 +59,7 @@ class SIMAgent(common_agent.ModuleAgent):
             'rmc_nodes': self.rmc_nodes,
             'io_mode': self.io_mode,
             'can': self.can_network.snapshot(),
+            'rmc_sensor_stack': self.rmc_sensor_stack,
             'last_scan': time.time(),
         }
 

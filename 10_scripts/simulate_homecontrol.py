@@ -570,10 +570,14 @@ function dimmerControl(ch,v,name){
 function dimValue(ch){return document.getElementById(`dim-value-${ch}`)}
 function renderSim(id){
   const nodes=appState.sim.rmc_nodes;
+  const sensors=appState.sim.rmc_sensor_stack || {};
+  const sensorRows=Object.entries(sensors).map(([key,s])=>kv(key,`${s.label || key} / ${s.interface || '-'}${s.address ? ' / '+s.address : ''}${s.pin ? ' / '+s.pin : ''}`)).join('');
   devicePage.innerHTML=`<h2>${id} Sensor Interface Configuration</h2>
     ${kv('Module type','SIM')}${kv('IO mode',appState.sim.io_mode)}${kv('CAN interfaces',Object.keys(appState.sim.can).join(', '))}
+    <h3>Supported RMC Sensors</h3>
+    ${sensorRows || '<p class="muted">No sensor manifest loaded.</p>'}
     <h3>RMC Nodes</h3>
-    ${Object.keys(nodes).length?Object.entries(nodes).map(([addr,n])=>`<div class="kv"><span>RMC ${addr}</span><span>${n.temperature_f ?? '-'}°F / ${n.humidity_pct ?? '-'}% RH / ${n.lux ?? '-'} lx / presence ${n.presence?'yes':'no'}</span></div>`).join(''):'<p class="muted">No RMC telemetry yet.</p>'}
+    ${Object.keys(nodes).length?Object.entries(nodes).map(([addr,n])=>`<div class="kv"><span>RMC ${addr}</span><span>${n.temperature_f ?? '-'}°F / ${n.humidity_pct ?? '-'}% RH / ${n.lux ?? '-'} lx / AQI ${n.aqi ?? '-'} / presence ${n.presence?'yes':'no'}${n.sensor_faults?.length ? ' / faults '+n.sensor_faults.join(', ') : ''}</span></div>`).join(''):'<p class="muted">No RMC telemetry yet.</p>'}
     <div class="row" style="margin-top:14px"><button onclick="post('/api/sim/rmc-tick',{})">Inject RMC Frame</button></div>`;
 }
 function renderPnl(id){

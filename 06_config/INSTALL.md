@@ -57,6 +57,9 @@ bus number and mux/DAC addresses are confirmed.
 SIM config includes three SocketCAN loops: CAN A on `can0`, CAN B on `can1`,
 and CAN C on `can2`. The SIM installer runs `02_SIM/post_install.sh`, which
 adds `homecontrol-sim-can.service` so the CAN links are configured at boot.
+SIM state also advertises the supported RMC sensor stack from config: AHT21
+temperature/humidity, ENS160 AQI, BH1750 lux, RCWL-0516 presence, and the
+MCP2515/TJA1050 CAN interface.
 
 Each Linux module also serves a local status web UI. The module UI accepts only
 an HCM-issued bearer token; if the browser has no token or the token is invalid,
@@ -160,4 +163,6 @@ pulling the repo into `/opt/HomeControl` first.
 
 RMC is a microcontroller CAN room node, not a Linux service target. The
 `06_RMC` folder is reserved for the Arduino `.ino` firmware and its pinned
-hardware map.
+hardware map. `06_RMC/rmc.yaml` records the BOM-backed sensor stack and CAN
+hardware expected by the firmware: ENS160+AHT21 combo board, BH1750, RCWL-0516,
+MCP2515/TJA1050, and the 4-bit address DIP switch.

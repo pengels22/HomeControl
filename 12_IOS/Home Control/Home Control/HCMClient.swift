@@ -82,9 +82,11 @@ struct DimmerState: Decodable {
 
 struct SIMState: Decodable {
     let rmcNodes: [String: RMCNode]
+    let rmcSensorStack: [String: RMCSensorDefinition]?
 
     enum CodingKeys: String, CodingKey {
         case rmcNodes = "rmc_nodes"
+        case rmcSensorStack = "rmc_sensor_stack"
     }
 }
 
@@ -92,14 +94,28 @@ struct RMCNode: Decodable {
     let temperatureF: Double?
     let humidityPct: Double?
     let lux: Double?
+    let aqi: Int?
     let presence: Bool?
+    let sensorOK: [String: Bool]?
+    let sensorFaults: [String]?
 
     enum CodingKeys: String, CodingKey {
         case temperatureF = "temperature_f"
         case humidityPct = "humidity_pct"
         case lux
+        case aqi
         case presence
+        case sensorOK = "sensor_ok"
+        case sensorFaults = "sensor_faults"
     }
+}
+
+struct RMCSensorDefinition: Decodable {
+    let label: String?
+    let interface: String?
+    let address: String?
+    let pin: String?
+    let telemetry: [String]?
 }
 
 struct PNLState: Decodable {

@@ -14,6 +14,52 @@ RMC_FRAME_KIND = {
     0x400: "fault_clear",
 }
 
+RMC_SENSOR_DEFINITIONS = {
+    "aht21": {
+        "label": "AHT21 temperature/humidity",
+        "interface": "i2c",
+        "address": "0x38",
+        "telemetry": ["temperature_c", "humidity_pct"],
+        "health_bit": 2,
+    },
+    "ens160": {
+        "label": "ENS160 air quality",
+        "interface": "i2c",
+        "address": "0x52",
+        "telemetry": ["aqi"],
+        "health_bit": 3,
+    },
+    "bh1750": {
+        "label": "BH1750 ambient light",
+        "interface": "i2c",
+        "address": "0x23",
+        "telemetry": ["lux"],
+        "health_bit": 1,
+    },
+    "rcwl_0516": {
+        "label": "RCWL-0516 presence",
+        "interface": "gpio",
+        "pin": "D3",
+        "telemetry": ["presence"],
+        "health_bit": None,
+    },
+    "mcp2515_tja1050": {
+        "label": "MCP2515 + TJA1050 CAN interface",
+        "interface": "spi",
+        "cs_pin": "D10",
+        "int_pin": "D2",
+        "telemetry": ["can"],
+        "health_bit": 4,
+    },
+}
+
+RMC_FAULT_BITS = {
+    0x01: "bh1750",
+    0x02: "aht21",
+    0x04: "ens160",
+    0x08: "can",
+}
+
 
 @dataclass(slots=True)
 class CANInterface:
@@ -109,6 +155,13 @@ def decode_rmc_frame(arbitration_id: int, data: list[int]) -> dict[str, Any] | N
     if kind == "telemetry":
         flags = payload[0]
         lux = (payload[3] << 8) | payload[4]
+        sensor_ok = {
+            "bh1750": bool(flags & 0x02),
+            "aht21": bool(flags & 0x04),
+            "ens160": bool(flags & 0x08),
+            "can": bool(flags & 0x10),
+            "rcwl_0516": True,
+        }
         return {
             "kind": kind,
             "address": address,
@@ -118,29 +171,29 @@ def decode_rmc_frame(arbitration_id: int, data: list[int]) -> dict[str, Any] | N
             "lux": lux,
             "aqi": payload[5],
             "status_flags": flags,
-            "sensor_ok": {
-                "bh1750": bool(flags & 0x02),
-                "aht21": bool(flags & 0x04),
-                "ens160": bool(flags & 0x08),
-                "can": bool(flags & 0x10),
-            },
+            "sensor_ok": sensor_ok,
+            "sensor_faults": [name for name, ok in sensor_ok.items() if not ok],
             "any_sensor_fault": bool(flags & 0x20),
         }
     if kind == "heartbeat":
         uptime = (payload[4] << 24) | (payload[5] << 16) | (payload[6] << 8) | payload[7]
+        fault_mask = payload[2]
         return {
             "kind": kind,
             "address": address,
             "protocol_version": payload[0],
             "reported_address": payload[1],
-            "fault_mask": payload[2],
+            "fault_mask": fault_mask,
+            "faults": [name for bit, name in RMC_FAULT_BITS.items() if fault_mask & bit],
             "status_flags": payload[3],
             "uptime_s": uptime,
         }
+    fault_mask = payload[0]
     return {
         "kind": kind,
         "address": address,
-        "fault_mask": payload[0],
+        "fault_mask": fault_mask,
+        "faults": [name for bit, name in RMC_FAULT_BITS.items() if fault_mask & bit],
         "status_flags": payload[1],
         "reported_address": payload[2],
         "protocol_version": payload[3],

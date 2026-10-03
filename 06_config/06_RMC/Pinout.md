@@ -28,6 +28,8 @@
 | BH1750 | A4 SDA / A5 SCL | Ambient Light |
 | ENS160 | A4 SDA / A5 SCL | Air Quality / VOC |
 | AHT21 | A4 SDA / A5 SCL | Temperature / Humidity |
+| RCWL-0516 | D3 | Presence / Motion |
+| MCP2515 + TJA1050 | D10 CS / D2 INT / D11-D13 SPI | CAN telemetry uplink |
 
 | Signal | Hardware |
 |---|---|

@@ -1,0 +1,61 @@
+config_version: 1
+module_type: RMC
+hardware:
+  controller: HiLetgo Nano 3.0 Type-C
+  power:
+    field_input_vdc: 12
+    local_regulator: 5V 3A buck converter
+  can:
+    controller: MCP2515
+    transceiver: TJA1050
+    speed_bps: 250000
+    mcp_clock: 8000000
+    cs_pin: D10
+    int_pin: D2
+    connectors:
+      - name: CAN IN
+        signals: [+12V, GND, CAN-H, CAN-L]
+      - name: CAN OUT
+        signals: [+12V, GND, CAN-H, CAN-L]
+addressing:
+  dip_switch:
+    bits:
+      - {name: ADDR0, pin: D4, weight: 1}
+      - {name: ADDR1, pin: D5, weight: 2}
+      - {name: ADDR2, pin: D6, weight: 4}
+      - {name: ADDR3, pin: D7, weight: 8}
+    address_range: [0, 15]
+sensors:
+  aht21:
+    label: AHT21 temperature/humidity
+    interface: i2c
+    address: "0x38"
+    telemetry: [temperature_c, humidity_pct]
+    required: true
+  ens160:
+    label: ENS160 air quality
+    interface: i2c
+    address: "0x52"
+    telemetry: [aqi]
+    required: true
+  bh1750:
+    label: BH1750 ambient light
+    interface: i2c
+    address: "0x23"
+    telemetry: [lux]
+    required: true
+  rcwl_0516:
+    label: RCWL-0516 presence
+    interface: gpio
+    pin: D3
+    telemetry: [presence]
+    required: true
+protocol:
+  telemetry_frame: 0x100
+  heartbeat_frame: 0x200
+  fault_frame: 0x300
+  fault_clear_frame: 0x400
+  notes:
+    - Telemetry frame layout is implemented in RMC.ino.
+    - AHT21 temperature/humidity feeds ENS160 compensation when available.
+    - RMC is sensor-only and performs no output control.

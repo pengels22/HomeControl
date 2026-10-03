@@ -364,7 +364,8 @@ private struct DeviceConfigView: View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach((state.sim?.rmcNodes.keys.sorted() ?? []), id: \.self) { key in
                 let node = state.sim?.rmcNodes[key]
-                DetailRow(label: "RMC \(key)", value: "\(node?.temperatureF?.formatted() ?? "-") F / \(node?.humidityPct?.formatted() ?? "-")% RH")
+                let faults = node?.sensorFaults?.isEmpty == false ? " / faults \(node?.sensorFaults?.joined(separator: ", ") ?? "")" : ""
+                DetailRow(label: "RMC \(key)", value: "\(node?.temperatureF?.formatted() ?? "-") F / \(node?.humidityPct?.formatted() ?? "-")% RH / \(node?.lux?.formatted() ?? "-") lx / AQI \(node?.aqi.map(String.init) ?? "-")\(faults)")
             }
         }
     }

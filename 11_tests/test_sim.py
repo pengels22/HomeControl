@@ -22,6 +22,20 @@ def test_sim_builds_three_can_interfaces_from_config():
     assert state['can2']['bitrate'] == 125000
 
 
+def test_sim_exposes_bom_rmc_sensor_stack_from_config():
+    cfg = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+    agent = sim.SIMAgent(cfg)
+
+    sensors = agent.rmc_sensor_stack
+
+    assert set(sensors) >= {'aht21', 'ens160', 'bh1750', 'rcwl_0516', 'mcp2515_tja1050'}
+    assert sensors['aht21']['address'] == '0x38'
+    assert sensors['ens160']['address'] == '0x52'
+    assert sensors['bh1750']['address'] == '0x23'
+    assert sensors['rcwl_0516']['pin'] == 'D3'
+    assert sensors['mcp2515_tja1050']['cs_pin'] == 'D10'
+
+
 @pytest.mark.asyncio
 async def test_sim_configure_can_dry_run_returns_ip_commands():
     agent = sim.SIMAgent({
@@ -72,6 +86,21 @@ def test_rmc_telemetry_codec_matches_firmware_layout():
     assert decoded['humidity_pct'] == 47
     assert decoded['lux'] == 512
     assert decoded['aqi'] == 2
+    assert decoded['sensor_ok'] == {
+        'bh1750': True,
+        'aht21': True,
+        'ens160': True,
+        'can': True,
+        'rcwl_0516': True,
+    }
+    assert decoded['sensor_faults'] == []
+
+
+def test_rmc_fault_frames_name_supported_sensors():
+    decoded = common_can.decode_rmc_frame(0x300, [0x07, 0, 3, 1])
+
+    assert decoded['kind'] == 'fault'
+    assert decoded['faults'] == ['bh1750', 'aht21', 'ens160']
 
 
 @pytest.mark.asyncio
@@ -100,3 +129,5 @@ async def test_sim_updates_rmc_node_from_firmware_telemetry_frame():
     assert result['decoded']['address'] == 2
     assert agent.rmc_nodes['2']['temperature_f'] == 69.8
     assert agent.rmc_nodes['2']['lux'] == 300
+    assert agent.rmc_nodes['2']['aqi'] == 1
+    assert agent.rmc_nodes['2']['sensor_ok']['ens160'] is True
