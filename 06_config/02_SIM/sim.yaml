@@ -7,7 +7,64 @@ io:
   mode: auto
 tls:
   enabled: false
-capabilities: [rmc-can, telemetry, faults]
+capabilities: [rmc-can, telemetry, faults, hexa-aio, hexa-dio, hexa-usb, hexa-can, hexa-24v-switching]
+hexa_board:
+  model: ViaGasaFamido 6-channel CAN hub / Hexa board
+  role: SIM field IO and CAN distribution
+  interfaces:
+    aio:
+      enabled: true
+      channels:
+        adc1:
+          label: 3.3V bus monitor
+          source: ADC1
+          unit: V
+          nominal_v: 3.3
+          warning_low_v: 3.1
+          warning_high_v: 3.5
+          simulated_v: 3.31
+        adc2:
+          label: 5V bus monitor
+          source: ADC2
+          unit: V
+          nominal_v: 5.0
+          warning_low_v: 4.75
+          warning_high_v: 5.25
+          simulated_v: 5.02
+        adc3:
+          label: Loop A 12V monitor
+          source: ADC3
+          unit: V
+          nominal_v: 12.0
+          warning_low_v: 11.0
+          warning_high_v: 13.2
+          simulated_v: 12.1
+        adc4:
+          label: Loop B 12V monitor
+          source: ADC4
+          unit: V
+          nominal_v: 12.0
+          warning_low_v: 11.0
+          warning_high_v: 13.2
+          simulated_v: 12.0
+    dio:
+      enabled: true
+      channels:
+        dio1: {label: Digital IO 1, direction: input, simulated: false}
+        dio2: {label: Digital IO 2, direction: input, simulated: false}
+        dio3: {label: Digital IO 3, direction: output, simulated: false}
+        dio4: {label: Digital IO 4, direction: output, simulated: false}
+    usb:
+      enabled: true
+      ports:
+        usb1: {label: OPI3 host link, expected: connected}
+        usb2: {label: UCAN loop B, expected: connected}
+        usb3: {label: UCAN loop C, expected: connected}
+    switching_24v:
+      enabled: true
+      outputs:
+        sw1: {label: 24V switched output 1, simulated: false}
+        sw2: {label: 24V switched output 2, simulated: false}
 rmc_sensor_stack:
   aht21:
     label: AHT21 temperature/humidity

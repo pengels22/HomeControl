@@ -1,9 +1,9 @@
 | Channel | Hardware Address | Function | Field Voltage |
 |---|---|---|---|
-| A1 | ADC0 CH0 | Analog Input 1 | Analog |
-| A2 | ADC0 CH1 | Analog Input 2 | Analog |
-| A3 | ADC0 CH2 | Analog Input 3 | Analog |
-| A4 | ADC0 CH3 | Analog Input 4 | Analog |
+| A1 | Hexa ADC1 | 3.3V bus monitor | 3.3VDC |
+| A2 | Hexa ADC2 | 5V bus monitor | 5VDC |
+| A3 | Hexa ADC3 | Loop A 12V monitor | 12VDC |
+| A4 | Hexa ADC4 | Loop B 12V monitor | 12VDC |
 | A5 | ADC1 CH0 | Analog Input 5 | Analog |
 | A6 | ADC1 CH1 | Analog Input 6 | Analog |
 | A7 | ADC1 CH2 | Analog Input 7 | Analog |
@@ -11,22 +11,22 @@
 | B1 | HEXA CAN0 | CAN Loop A | 12VDC + CAN |
 | B2 | UCAN1 CAN0 | CAN Loop B | 12VDC + CAN |
 | B3 | UCAN2 CAN0 | CAN Loop C | 12VDC + CAN |
-| B4 | HEXA ADC | 5V Rail Monitor | 5VDC |
-| B5 | HEXA ADC | 12V Rail Monitor | 12VDC |
-| B6 | HEXA ADC | 24V Rail Monitor | 24VDC |
-| B7 | Internal | SIM Health / Internal Monitor | - |
-| B8 | Internal | Reserved | - |
+| B4 | HEXA DIO | Digital IO bank | Logic IO |
+| B5 | HEXA USB | USB host/downstream links | USB |
+| B6 | HEXA 24V SW | 24V switched outputs | 24VDC |
+| B7 | Internal | SIM health / internal monitor | - |
+| B8 | Internal | Reserved Hexa expansion | - |
 
-| ADC | Channel | SIM Input |
+| Hexa ADC | SIM Input | Function |
 |---|---|---|
-| ADC0 | CH0 | A1 |
-| ADC0 | CH1 | A2 |
-| ADC0 | CH2 | A3 |
-| ADC0 | CH3 | A4 |
-| ADC1 | CH0 | A5 |
-| ADC1 | CH1 | A6 |
-| ADC1 | CH2 | A7 |
-| ADC1 | CH3 | A8 |
+| ADC1 | A1 | 3.3V bus monitor |
+| ADC2 | A2 | 5V bus monitor |
+| ADC3 | A3 | Loop A 12V monitor |
+| ADC4 | A4 | Loop B 12V monitor |
+| ADC5 | A5 | Spare analog input |
+| ADC6 | A6 | Spare analog input |
+| ADC7 | A7 | Spare analog input |
+| ADC8 | A8 | Spare analog input |
 
 | Phoenix Pin | Signal |
 |---|---|
@@ -46,6 +46,15 @@
 | CAN A | FYSETC Hexa CAN0 | Hexa Port 1 | +12V / GND / CAN-H / CAN-L |
 | CAN B | UCAN1 | Hexa Port 2 | +12V / GND / CAN-H / CAN-L |
 | CAN C | UCAN2 | Hexa Port 3 | +12V / GND / CAN-H / CAN-L |
+
+Hexa board support manifest:
+
+- AIO is represented by `hexa_board.interfaces.aio` in `sim.yaml`.
+- DIO is represented by `hexa_board.interfaces.dio` and can be simulated from the SIM page.
+- USB links are represented by `hexa_board.interfaces.usb`.
+- CAN links are represented by the existing SocketCAN `can0`, `can1`, and `can2` setup.
+- 24V switching is represented by `hexa_board.interfaces.switching_24v` and can be simulated from the SIM page.
+- ADC1 monitors the 3.3V bus, ADC2 monitors the 5V bus, ADC3 monitors loop A 12V, and ADC4 monitors loop B 12V.
 
 OPI3 / Linux CAN bring-up:
 

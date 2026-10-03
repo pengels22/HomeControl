@@ -305,6 +305,9 @@ async def index():
     .lcm-dimmer{grid-template-columns:54px minmax(130px,1fr) 54px}
     .name-input{grid-column:1 / -1;padding:.45rem}
     .channel .on{color:#8ee0be}.channel .off{color:#aab2ae}.channel .locked-label{color:#ffca8a}
+    .io-grid{display:grid;grid-template-columns:repeat(2,minmax(240px,1fr));gap:8px}
+    .io-card{background:#111417;border:1px solid #2b3035;border-radius:6px;padding:10px;display:grid;gap:6px}
+    .io-card strong{font-size:.95rem}.io-card span{color:#aab2ae}.io-card .ok{color:#8ee0be}.io-card .warn{color:#ffca8a}
     .screen-wrap{display:grid;grid-template-columns:minmax(300px,460px) 1fr;gap:16px;align-items:start;margin-top:14px}
     .screen-bezel{background:#050607;border:1px solid #32383d;border-radius:8px;padding:12px;box-shadow:inset 0 0 0 2px #0c0f11}
     .screen{aspect-ratio:4/3;background:#d8ecdf;color:#17201b;border-radius:4px;padding:12px;display:grid;grid-template-rows:auto 1fr auto;gap:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
@@ -355,6 +358,7 @@ async def index():
       .channel{grid-template-columns:48px minmax(0,1fr) 64px;padding:10px}
       .lcm-channel{grid-template-columns:48px minmax(0,1fr) 70px}
       .lcm-dimmer{grid-template-columns:48px minmax(0,1fr) 50px}
+      .io-grid{grid-template-columns:1fr}
       .screen-wrap{gap:12px}
       .screen-bezel{padding:8px}
       .screen{padding:10px;gap:8px}
@@ -571,9 +575,46 @@ function dimValue(ch){return document.getElementById(`dim-value-${ch}`)}
 function renderSim(id){
   const nodes=appState.sim.rmc_nodes;
   const sensors=appState.sim.rmc_sensor_stack || {};
+  const hexa=appState.sim.hexa_board || {};
   const sensorRows=Object.entries(sensors).map(([key,s])=>kv(key,`${s.label || key} / ${s.interface || '-'}${s.address ? ' / '+s.address : ''}${s.pin ? ' / '+s.pin : ''}`)).join('');
+  const aioRows=Object.entries(hexa.aio || {}).map(([key,ch])=>`<div class="io-card">
+    <strong>${esc(ch.label || key)}</strong>
+    <span>${esc(ch.source || key)}: <b class="${ch.ok?'ok':'warn'}">${Number(ch.value ?? 0).toFixed(2)} ${esc(ch.unit || 'V')}</b></span>
+    <span>Nominal ${ch.nominal_v ?? '-'} V / limits ${ch.warning_low_v ?? '-'}-${ch.warning_high_v ?? '-'}</span>
+  </div>`).join('');
+  const dioRows=Object.entries(hexa.dio || {}).map(([key,ch])=>`<div class="io-card">
+    <strong>${esc(ch.label || key)}</strong>
+    <span>${esc(ch.direction || 'input')} / ${ch.value?'ON':'OFF'}</span>
+    <button class="${ch.value?'':'secondary'}" onclick="toggleHexaDio('${key}',${!ch.value})">${ch.value?'ON':'OFF'}</button>
+  </div>`).join('');
+  const usbRows=Object.entries(hexa.usb || {}).map(([key,port])=>`<div class="io-card">
+    <strong>${esc(port.label || key)}</strong>
+    <span>Expected ${esc(port.expected || '-')}</span>
+    <span class="${port.connected===false?'warn':'ok'}">${port.connected===false?'Missing':'Ready / simulated'}</span>
+  </div>`).join('');
+  const switchRows=Object.entries(hexa.switching_24v || {}).map(([key,ch])=>`<div class="io-card">
+    <strong>${esc(ch.label || key)}</strong>
+    <span>24V switched output / ${ch.value?'ON':'OFF'}</span>
+    <button class="${ch.value?'':'secondary'}" onclick="toggleHexa24v('${key}',${!ch.value})">${ch.value?'ON':'OFF'}</button>
+  </div>`).join('');
+  const canRows=Object.entries(hexa.can || appState.sim.can || {}).map(([key,c])=>`<div class="io-card">
+    <strong>${esc(c.label || key)}</strong>
+    <span>${esc(key)} / ${c.enabled?'enabled':'disabled'} / ${c.bitrate} bps</span>
+    <span>TX ${c.tx_count ?? 0} / RX ${c.rx_count ?? 0}</span>
+  </div>`).join('');
   devicePage.innerHTML=`<h2>${id} Sensor Interface Configuration</h2>
     ${kv('Module type','SIM')}${kv('IO mode',appState.sim.io_mode)}${kv('CAN interfaces',Object.keys(appState.sim.can).join(', '))}
+    ${kv('Hexa board',hexa.model || 'not configured')}${kv('Bus monitors',hexa.all_bus_monitors_ok ? 'OK' : 'Warning')}
+    <h3>Hexa AIO Bus Monitors</h3>
+    <div class="io-grid">${aioRows || '<p class="muted">No AIO monitor manifest loaded.</p>'}</div>
+    <h3>Hexa DIO</h3>
+    <div class="io-grid">${dioRows || '<p class="muted">No DIO manifest loaded.</p>'}</div>
+    <h3>Hexa USB Links</h3>
+    <div class="io-grid">${usbRows || '<p class="muted">No USB manifest loaded.</p>'}</div>
+    <h3>Hexa CAN Links</h3>
+    <div class="io-grid">${canRows || '<p class="muted">No CAN manifest loaded.</p>'}</div>
+    <h3>Hexa 24V Switching</h3>
+    <div class="io-grid">${switchRows || '<p class="muted">No 24V switching manifest loaded.</p>'}</div>
     <h3>Supported RMC Sensors</h3>
     ${sensorRows || '<p class="muted">No sensor manifest loaded.</p>'}
     <h3>RMC Nodes</h3>
@@ -672,6 +713,8 @@ async function toggleLock(channel,locked){await post('/api/rcm/lock',{channel,lo
 async function saveRcmName(channel,name){editingName=false; await post('/api/rcm/name',{channel,name})}
 async function toggleLcmRelay(channel,value){await post('/api/lcm/relay',{channel,value})}
 async function saveLcmName(channel,name){editingName=false; await post('/api/lcm/name',{channel,name})}
+async function toggleHexaDio(channel,value){await post('/api/sim/hexa/dio',{channel,value})}
+async function toggleHexa24v(channel,value){await post('/api/sim/hexa/24v',{channel,value})}
 async function commitDimmer(channel,percent){
   const target=Number(percent);
   slidingDimmer=false;
@@ -804,6 +847,16 @@ async def lcm_name(body: dict[str, Any]):
 @app.post("/api/sim/rmc-tick")
 async def sim_rmc_tick():
     return await sim.tick_rmc()
+
+
+@app.post("/api/sim/hexa/dio")
+async def sim_hexa_dio(body: dict[str, Any]):
+    return await sim.sim.apply_command({"op": "set_hexa_dio", "channel": body["channel"], "value": body["value"]})
+
+
+@app.post("/api/sim/hexa/24v")
+async def sim_hexa_24v(body: dict[str, Any]):
+    return await sim.sim.apply_command({"op": "set_hexa_24v", "channel": body["channel"], "value": body["value"]})
 
 
 if __name__ == "__main__":

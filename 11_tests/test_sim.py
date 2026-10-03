@@ -50,6 +50,43 @@ def test_sim_exposes_bom_rmc_sensor_stack_from_config():
 
 
 @pytest.mark.asyncio
+async def test_sim_exposes_hexa_board_capabilities_and_adc_bus_monitors():
+    cfg = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+    agent = sim.SIMAgent(cfg)
+
+    state = await agent.collect_state()
+    hexa = state['hexa_board']
+
+    assert set(hexa) >= {'aio', 'dio', 'usb', 'can', 'switching_24v'}
+    assert hexa['aio']['adc1']['label'] == '3.3V bus monitor'
+    assert hexa['aio']['adc2']['label'] == '5V bus monitor'
+    assert hexa['aio']['adc3']['label'] == 'Loop A 12V monitor'
+    assert hexa['aio']['adc4']['label'] == 'Loop B 12V monitor'
+    assert hexa['aio']['adc1']['source'] == 'ADC1'
+    assert hexa['aio']['adc2']['source'] == 'ADC2'
+    assert hexa['aio']['adc3']['source'] == 'ADC3'
+    assert hexa['aio']['adc4']['source'] == 'ADC4'
+    assert hexa['all_bus_monitors_ok'] is True
+    assert hexa['usb']['usb2']['label'] == 'UCAN loop B'
+    assert set(hexa['switching_24v']) == {'sw1', 'sw2'}
+
+
+@pytest.mark.asyncio
+async def test_sim_can_toggle_hexa_dio_and_24v_switch_outputs():
+    cfg = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+    agent = sim.SIMAgent(cfg)
+
+    dio_result = await agent.apply_command({'op': 'set_hexa_dio', 'channel': 'dio3', 'value': True})
+    switch_result = await agent.apply_command({'op': 'set_hexa_24v', 'channel': 'sw1', 'value': True})
+    state = await agent.collect_state()
+
+    assert dio_result == {'ok': True, 'channel': 'dio3', 'value': True}
+    assert switch_result == {'ok': True, 'channel': 'sw1', 'value': True}
+    assert state['hexa_board']['dio']['dio3']['value'] is True
+    assert state['hexa_board']['switching_24v']['sw1']['value'] is True
+
+
+@pytest.mark.asyncio
 async def test_sim_configure_can_dry_run_returns_ip_commands():
     agent = sim.SIMAgent({
         'can_interfaces': [
