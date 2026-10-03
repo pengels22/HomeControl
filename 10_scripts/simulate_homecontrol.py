@@ -597,9 +597,7 @@ function dimmerControl(ch,v,name){
 function dimValue(ch){return document.getElementById(`dim-value-${ch}`)}
 function renderSim(id){
   const nodes=appState.sim.rmc_nodes;
-  const sensors=appState.sim.rmc_sensor_stack || {};
   const hexa=appState.sim.hexa_board || {};
-  const sensorRows=Object.entries(sensors).map(([key,s])=>kv(key,`${s.label || key} / ${s.interface || '-'}${s.address ? ' / '+s.address : ''}${s.pin ? ' / '+s.pin : ''}`)).join('');
   const aio=hexa.aio || {};
   const monitorChip=ch=>`chip ${(ch.status || '').toLowerCase()==='fault'?'fault':(ch.status || '').toLowerCase()==='off'?'off':''}`;
   const voltageTitle=ch=>`${Number(ch.value ?? 0).toFixed(2)} ${ch.unit || 'V'} / ${ch.source || ''}`;
@@ -643,8 +641,6 @@ function renderSim(id){
     <div class="io-grid">${canRows || '<p class="muted">No CAN manifest loaded.</p>'}</div>
     <h3>Hexa 12V Switching</h3>
     <div class="io-grid">${switchRows || '<p class="muted">No 12V switching manifest loaded.</p>'}</div>
-    <h3>Supported RMC Sensors</h3>
-    ${sensorRows || '<p class="muted">No sensor manifest loaded.</p>'}
     <h3>RMC Nodes</h3>
     ${Object.keys(nodes).length?Object.entries(nodes).map(([addr,n])=>`<div class="kv"><span>RMC ${addr}</span><span>${n.temperature_f ?? '-'}°F / ${n.humidity_pct ?? '-'}% RH / ${n.lux ?? '-'} lx / AQI ${n.aqi ?? '-'} / presence ${n.presence?'yes':'no'}${n.sensor_faults?.length ? ' / faults '+n.sensor_faults.join(', ') : ''}</span></div>`).join(''):'<p class="muted">No RMC telemetry yet.</p>'}
     <h3>RMC Firmware</h3>
