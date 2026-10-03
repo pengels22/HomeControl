@@ -409,6 +409,7 @@ let selectedDevice='HCM:HCM01';
 let editingName=false;
 let slidingDimmer=false;
 let pendingDimmerTargets={};
+let selectedLoopPowerSwitch='sw1';
 async function post(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(!r.ok) throw new Error(await r.text()); await refresh()}
 async function postNoRefresh(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(!r.ok) throw new Error(await r.text()); return await r.json()}
 async function refresh(){
@@ -604,17 +605,13 @@ function renderSim(id){
   const busRows=Object.entries(aio.bus_monitors || {}).map(([key,ch])=>`<div class="mini-row" title="${esc(voltageTitle(ch))}"><strong>${esc((ch.label || key).replace(' monitor',''))}</strong><span class="${monitorChip(ch)}">${esc(ch.status || '-')}</span></div>`).join('');
   const loopRows=Object.entries(aio.loop_monitors || {}).filter(([,ch])=>ch.visible!==false).map(([key,ch])=>`<div class="mini-row" title="${esc(voltageTitle(ch))}"><strong>${esc((ch.label || key).replace(' monitor',''))}</strong><span class="${monitorChip(ch)}">${esc(ch.status || '-')}</span></div>`).join('');
   const aiRows=Object.entries(aio.analog_inputs || {}).filter(([,ch])=>ch.visible!==false).map(([key,ch])=>`<div class="mini-row" title="${esc(ch.source || '')}"><strong>${esc(ch.label || key.toUpperCase())}</strong><span>${Number(ch.value ?? 0).toFixed(2)} ${esc(ch.unit || 'V')}</span></div>`).join('');
-  const dioRows=Object.entries(hexa.dio || {}).map(([key,ch])=>`<div class="io-card">
-    <strong>${esc(ch.label || key)}</strong>
-    <span>${esc(ch.direction || 'input')} / ${ch.value?'ON':'OFF'}</span>
-    <button class="${ch.value?'':'secondary'}" onclick="toggleHexaDio('${key}',${!ch.value})">${ch.value?'ON':'OFF'}</button>
-  </div>`).join('');
   const usb=hexa.usb || {};
   const linkedUsb=(usb.linked_devices || []).map(link=>`<div class="mini-row"><strong>${esc(link.name)}</strong><span>${esc(link.port_label || link.port)}</span><button class="secondary" onclick="disconnectHexaUsb('${esc(link.id)}')">Disconnect</button></div>`).join('');
   const usbOptions=(usb.available_ports || []).map(port=>`<option value="${esc(port.id)}">${esc(port.label || port.id)}</option>`).join('');
   const switches=hexa.switching_12v || {};
   const activeSwitchRows=Object.entries(switches).filter(([,ch])=>ch.value).map(([key,ch])=>`<div class="mini-row"><strong>${esc(ch.label || key)}</strong><span class="chip">ON</span></div>`).join('');
-  const switchOptions=Object.entries(switches).map(([key,ch])=>`<option value="${esc(key)}">${esc(ch.label || key)}</option>`).join('');
+  if(!switches[selectedLoopPowerSwitch]) selectedLoopPowerSwitch=Object.keys(switches)[0] || '';
+  const switchOptions=Object.entries(switches).map(([key,ch])=>`<option value="${esc(key)}" ${key===selectedLoopPowerSwitch?'selected':''}>${esc(ch.label || key)}</option>`).join('');
   const canRows=Object.entries(hexa.can || appState.sim.can || {}).map(([key,c])=>{
     const status=c.enabled ? 'OK' : 'FAULT';
     return `<div class="mini-row" title="${esc(key)} / ${c.bitrate} bps / TX ${c.tx_count ?? 0} / RX ${c.rx_count ?? 0}"><strong>${esc(c.label || key)}</strong><span class="chip ${status==='FAULT'?'fault':''}">${status}</span></div>`
@@ -628,8 +625,6 @@ function renderSim(id){
     <div class="mini-grid">${loopRows || '<p class="muted">No loop monitors.</p>'}</div>
     <h3>AI</h3>
     <div class="mini-grid">${aiRows || '<p class="muted">No analog inputs.</p>'}</div>
-    <h3>Hexa DIO</h3>
-    <div class="io-grid">${dioRows || '<p class="muted">No DIO manifest loaded.</p>'}</div>
     <h3>Hexa USB Links</h3>
     <div class="mini-grid">${linkedUsb || '<p class="muted">No linked USB devices.</p>'}</div>
     <div class="row" style="margin-top:8px">
@@ -642,7 +637,7 @@ function renderSim(id){
     <h3>Hexa 12V Switching</h3>
     <div class="mini-grid">${activeSwitchRows || '<p class="muted">No loop power switches are on.</p>'}</div>
     <div class="row" style="margin-top:8px">
-      <select id="loop-power-switch">${switchOptions || '<option value="">No switches</option>'}</select>
+      <select id="loop-power-switch" onchange="selectedLoopPowerSwitch=this.value">${switchOptions || '<option value="">No switches</option>'}</select>
       <button onclick="setHexa12v(true)">On</button>
       <button class="secondary" onclick="setHexa12v(false)">Off</button>
       <button class="warn" onclick="restartHexa12v()">Restart</button>
@@ -746,7 +741,10 @@ async function saveRcmName(channel,name){editingName=false; await post('/api/rcm
 async function toggleLcmRelay(channel,value){await post('/api/lcm/relay',{channel,value})}
 async function saveLcmName(channel,name){editingName=false; await post('/api/lcm/name',{channel,name})}
 async function toggleHexaDio(channel,value){await post('/api/sim/hexa/dio',{channel,value})}
-function selectedLoopSwitch(){return document.getElementById('loop-power-switch')?.value || ''}
+function selectedLoopSwitch(){
+  selectedLoopPowerSwitch=document.getElementById('loop-power-switch')?.value || selectedLoopPowerSwitch || '';
+  return selectedLoopPowerSwitch;
+}
 async function setHexa12v(value){
   const channel=selectedLoopSwitch();
   if(!channel) return;
