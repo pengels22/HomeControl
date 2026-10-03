@@ -326,6 +326,10 @@ async def index():
     .io-grid{display:grid;grid-template-columns:repeat(2,minmax(240px,1fr));gap:8px}
     .io-card{background:#111417;border:1px solid #2b3035;border-radius:6px;padding:10px;display:grid;gap:6px}
     .io-card strong{font-size:.95rem}.io-card span{color:#aab2ae}.io-card .ok{color:#8ee0be}.io-card .warn{color:#ffca8a}
+    .mini-grid{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:8px}
+    .mini-row{display:flex;justify-content:space-between;align-items:center;gap:10px;background:#111417;border:1px solid #2b3035;border-radius:6px;padding:9px 10px}
+    .chip{display:inline-flex;min-width:58px;justify-content:center;border-radius:999px;padding:3px 8px;font-size:.78rem;font-weight:700;background:#27302d;color:#8ee0be}
+    .chip.off{background:#25292d;color:#aab2ae}.chip.fault{background:#432622;color:#ffb2a8}
     .screen-wrap{display:grid;grid-template-columns:minmax(300px,460px) 1fr;gap:16px;align-items:start;margin-top:14px}
     .screen-bezel{background:#050607;border:1px solid #32383d;border-radius:8px;padding:12px;box-shadow:inset 0 0 0 2px #0c0f11}
     .screen{aspect-ratio:4/3;background:#d8ecdf;color:#17201b;border-radius:4px;padding:12px;display:grid;grid-template-rows:auto 1fr auto;gap:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
@@ -377,6 +381,7 @@ async def index():
       .lcm-channel{grid-template-columns:48px minmax(0,1fr) 70px}
       .lcm-dimmer{grid-template-columns:48px minmax(0,1fr) 50px}
       .io-grid{grid-template-columns:1fr}
+      .mini-grid{grid-template-columns:1fr 1fr}
       .screen-wrap{gap:12px}
       .screen-bezel{padding:8px}
       .screen{padding:10px;gap:8px}
@@ -595,11 +600,12 @@ function renderSim(id){
   const sensors=appState.sim.rmc_sensor_stack || {};
   const hexa=appState.sim.hexa_board || {};
   const sensorRows=Object.entries(sensors).map(([key,s])=>kv(key,`${s.label || key} / ${s.interface || '-'}${s.address ? ' / '+s.address : ''}${s.pin ? ' / '+s.pin : ''}`)).join('');
-  const aioRows=Object.entries(hexa.aio || {}).map(([key,ch])=>`<div class="io-card">
-    <strong>${esc(ch.label || key)}</strong>
-    <span>${esc(ch.source || key)}: <b class="${ch.ok?'ok':'warn'}">${Number(ch.value ?? 0).toFixed(2)} ${esc(ch.unit || 'V')}</b></span>
-    <span>Nominal ${ch.nominal_v ?? '-'} V / limits ${ch.warning_low_v ?? '-'}-${ch.warning_high_v ?? '-'}</span>
-  </div>`).join('');
+  const aio=hexa.aio || {};
+  const monitorChip=ch=>`chip ${(ch.status || '').toLowerCase()==='fault'?'fault':(ch.status || '').toLowerCase()==='off'?'off':''}`;
+  const voltageTitle=ch=>`${Number(ch.value ?? 0).toFixed(2)} ${ch.unit || 'V'} / ${ch.source || ''}`;
+  const busRows=Object.entries(aio.bus_monitors || {}).map(([key,ch])=>`<div class="mini-row" title="${esc(voltageTitle(ch))}"><strong>${esc((ch.label || key).replace(' monitor',''))}</strong><span class="${monitorChip(ch)}">${esc(ch.status || '-')}</span></div>`).join('');
+  const loopRows=Object.entries(aio.loop_monitors || {}).map(([key,ch])=>`<div class="mini-row" title="${esc(voltageTitle(ch))}"><strong>${esc((ch.label || key).replace(' monitor',''))}</strong><span class="${monitorChip(ch)}">${esc(ch.status || '-')}</span></div>`).join('');
+  const aiRows=Object.entries(aio.analog_inputs || {}).map(([key,ch])=>`<div class="mini-row" title="${esc(ch.source || '')}"><strong>${esc(ch.label || key.toUpperCase())}</strong><span>${Number(ch.value ?? 0).toFixed(2)} ${esc(ch.unit || 'V')}</span></div>`).join('');
   const dioRows=Object.entries(hexa.dio || {}).map(([key,ch])=>`<div class="io-card">
     <strong>${esc(ch.label || key)}</strong>
     <span>${esc(ch.direction || 'input')} / ${ch.value?'ON':'OFF'}</span>
@@ -622,9 +628,13 @@ function renderSim(id){
   </div>`).join('');
   devicePage.innerHTML=`<h2>${id} Sensor Interface Configuration</h2>
     ${kv('Module type','SIM')}${kv('IO mode',appState.sim.io_mode)}${kv('CAN interfaces',Object.keys(appState.sim.can).join(', '))}
-    ${kv('Hexa board',hexa.model || 'not configured')}${kv('Bus monitors',hexa.all_bus_monitors_ok ? 'OK' : 'Warning')}
-    <h3>Hexa AIO Bus Monitors</h3>
-    <div class="io-grid">${aioRows || '<p class="muted">No AIO monitor manifest loaded.</p>'}</div>
+    ${kv('Hexa board',hexa.model || 'not configured')}${kv('Power',hexa.all_bus_monitors_ok ? 'OK' : 'Warning')}
+    <h3>Bus</h3>
+    <div class="mini-grid">${busRows || '<p class="muted">No bus monitors.</p>'}</div>
+    <h3>Loops</h3>
+    <div class="mini-grid">${loopRows || '<p class="muted">No loop monitors.</p>'}</div>
+    <h3>AI</h3>
+    <div class="mini-grid">${aiRows || '<p class="muted">No analog inputs.</p>'}</div>
     <h3>Hexa DIO</h3>
     <div class="io-grid">${dioRows || '<p class="muted">No DIO manifest loaded.</p>'}</div>
     <h3>Hexa USB Links</h3>

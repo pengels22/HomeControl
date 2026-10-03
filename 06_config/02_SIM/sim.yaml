@@ -29,39 +29,81 @@ hexa_board:
   interfaces:
     aio:
       enabled: true
-      channels:
-        adc1:
+      ads1115:
+        - name: ads_ai_1
+          address: "0x48"
+          role: Analog inputs A1-A4
+        - name: ads_ai_2
+          address: "0x49"
+          role: Analog inputs A5-A8
+        - name: ads_loop_monitor
+          address: "0x4A"
+          role: 12V loop monitors
+      bus_monitors:
+        bus_3v3:
           label: 3.3V bus monitor
-          source: ADC1
+          source: onboard ADC1
           unit: V
           nominal_v: 3.3
+          off_below_v: 1.0
           warning_low_v: 3.1
           warning_high_v: 3.5
           simulated_v: 3.31
-        adc2:
+        bus_5v:
           label: 5V bus monitor
-          source: ADC2
+          source: onboard ADC2
           unit: V
           nominal_v: 5.0
+          off_below_v: 1.0
           warning_low_v: 4.75
           warning_high_v: 5.25
           simulated_v: 5.02
-        adc3:
+      loop_monitors:
+        loop_a:
           label: Loop A 12V monitor
-          source: ADC3
+          source: ADS 0x4A CH0
           unit: V
           nominal_v: 12.0
+          off_below_v: 3.0
           warning_low_v: 11.0
           warning_high_v: 13.2
           simulated_v: 12.1
-        adc4:
+        loop_b:
           label: Loop B 12V monitor
-          source: ADC4
+          source: ADS 0x4A CH1
           unit: V
           nominal_v: 12.0
+          off_below_v: 3.0
           warning_low_v: 11.0
           warning_high_v: 13.2
           simulated_v: 12.0
+        loop_c:
+          label: Loop C 12V monitor
+          source: ADS 0x4A CH2
+          unit: V
+          nominal_v: 12.0
+          off_below_v: 3.0
+          warning_low_v: 11.0
+          warning_high_v: 13.2
+          simulated_v: 0.0
+        loop_d:
+          label: Loop D spare
+          source: ADS 0x4A CH3
+          unit: V
+          nominal_v: 12.0
+          off_below_v: 3.0
+          warning_low_v: 11.0
+          warning_high_v: 13.2
+          simulated_v: 0.0
+      analog_inputs:
+        a1: {label: A1, source: ADS 0x48 CH0, unit: V, simulated_v: 0.00}
+        a2: {label: A2, source: ADS 0x48 CH1, unit: V, simulated_v: 0.00}
+        a3: {label: A3, source: ADS 0x48 CH2, unit: V, simulated_v: 0.00}
+        a4: {label: A4, source: ADS 0x48 CH3, unit: V, simulated_v: 0.00}
+        a5: {label: A5, source: ADS 0x49 CH0, unit: V, simulated_v: 0.00}
+        a6: {label: A6, source: ADS 0x49 CH1, unit: V, simulated_v: 0.00}
+        a7: {label: A7, source: ADS 0x49 CH2, unit: V, simulated_v: 0.00}
+        a8: {label: A8, source: ADS 0x49 CH3, unit: V, simulated_v: 0.00}
     dio:
       enabled: true
       channels:

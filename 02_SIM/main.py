@@ -33,30 +33,45 @@ class SIMAgent(common_agent.ModuleAgent):
 
     def _analog_value_status(self, item):
         value = float(item.get('simulated_v', item.get('nominal_v', 0)))
+        off_below = item.get('off_below_v')
         low = item.get('warning_low_v')
         high = item.get('warning_high_v')
-        ok = (low is None or value >= float(low)) and (high is None or value <= float(high))
+        off = off_below is not None and value < float(off_below)
+        ok = not off and (low is None or value >= float(low)) and (high is None or value <= float(high))
+        status = 'OFF' if off else 'OK' if ok else 'FAULT'
         return {
             'label': item.get('label'),
             'source': item.get('source'),
             'unit': item.get('unit', 'V'),
             'value': value,
+            'status': status,
             'nominal_v': item.get('nominal_v'),
+            'off_below_v': off_below,
             'warning_low_v': low,
             'warning_high_v': high,
             'ok': ok,
         }
 
     def hexa_state(self):
-        aio = self._hexa_section('aio').get('channels', {})
+        aio = self._hexa_section('aio')
+        bus_monitors = aio.get('bus_monitors', {})
+        loop_monitors = aio.get('loop_monitors', {})
+        analog_inputs = aio.get('analog_inputs', {})
         dio = self._hexa_section('dio').get('channels', {})
         switching = self._hexa_section('switching_12v').get('outputs', {})
         usb = self._hexa_section('usb').get('ports', {})
-        analog = {name: self._analog_value_status(item) for name, item in aio.items()}
+        bus = {name: self._analog_value_status(item) for name, item in bus_monitors.items()}
+        loops = {name: self._analog_value_status(item) for name, item in loop_monitors.items()}
+        ai = {name: self._analog_value_status(item) for name, item in analog_inputs.items()}
         return {
             'model': self.hexa_board.get('model'),
             'role': self.hexa_board.get('role'),
-            'aio': analog,
+            'aio': {
+                'ads1115': aio.get('ads1115', []),
+                'bus_monitors': bus,
+                'loop_monitors': loops,
+                'analog_inputs': ai,
+            },
             'dio': {
                 name: {
                     'label': item.get('label'),
@@ -81,7 +96,7 @@ class SIMAgent(common_agent.ModuleAgent):
                 for name, item in switching.items()
             },
             'can': self.can_network.snapshot(),
-            'all_bus_monitors_ok': all(item['ok'] for item in analog.values()),
+            'all_bus_monitors_ok': all(item['status'] in ('OK', 'OFF') for item in {**bus, **loops}.values()),
         }
 
     def _record_rmc_frame(self, interface, arbitration_id, data):

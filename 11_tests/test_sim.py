@@ -58,14 +58,17 @@ async def test_sim_exposes_hexa_board_capabilities_and_adc_bus_monitors():
     hexa = state['hexa_board']
 
     assert set(hexa) >= {'aio', 'dio', 'usb', 'can', 'switching_12v'}
-    assert hexa['aio']['adc1']['label'] == '3.3V bus monitor'
-    assert hexa['aio']['adc2']['label'] == '5V bus monitor'
-    assert hexa['aio']['adc3']['label'] == 'Loop A 12V monitor'
-    assert hexa['aio']['adc4']['label'] == 'Loop B 12V monitor'
-    assert hexa['aio']['adc1']['source'] == 'ADC1'
-    assert hexa['aio']['adc2']['source'] == 'ADC2'
-    assert hexa['aio']['adc3']['source'] == 'ADC3'
-    assert hexa['aio']['adc4']['source'] == 'ADC4'
+    assert hexa['aio']['ads1115'][0]['address'] == '0x48'
+    assert hexa['aio']['ads1115'][1]['address'] == '0x49'
+    assert hexa['aio']['ads1115'][2]['address'] == '0x4A'
+    assert hexa['aio']['bus_monitors']['bus_3v3']['status'] == 'OK'
+    assert hexa['aio']['bus_monitors']['bus_5v']['status'] == 'OK'
+    assert hexa['aio']['loop_monitors']['loop_a']['status'] == 'OK'
+    assert hexa['aio']['loop_monitors']['loop_b']['status'] == 'OK'
+    assert hexa['aio']['loop_monitors']['loop_c']['status'] == 'OFF'
+    assert list(hexa['aio']['analog_inputs']) == ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8']
+    assert hexa['aio']['analog_inputs']['a1']['label'] == 'A1'
+    assert hexa['aio']['analog_inputs']['a8']['source'] == 'ADS 0x49 CH3'
     assert hexa['all_bus_monitors_ok'] is True
     assert hexa['usb']['usb2']['label'] == 'UCAN loop B'
     assert set(hexa['switching_12v']) == {'sw1', 'sw2'}
