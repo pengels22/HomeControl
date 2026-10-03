@@ -167,12 +167,12 @@ class ModuleRegistry:
             try: await writer.wait_closed()
             except Exception: pass
 
-    async def command_by_hostname(self, hostname: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def command_by_hostname(self, hostname: str, payload: dict[str, Any], timeout: float = 10.0) -> dict[str, Any]:
         async with db.acquire() as conn:
             row = await conn.fetchrow('SELECT module_uuid FROM modules WHERE hostname=$1', hostname)
         if not row: raise KeyError(hostname)
         mc = self.connections.get(str(row['module_uuid']))
         if not mc: raise ConnectionError(f'{hostname} offline')
-        return await mc.command(payload)
+        return await mc.command(payload, timeout=timeout)
 
 registry = ModuleRegistry()

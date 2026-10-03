@@ -49,3 +49,12 @@ class PairingKeyCreateIn(BaseModel):
 class PairingKeyVerifyIn(BaseModel):
     pairing_key: str
     used_by: str | None = None
+
+class RmcFirmwareUpdateIn(BaseModel):
+    target_rmc_id: str
+    sim_hostname: str
+    can_interface: str
+    node_id: int = Field(ge=0, le=15)
+    firmware_version: str
+    firmware_image_b64: str
+    hardware_revision: str = 'RMC-NANO-ATMEGA328P'

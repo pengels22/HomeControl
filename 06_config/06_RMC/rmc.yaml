@@ -55,7 +55,38 @@ protocol:
   heartbeat_frame: 0x200
   fault_frame: 0x300
   fault_clear_frame: 0x400
+  firmware_update:
+    sim_to_rmc_frame: 0x600
+    rmc_to_sim_frame: 0x680
+    transport: classical-can
+    block_size_bytes: 4
+    strategy: stop-and-wait
+    commands:
+      - UPDATE_ENTER_BOOTLOADER
+      - BOOTLOADER_READY
+      - UPDATE_BEGIN
+      - UPDATE_DATA
+      - UPDATE_ACK
+      - UPDATE_NACK
+      - UPDATE_STATUS
+      - UPDATE_END
+      - UPDATE_VERIFY
+      - UPDATE_VALID
+      - UPDATE_FAILED
+      - UPDATE_REBOOT
+      - APPLICATION_ONLINE
+bootloader:
+  required: true
+  protected: true
+  application_layout: single-image
+  metadata_store: eeprom
+  application_states: [VALID, UPDATING, INVALID]
+  integrity:
+    package_hash: sha256
+    bootloader_check: crc32
   notes:
     - Telemetry frame layout is implemented in RMC.ino.
     - AHT21 temperature/humidity feeds ENS160 compensation when available.
     - RMC is sensor-only and performs no output control.
+    - RMC firmware updates are delivered HCM to SIM to CAN to RMC; never direct HCM to RMC.
+    - The bootloader must never erase or overwrite itself during normal field firmware updates.

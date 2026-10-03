@@ -175,3 +175,13 @@ RMC is a microcontroller CAN room node, not a Linux service target. The
 hardware map. `06_RMC/rmc.yaml` records the BOM-backed sensor stack and CAN
 hardware expected by the firmware: ENS160+AHT21 combo board, BH1750, RCWL-0516,
 MCP2515/TJA1050, and the 4-bit address DIP switch.
+
+RMC firmware updates are orchestrated by HCM and physically delivered by the
+assigned SIM over CAN. The update path is always HCM -> SIM -> CAN -> RMC. HCM
+builds and sends a complete RMC firmware package to the SIM, the SIM stages and
+validates it under `/var/lib/hcm/firmware-staging`, then the SIM runs the
+stop-and-wait Classical CAN transfer. The RMC bootloader is protected and owns
+application flash programming; normal field updates must never overwrite the
+bootloader. HCM/SIM validate SHA-256 package integrity, while the Nano
+bootloader is expected to verify the application image with CRC32 before marking
+the single application image VALID.

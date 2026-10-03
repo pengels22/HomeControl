@@ -8,6 +8,21 @@ io:
 tls:
   enabled: false
 capabilities: [rmc-can, telemetry, faults, hexa-aio, hexa-dio, hexa-usb, hexa-can, hexa-24v-switching]
+rmc_firmware_updates:
+  enabled: true
+  staging_root: /var/lib/hcm/firmware-staging
+  compatible_hardware: [RMC-NANO-ATMEGA328P]
+  can_protocol:
+    transport: classical-can
+    block_size_bytes: 4
+    strategy: stop-and-wait
+    max_retries_per_block: 3
+    timeouts_s:
+      enter_bootloader_ack: 3
+      bootloader_ready: 8
+      block_ack: 2
+      verify: 10
+      application_return: 20
 hexa_board:
   model: ViaGasaFamido 6-channel CAN hub / Hexa board
   role: SIM field IO and CAN distribution

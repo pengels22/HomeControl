@@ -7,6 +7,7 @@ common_agent = import_module('07_servises.common.agent')
 common_can = import_module('07_servises.common.can')
 common_cfg = import_module('07_servises.common.config')
 common_io = import_module('07_servises.common.io')
+common_rmc_fw = import_module('07_servises.common.rmc_firmware')
 
 class SIMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
@@ -18,6 +19,10 @@ class SIMAgent(common_agent.ModuleAgent):
         self.hexa_board = config.get('hexa_board', {})
         self.hexa_dio_state = self._initial_output_state('dio', 'channels')
         self.hexa_switching_state = self._initial_output_state('switching_24v', 'outputs')
+        self.rmc_firmware_cfg = config.get('rmc_firmware_updates', {})
+        self.firmware_staging_root = Path(self.rmc_firmware_cfg.get('staging_root', '/var/lib/hcm/firmware-staging'))
+        self.compatible_rmc_hardware = list(self.rmc_firmware_cfg.get('compatible_hardware', ['RMC-NANO-ATMEGA328P']))
+        self.rmc_update_sessions = {}
 
     def _hexa_section(self, section):
         return self.hexa_board.get('interfaces', {}).get(section, {})
@@ -124,8 +129,90 @@ class SIMAgent(common_agent.ModuleAgent):
             'can': self.can_network.snapshot(),
             'hexa_board': self.hexa_state(),
             'rmc_sensor_stack': self.rmc_sensor_stack,
+            'rmc_firmware_updates': {
+                'enabled': bool(self.rmc_firmware_cfg.get('enabled', True)),
+                'staging_root': str(self.firmware_staging_root),
+                'sessions': {k: v.to_dict() for k, v in self.rmc_update_sessions.items()},
+            },
             'last_scan': time.time(),
         }
+
+    async def perform_rmc_firmware_update(self, payload):
+        package = payload['package']
+        target = payload.get('target', {})
+        session_id = str(package.get('session_id') or payload.get('session_id'))
+        node_id = int(target.get('node_id', payload.get('node_id')))
+        can_interface = str(target.get('can_interface', payload.get('can_interface', 'can0')))
+        target_rmc_id = str(target.get('rmc_id', payload.get('target_rmc_id', f'RMC-{node_id:02d}')))
+        if can_interface not in self.can_network.interfaces:
+            return {'ok': False, 'error': f'unknown CAN interface {can_interface}'}
+
+        session = common_rmc_fw.RmcFirmwareUpdateSession(
+            session_id=session_id,
+            target_rmc_id=target_rmc_id,
+            node_id=node_id,
+            can_interface=can_interface,
+            firmware_version=str(package.get('firmware_version', 'unknown')),
+        )
+        self.rmc_update_sessions[session_id] = session
+        try:
+            session.transition('RECEIVING_FIRMWARE', 0)
+            session.transition('VALIDATING_PACKAGE', 5)
+            image = common_rmc_fw.validate_package(package, compatible_hardware=self.compatible_rmc_hardware)
+            staged_path = common_rmc_fw.stage_package(self.firmware_staging_root, package, image)
+            session.transition('READY', 10, {'staged_path': str(staged_path)})
+            session.transition('REQUESTING_BOOTLOADER', 12)
+            session.transition('WAITING_FOR_BOOTLOADER', 15)
+            session.transition('BEGINNING_UPDATE', 20)
+            frames = common_rmc_fw.update_frame_plan(image, node_id, session_id)
+            data_frames = [frame for frame in frames if frame['command'] == 'UPDATE_DATA']
+            session.transition('TRANSFERRING', 25, {'blocks': len(data_frames)})
+            iface = self.can_network.interfaces[can_interface]
+            total_data = max(1, len(data_frames))
+            for frame in frames:
+                iface.tx_count += 1
+                iface.last_frame = {
+                    'arbitration_id': frame['arbitration_id'],
+                    'data': frame['data'],
+                    'ts': time.time(),
+                    'firmware_update': True,
+                    'command': frame['command'],
+                }
+                session.frames_sent += 1
+                if frame['command'] == 'UPDATE_DATA':
+                    seq = int(frame['sequence'])
+                    pct = 25 + int(((seq + 1) / total_data) * 50)
+                    if pct >= session.progress_pct + 10 or seq == total_data - 1:
+                        session.transition('TRANSFERRING', pct, {'sequence': seq})
+                await asyncio.sleep(0)
+            session.transition('VERIFYING', 80, {'crc32': package.get('image_crc32')})
+            session.transition('REBOOTING', 90)
+            session.transition('WAITING_FOR_APPLICATION', 94)
+            node = self.rmc_nodes.setdefault(str(node_id), {'address': node_id})
+            node.update({
+                'firmware_version': package.get('firmware_version'),
+                'hardware_revision': package.get('hardware_revision'),
+                'last_seen': time.time(),
+                'last_frame_kind': 'application_online',
+            })
+            session.transition('VERIFYING_VERSION', 98, {'reported_version': node['firmware_version']})
+            if node['firmware_version'] != package.get('firmware_version'):
+                raise RuntimeError('VERSION_MISMATCH')
+            session.transition('COMPLETE', 100)
+            try:
+                staged_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return {
+                'ok': True,
+                'session': session.to_dict(),
+                'reported_firmware_version': node['firmware_version'],
+                'frames_sent': session.frames_sent,
+            }
+        except Exception as exc:
+            session.error = str(exc)
+            session.transition('FAILED', session.progress_pct, {'error': session.error})
+            return {'ok': False, 'session': session.to_dict(), 'error': session.error}
 
     async def apply_command(self, payload):
         if payload.get('op') == 'configure_can':
@@ -150,6 +237,8 @@ class SIMAgent(common_agent.ModuleAgent):
                 return {'ok': False, 'error': 'unknown_hexa_24v_channel'}
             self.hexa_switching_state[channel] = bool(payload.get('value', False))
             return {'ok': True, 'channel': channel, 'value': self.hexa_switching_state[channel]}
+        if payload.get('op') == 'rmc_firmware_update':
+            return await self.perform_rmc_firmware_update(payload)
         return await super().apply_command(payload)
 
 async def main():

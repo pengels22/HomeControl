@@ -23,6 +23,7 @@ sys.path.insert(0, str(ROOT))
 common_can = import_module("07_servises.common.can")
 common_cfg = import_module("07_servises.common.config")
 common_pairing = import_module("07_servises.common.pairing_glyph")
+common_rmc_fw = import_module("07_servises.common.rmc_firmware")
 hvac_mod = import_module("01_HCM.hvac")
 lcm_mod = import_module("03_LCM.main")
 rcm_mod = import_module("04_RCM.main")
@@ -245,6 +246,23 @@ class HomeControlSimulator:
             "interface": "can0",
             "arbitration_id": arbitration_id,
             "data": data,
+        })
+
+    async def update_rmc_firmware(self, node_id: int = 0, version: str = "0.1.1") -> dict[str, Any]:
+        image = bytes((i % 251 for i in range(256)))
+        package = common_rmc_fw.make_package(
+            image=image,
+            firmware_version=version,
+            hardware_revision="RMC-NANO-ATMEGA328P",
+        )
+        return await self.sim.apply_command({
+            "op": "rmc_firmware_update",
+            "target": {
+                "rmc_id": f"RMC-{node_id:02d}",
+                "node_id": node_id,
+                "can_interface": "can0",
+            },
+            "package": package,
         })
 
     async def loop(self) -> None:
@@ -619,7 +637,9 @@ function renderSim(id){
     ${sensorRows || '<p class="muted">No sensor manifest loaded.</p>'}
     <h3>RMC Nodes</h3>
     ${Object.keys(nodes).length?Object.entries(nodes).map(([addr,n])=>`<div class="kv"><span>RMC ${addr}</span><span>${n.temperature_f ?? '-'}°F / ${n.humidity_pct ?? '-'}% RH / ${n.lux ?? '-'} lx / AQI ${n.aqi ?? '-'} / presence ${n.presence?'yes':'no'}${n.sensor_faults?.length ? ' / faults '+n.sensor_faults.join(', ') : ''}</span></div>`).join(''):'<p class="muted">No RMC telemetry yet.</p>'}
-    <div class="row" style="margin-top:14px"><button onclick="post('/api/sim/rmc-tick',{})">Inject RMC Frame</button></div>`;
+    <h3>RMC Firmware</h3>
+    ${Object.values(appState.sim.rmc_firmware_updates?.sessions || {}).map(s=>`<div class="kv"><span>${esc(s.target_rmc_id)}</span><span>${esc(s.state)} / ${s.progress_pct}% / ${esc(s.firmware_version)}</span></div>`).join('') || '<p class="muted">No firmware update sessions yet.</p>'}
+    <div class="row" style="margin-top:14px"><button onclick="post('/api/sim/rmc-tick',{})">Inject RMC Frame</button><button onclick="post('/api/sim/rmc-firmware-update',{node_id:0,version:'0.1.1'})">Sim RMC Firmware Update</button></div>`;
 }
 function renderPnl(id){
   devicePage.innerHTML=`<h2>${id} Panel Configuration</h2>${kv('Module type','PNL')}${kv('Room',appState.pnl.room || 'unassigned')}${kv('Dashboard URL',appState.pnl.dashboard_url)}
@@ -847,6 +867,11 @@ async def lcm_name(body: dict[str, Any]):
 @app.post("/api/sim/rmc-tick")
 async def sim_rmc_tick():
     return await sim.tick_rmc()
+
+
+@app.post("/api/sim/rmc-firmware-update")
+async def sim_rmc_firmware_update(body: dict[str, Any]):
+    return await sim.update_rmc_firmware(int(body.get("node_id", 0)), str(body.get("version", "0.1.1")))
 
 
 @app.post("/api/sim/hexa/dio")

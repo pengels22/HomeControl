@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import base64
 from fastapi import APIRouter, Depends, HTTPException
 from .models import (
     AuthChallengeIn,
@@ -11,6 +12,7 @@ from .models import (
     PairingKeyCreateIn,
     PairingKeyVerifyIn,
     PasswordLoginIn,
+    RmcFirmwareUpdateIn,
     RoomStateIn,
     UserCreateIn,
 )
@@ -28,6 +30,7 @@ from .auth import (
 from .devices import MaintenanceLockedError, command_logical
 from .hvac import Mode
 from .settings import settings
+from .updater import updater
 
 router = APIRouter(prefix='/api/v1')
 hvac = None
@@ -122,6 +125,28 @@ async def device_command(body: DeviceCommand, user=Depends(require_user)):
     except KeyError as exc: raise HTTPException(404, str(exc))
     except MaintenanceLockedError as exc: raise HTTPException(423, str(exc))
     except ConnectionError as exc: raise HTTPException(503, str(exc))
+
+@router.post('/firmware/rmc/update')
+async def rmc_firmware_update(body: RmcFirmwareUpdateIn, user=Depends(require_user)):
+    if user['role'] != 'ADMIN': raise HTTPException(403)
+    try:
+        firmware_image = base64.b64decode(body.firmware_image_b64.encode('ascii'), validate=True)
+    except Exception as exc:
+        raise HTTPException(400, 'firmware_image_b64 is not valid base64') from exc
+    try:
+        return await updater.update_rmc_via_sim(
+            target_rmc_id=body.target_rmc_id,
+            sim_hostname=body.sim_hostname,
+            can_interface=body.can_interface,
+            node_id=body.node_id,
+            firmware_image=firmware_image,
+            firmware_version=body.firmware_version,
+            hardware_revision=body.hardware_revision,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    except ConnectionError as exc:
+        raise HTTPException(503, str(exc))
 
 @router.post('/safety/fire')
 async def fire(body: FireStateIn, user=Depends(require_user)):

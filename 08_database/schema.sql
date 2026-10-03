@@ -176,3 +176,39 @@ CREATE TABLE IF NOT EXISTS notification_log (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     acknowledged_at TIMESTAMPTZ
 );
+
+CREATE TABLE IF NOT EXISTS firmware_releases (
+    id BIGSERIAL PRIMARY KEY,
+    target_module TEXT NOT NULL CHECK (target_module IN ('RCM','LCM','SIM','PNL','RMC')),
+    hardware_revision TEXT NOT NULL,
+    firmware_version TEXT NOT NULL,
+    package_version INTEGER NOT NULL,
+    image_length INTEGER NOT NULL CHECK (image_length > 0),
+    image_sha256 TEXT NOT NULL,
+    image_crc32 TEXT,
+    build_id TEXT,
+    package JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(target_module, hardware_revision, firmware_version)
+);
+
+CREATE TABLE IF NOT EXISTS rmc_firmware_updates (
+    id BIGSERIAL PRIMARY KEY,
+    session_id UUID UNIQUE NOT NULL,
+    target_rmc_id TEXT NOT NULL,
+    sim_module_id BIGINT REFERENCES modules(id),
+    can_interface TEXT NOT NULL,
+    node_id INTEGER NOT NULL CHECK (node_id >= 0 AND node_id <= 15),
+    firmware_release_id BIGINT REFERENCES firmware_releases(id),
+    state TEXT NOT NULL,
+    progress_pct INTEGER NOT NULL DEFAULT 0 CHECK (progress_pct >= 0 AND progress_pct <= 100),
+    reported_firmware_version TEXT,
+    error TEXT,
+    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_rmc_firmware_updates_target ON rmc_firmware_updates(target_rmc_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_rmc_firmware_updates_state ON rmc_firmware_updates(state);

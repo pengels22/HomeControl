@@ -64,6 +64,8 @@
 #include <Wire.h>
 #include <SPI.h>
 #include <mcp_can.h>
+#include <EEPROM.h>
+#include <avr/wdt.h>
 
 // -----------------------------------------------------------------------------
 // USER / BUS CONFIGURATION
@@ -96,6 +98,15 @@ static const bool SEND_IMMEDIATE_PRESENCE = true;
 
 // Serial diagnostics
 static const unsigned long SERIAL_BAUD = 115200UL;
+
+// Firmware update / bootloader handoff.
+// The protected CAN bootloader must own application flash writes. The running
+// application only acknowledges a targeted ENTER_BOOTLOADER request, records a
+// small marker, and resets.
+static const uint8_t EEPROM_BOOTLOADER_MARKER_ADDR = 0;
+static const uint8_t EEPROM_BOOTLOADER_MARKER = 0xA5;
+static const uint8_t FW_CMD_ENTER_BOOTLOADER = 0x01;
+static const uint8_t FW_CMD_ACK = 0x05;
 
 // -----------------------------------------------------------------------------
 // I2C ADDRESSES / SENSOR CONSTANTS
@@ -133,6 +144,8 @@ uint16_t canIdTelemetry()  { return 0x100U | ((uint16_t)rmcAddress << 4); }
 uint16_t canIdHeartbeat()  { return 0x200U | ((uint16_t)rmcAddress << 4); }
 uint16_t canIdFault()      { return 0x300U | ((uint16_t)rmcAddress << 4); }
 uint16_t canIdFaultClear() { return 0x400U | ((uint16_t)rmcAddress << 4); }
+uint16_t canIdUpdateCommand() { return 0x600U | ((uint16_t)rmcAddress << 4); }
+uint16_t canIdUpdateResponse() { return 0x680U | ((uint16_t)rmcAddress << 4); }
 
 // -----------------------------------------------------------------------------
 // FAULT BITS
@@ -425,6 +438,37 @@ bool sendCanFrame(uint16_t id, const uint8_t *data, uint8_t len) {
   return true;
 }
 
+void enterBootloaderForFirmwareUpdate(uint8_t sessionByte) {
+  uint8_t ack[8] = {FW_CMD_ACK, sessionByte, 0, 0, 0, 0, 0, 0};
+  sendCanFrame(canIdUpdateResponse(), ack, 8);
+  EEPROM.update(EEPROM_BOOTLOADER_MARKER_ADDR, EEPROM_BOOTLOADER_MARKER);
+  delay(25);
+  wdt_enable(WDTO_15MS);
+  while (true) {
+    // Wait for watchdog reset into the protected CAN bootloader.
+  }
+}
+
+void processFirmwareUpdateCommand(const uint8_t *data, uint8_t len) {
+  if (len < 2) return;
+  if (data[0] != FW_CMD_ENTER_BOOTLOADER) return;
+  enterBootloaderForFirmwareUpdate(data[1]);
+}
+
+void processIncomingCan() {
+  if (!canReady) return;
+  if (CAN0.checkReceive() != CAN_MSGAVAIL) return;
+
+  unsigned long rxId = 0;
+  uint8_t len = 0;
+  uint8_t data[8] = {0};
+  CAN0.readMsgBuf(&rxId, &len, data);
+
+  if ((uint16_t)rxId == canIdUpdateCommand()) {
+    processFirmwareUpdateCommand(data, len);
+  }
+}
+
 // -----------------------------------------------------------------------------
 // SENSOR / FAULT MANAGEMENT
 // -----------------------------------------------------------------------------
@@ -688,6 +732,8 @@ void setup() {
 
 void loop() {
   unsigned long now = millis();
+
+  processIncomingCan();
 
   // Presence is digital and may be reported immediately on transition.
   presenceState = (digitalRead(PIN_PRESENCE) == HIGH);
