@@ -1,0 +1,25 @@
+[Unit]
+Description=HCM Unified Heartbeat v3
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /usr/local/lib/hcm-heartbeat/hcm_heartbeat.py --config /etc/hcm-heartbeat/config.json serve
+Restart=always
+RestartSec=3
+RuntimeDirectory=hcm-heartbeat
+RuntimeDirectoryMode=0750
+StateDirectory=hcm-heartbeat
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/hcm-heartbeat /run/hcm-heartbeat
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

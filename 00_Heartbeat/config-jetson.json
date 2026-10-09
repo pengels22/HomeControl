@@ -1,0 +1,18 @@
+{
+  "role": "device",
+  "bind_address": "0.0.0.0",
+  "advertise_ip": "192.168.20.27",
+  "port": 6004,
+  "identity_interface": "eth0",
+  "conflict_address": "192.168.20.26",
+  "conflict_hostname": "conflict",
+  "interval_seconds": 5,
+  "peer_timeout_seconds": 15,
+  "startup_grace_seconds": 45,
+  "request_timeout_seconds": 4,
+  "services": ["ssh", "NetworkManager"],
+  "watchdogs": {},
+  "root_disk_percent_fail": 95,
+  "min_available_memory_percent": 5,
+  "thermal_celsius_fail": 90
+}

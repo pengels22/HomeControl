@@ -1,0 +1,14 @@
+{
+  "role": "conflict",
+  "bind_address": "192.168.20.26",
+  "advertise_ip": "192.168.20.26",
+  "port": 6004,
+  "identity_interface": "wlan0",
+  "peer_timeout_seconds": 15,
+  "services": ["ssh"],
+  "allowed_device_ids": ["48:b0:2d:87:db:16"],
+  "watchdogs": {},
+  "root_disk_percent_fail": 95,
+  "min_available_memory_percent": 5,
+  "thermal_celsius_fail": 90
+}
