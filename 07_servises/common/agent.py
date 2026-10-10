@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from homecontrol_identity import InvalidDeviceId, normalize_device_id
 from .protocol import read_frame, write_frame
 
 log = logging.getLogger(__name__)
@@ -20,7 +21,7 @@ class ModuleAgent:
     def __init__(self, module_type: str, config: dict[str, Any]):
         self.module_type = module_type.upper()
         self.config = config
-        self.hcm_host = config.get('hcm_host', '192.168.60.1')
+        self.hcm_host = config.get('hcm_host', '192.168.20.27')
         self.hcm_port = int(config.get('hcm_port', 6501))
         self.heartbeat_s = float(config.get('heartbeat_seconds', 5))
         self.identity_path = Path(config.get('identity_path', './runtime/identity.json'))
@@ -31,6 +32,13 @@ class ModuleAgent:
         self.web = config.get('web', {})
         self.hcm_api_url = self.web.get('hcm_api_url', f'http://{self.hcm_host}:8080/api/v1').rstrip('/')
         self.hcm_connected = False
+        heartbeat_cfg = config.get('heartbeat_v3', {})
+        self.heartbeat_socket_path = heartbeat_cfg.get(
+            'socket_path',
+            config.get('heartbeat_socket_path', '/run/hcm-heartbeat/control.sock'),
+        )
+        self.heartbeat_watchdog_name = heartbeat_cfg.get('watchdog_name', f'{self.module_type.lower()}_app')
+        self.heartbeat_status_name = heartbeat_cfg.get('status_name', f'{self.module_type.lower()}_app')
         self.running = True
 
     def _machine_id(self) -> str:
@@ -43,10 +51,24 @@ class ModuleAgent:
                 pass
         return str(uuid.getnode())
 
+    def _identity_device_id(self) -> str | None:
+        identity_cfg = self.config.get('identity', {})
+        configured = identity_cfg.get('device_id') or self.config.get('device_id')
+        if configured:
+            return normalize_device_id(configured)
+        iface = identity_cfg.get('interface') or self.config.get('identity_interface')
+        if not iface:
+            return None
+        try:
+            return normalize_device_id(Path(f'/sys/class/net/{iface}/address').read_text().strip())
+        except (OSError, InvalidDeviceId):
+            return None
+
     def _load_identity(self) -> dict[str, Any]:
         if self.identity_path.exists():
-            return json.loads(self.identity_path.read_text())
-        return {
+            identity = json.loads(self.identity_path.read_text())
+        else:
+            identity = {
             'module_type': self.module_type,
             'module_uuid': str(uuid.uuid5(uuid.NAMESPACE_DNS, f'homecontrol:{self.module_type}:{self._machine_id()}')),
             'hostname': self.module_type,
@@ -54,12 +76,49 @@ class ModuleAgent:
             'commissioned': False,
             'config_version': 0,
         }
+        device_id = self._identity_device_id()
+        if device_id:
+            identity['device_id'] = device_id
+        return identity
 
     def save_identity(self) -> None:
         self.identity_path.write_text(json.dumps(self.identity, indent=2))
 
     async def collect_state(self) -> dict[str, Any]:
         return self.state
+
+    async def heartbeat_control(self, action: str, name: str, value: Any | None = None) -> None:
+        payload = {'action': action, 'name': name}
+        if value is not None:
+            payload['value'] = value
+        try:
+            reader, writer = await asyncio.open_unix_connection(self.heartbeat_socket_path)
+            writer.write((json.dumps(payload) + '\n').encode('utf-8'))
+            await writer.drain()
+            raw = await asyncio.wait_for(reader.readline(), timeout=1.0)
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except AttributeError:
+                pass
+            if raw:
+                result = json.loads(raw.decode('utf-8'))
+                if not result.get('ok'):
+                    log.warning('heartbeat v3 control rejected %s for %s: %s', action, name, result.get('error'))
+        except (OSError, asyncio.TimeoutError, ValueError, json.JSONDecodeError):
+            log.debug('heartbeat v3 local control unavailable for %s', self.module_type, exc_info=True)
+
+    async def heartbeat_status(self, name: str, value: str) -> None:
+        await self.heartbeat_control('status_set', name, value)
+
+    async def heartbeat_fault(self, name: str, detail: str | None) -> None:
+        if detail:
+            await self.heartbeat_control('fault_set', name, detail)
+        else:
+            await self.heartbeat_control('fault_clear', name)
+
+    async def heartbeat_pulse(self) -> None:
+        await self.heartbeat_control('pulse', self.heartbeat_watchdog_name)
 
     async def apply_command(self, payload: dict[str, Any]) -> dict[str, Any]:
         return {'ok': False, 'error': 'command_not_implemented'}
@@ -270,6 +329,9 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
             server_hostname=server_hostname,
         )
         self.hcm_connected = True
+        await self.heartbeat_status('hcm_tcp_session', 'connected')
+        await self.heartbeat_fault('hcm_tcp_session', None)
+        await self.heartbeat_status(self.heartbeat_status_name, 'running')
         await write_frame(writer, {
             'type': 'identify',
             'payload': {
@@ -300,12 +362,15 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
                     'type': 'heartbeat',
                     'payload': {
                         'module_uuid': self.identity['module_uuid'],
+                        'device_id': self.identity.get('device_id'),
                         'hostname': self.identity['hostname'],
                         'ts': time.time(),
                         'state': state,
                         'faults': self.faults,
                     }
                 })
+                await self.heartbeat_pulse()
+                await self.heartbeat_status(self.heartbeat_status_name, 'running')
 
         hb = asyncio.create_task(heartbeat_loop())
         try:
@@ -322,6 +387,8 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
                     await write_frame(writer, {'type': 'command_ack', 'payload': result, 'request_id': msg.get('request_id')})
         finally:
             self.hcm_connected = False
+            await self.heartbeat_status('hcm_tcp_session', 'disconnected')
+            await self.heartbeat_fault('hcm_tcp_session', 'module TCP session disconnected')
             hb.cancel()
             writer.close()
             await writer.wait_closed()

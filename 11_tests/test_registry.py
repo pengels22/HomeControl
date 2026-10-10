@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 from importlib import import_module
 
 import pytest
@@ -24,15 +25,20 @@ class FakeRegistryConn:
         self.executed = []
 
     async def fetchrow(self, query, *args):
-        if 'WHERE module_uuid=$1' in query:
-            row = self.modules.get(args[0])
+        if 'device_id=$1' in query and 'module_uuid::text=$2' in query:
+            device_id, module_uuid = args
+            row = None
+            if device_id:
+                row = next((r for r in self.modules.values() if r.get('device_id') == device_id), None)
+            if row is None and module_uuid:
+                row = self.modules.get(module_uuid)
             if not row:
                 return None
             return {'hostname': row['hostname'], 'ip_address': row['ip_address']}
         if 'WHERE hostname=$1' in query:
             for module_uuid, row in self.modules.items():
                 if row['hostname'] == args[0]:
-                    return {'module_uuid': module_uuid}
+                    return {'device_id': row.get('device_id'), 'module_uuid': module_uuid}
             return None
         raise AssertionError(f'unexpected fetchrow: {query}')
 
@@ -48,8 +54,10 @@ class FakeRegistryConn:
     async def execute(self, query, *args):
         self.executed.append((query, args))
         if 'INSERT INTO modules' in query:
-            module_uuid, module_type, hostname, ip_address, software_version = args
-            self.modules[module_uuid] = {
+            device_id, module_uuid, module_type, hostname, ip_address, software_version = args
+            key = module_uuid or device_id
+            self.modules[key] = {
+                'device_id': device_id,
                 'module_type': module_type,
                 'hostname': hostname,
                 'ip_address': ip_address,
@@ -57,24 +65,36 @@ class FakeRegistryConn:
                 'online': True,
             }
         elif 'UPDATE modules SET online=true,last_seen=now(),last_state' in query:
-            module_uuid = args[0]
-            if module_uuid in self.modules:
-                self.modules[module_uuid]['last_state'] = args[1]
-                self.modules[module_uuid]['online'] = True
-        elif 'UPDATE modules SET online=true' in query:
-            module_uuid = args[0]
-            if module_uuid in self.modules:
-                self.modules[module_uuid]['online'] = True
+            device_id, module_uuid, state = args
+            row = self._find(device_id, module_uuid)
+            if row:
+                row['last_state'] = state
+                row['online'] = True
+        elif 'SET online=true' in query:
+            device_id, module_uuid = args[:2]
+            row = self._find(device_id, module_uuid)
+            if row:
+                row['online'] = True
+                if len(args) > 2:
+                    row['software_version'] = args[2]
         elif 'UPDATE modules SET online=false' in query:
-            module_uuid = args[0]
-            if module_uuid in self.modules:
-                self.modules[module_uuid]['online'] = False
+            device_id, module_uuid = args
+            row = self._find(device_id, module_uuid)
+            if row:
+                row['online'] = False
         else:
             raise AssertionError(f'unexpected execute: {query}')
 
+    def _find(self, device_id, module_uuid):
+        if module_uuid in self.modules:
+            return self.modules[module_uuid]
+        if device_id:
+            return next((row for row in self.modules.values() if row.get('device_id') == device_id), None)
+        return None
+
 
 @pytest.mark.asyncio
-async def test_assign_uses_pinned_module_ranges(monkeypatch):
+async def test_assign_uses_configured_development_control_network(monkeypatch):
     conn = FakeRegistryConn()
     monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
     monkeypatch.setattr(registry_mod.settings, 'commissioning_enabled', True)
@@ -84,15 +104,92 @@ async def test_assign_uses_pinned_module_ranges(monkeypatch):
     second = await reg._assign({'module_type': 'RCM', 'module_uuid': 'rcm-b', 'software_version': '0.1'})
     lcm = await reg._assign({'module_type': 'LCM', 'module_uuid': 'lcm-a', 'software_version': '0.1'})
 
-    assert first == {'hostname': 'RCM01', 'ip_address': '192.168.60.20', 'reboot_required': True}
-    assert second == {'hostname': 'RCM02', 'ip_address': '192.168.60.21', 'reboot_required': True}
-    assert lcm == {'hostname': 'LCM01', 'ip_address': '192.168.60.30', 'reboot_required': True}
+    assert first == {'hostname': 'RCM01', 'ip_address': '192.168.20.20', 'reboot_required': True}
+    assert second == {'hostname': 'RCM02', 'ip_address': '192.168.20.21', 'reboot_required': True}
+    assert lcm == {'hostname': 'LCM01', 'ip_address': '192.168.20.30', 'reboot_required': True}
+
+
+@pytest.mark.asyncio
+async def test_assign_prefers_normalized_device_id(monkeypatch):
+    conn = FakeRegistryConn()
+    monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
+    monkeypatch.setattr(registry_mod.settings, 'commissioning_enabled', True)
+    reg = registry_mod.ModuleRegistry()
+
+    assignment = await reg._assign({
+        'module_type': 'RCM',
+        'device_id': '48:b0:2d:87:db:16',
+        'module_uuid': 'legacy-uuid',
+        'software_version': '0.1',
+    })
+
+    assert assignment == {'hostname': 'RCM01', 'ip_address': '192.168.20.20', 'reboot_required': True}
+    assert conn.modules['legacy-uuid']['device_id'] == '48b02d87db16'
+
+
+def write_hcm_config(root: Path, active_profile: str, production_subnet: str | None = None) -> None:
+    path = root / '01_HCM'
+    path.mkdir(parents=True)
+    prod_subnet = production_subnet if production_subnet is not None else 'null'
+    prod_enabled = 'true' if production_subnet else 'false'
+    (path / 'hcm.yaml').write_text(f'''
+network:
+  control:
+    active_profile: {active_profile}
+    profiles:
+      development_control:
+        vlan: 20
+        subnet: 192.168.20.0/24
+        assignment_enabled: true
+        pools:
+          RCM: {{start: 192.168.20.20, end: 192.168.20.29}}
+          LCM: {{start: 192.168.20.30, end: 192.168.20.39}}
+          SIM: {{start: 192.168.20.40, end: 192.168.20.49}}
+          PNL: {{start: 192.168.20.50, end: 192.168.20.89}}
+      production_control:
+        vlan: 40
+        subnet: {prod_subnet}
+        assignment_enabled: {prod_enabled}
+        require_explicit_subnet: true
+        pools:
+          RCM: {{start: 192.168.40.20, end: 192.168.40.29}}
+''')
+
+
+def test_future_production_control_requires_explicit_subnet(tmp_path, monkeypatch):
+    write_hcm_config(tmp_path, 'production_control')
+    monkeypatch.setattr(registry_mod.settings, 'config_root', tmp_path)
+
+    with pytest.raises(RuntimeError, match='requires an approved subnet'):
+        registry_mod.load_control_network_plan()
+
+
+def test_vlan60_rejected_as_control_network(tmp_path, monkeypatch):
+    root = tmp_path / 'cfg'
+    path = root / '01_HCM'
+    path.mkdir(parents=True)
+    (path / 'hcm.yaml').write_text('''
+network:
+  control:
+    active_profile: bad_control
+    profiles:
+      bad_control:
+        vlan: 60
+        subnet: 192.168.60.0/24
+        pools:
+          RCM: {start: 192.168.60.20, end: 192.168.60.29}
+''')
+    monkeypatch.setattr(registry_mod.settings, 'config_root', root)
+
+    with pytest.raises(RuntimeError, match='VLAN 60 is reserved'):
+        registry_mod.load_control_network_plan()
 
 
 @pytest.mark.asyncio
 async def test_assign_existing_module_keeps_identity(monkeypatch):
     conn = FakeRegistryConn()
     conn.modules['rcm-a'] = {
+        'device_id': None,
         'module_type': 'RCM',
         'hostname': 'RCM01',
         'ip_address': '192.168.60.20',
@@ -134,6 +231,7 @@ def test_mutual_tls_requires_ca(monkeypatch):
 async def test_registered_module_receives_config_and_heartbeat_ack(monkeypatch):
     conn = FakeRegistryConn()
     conn.modules['rcm-a'] = {
+        'device_id': None,
         'module_type': 'RCM',
         'hostname': 'RCM01',
         'ip_address': '192.168.60.20',

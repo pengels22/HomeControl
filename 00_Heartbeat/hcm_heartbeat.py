@@ -7,6 +7,7 @@ import os
 import signal
 import socket
 import socketserver
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,8 @@ import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer as BaseHTTPServer
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
+
+from homecontrol_identity import InvalidDeviceId, normalize_device_id
 
 VERSION = 3
 MAX_BODY = 65536
@@ -45,10 +48,194 @@ def atomic_json(path, value):
 
 def mac_address(iface):
     with open('/sys/class/net/{}/address'.format(iface)) as f:
-        mac = f.read().strip().lower()
-    if len(mac.split(':')) != 6 or mac == '00:00:00:00:00:00':
+        mac = f.read().strip()
+    try:
+        return normalize_device_id(mac)
+    except InvalidDeviceId:
         raise ValueError('invalid MAC on {}'.format(iface))
-    return mac
+
+def normalize_allowlist(values):
+    result = []
+    for value in values or []:
+        result.append(normalize_device_id(value))
+    return result
+
+class ConflictStore(object):
+    def __init__(self, path):
+        self.path = path
+        self.lock = threading.RLock()
+        folder = os.path.dirname(path)
+        if folder and not os.path.isdir(folder):
+            os.makedirs(folder)
+        self.conn = sqlite3.connect(path, check_same_thread=False)
+        self.conn.row_factory = sqlite3.Row
+        self._init()
+
+    def _init(self):
+        with self.lock:
+            self.conn.execute('PRAGMA journal_mode=WAL')
+            self.conn.execute('PRAGMA synchronous=NORMAL')
+            self.conn.execute('PRAGMA busy_timeout=5000')
+            self.conn.execute('PRAGMA foreign_keys=ON')
+            self.conn.execute('''
+                CREATE TABLE IF NOT EXISTS devices (
+                    device_id TEXT PRIMARY KEY,
+                    hostname TEXT NOT NULL,
+                    ip_address TEXT,
+                    observed_ip TEXT,
+                    boot_id TEXT,
+                    first_seen INTEGER NOT NULL,
+                    last_seen INTEGER NOT NULL,
+                    last_sequence INTEGER,
+                    last_health TEXT,
+                    last_status TEXT,
+                    last_reachable INTEGER NOT NULL DEFAULT 1,
+                    offline_since INTEGER
+                )
+            ''')
+            self.conn.execute('''
+                CREATE TABLE IF NOT EXISTS heartbeat_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts INTEGER NOT NULL,
+                    device_id TEXT,
+                    event_type TEXT NOT NULL,
+                    details TEXT NOT NULL
+                )
+            ''')
+            self.conn.execute('CREATE INDEX IF NOT EXISTS idx_heartbeat_events_device_ts ON heartbeat_events(device_id, ts)')
+            now = int(time.time())
+            self.conn.execute('''
+                UPDATE devices
+                SET last_reachable=0, offline_since=COALESCE(offline_since, ?)
+                WHERE last_reachable=1
+            ''', (now,))
+            self.conn.commit()
+
+    def close(self):
+        with self.lock:
+            self.conn.close()
+
+    def event(self, event_type, device_id=None, details=None):
+        payload = json.dumps(details or {}, sort_keys=True)
+        with self.lock:
+            with self.conn:
+                self.conn.execute(
+                    'INSERT INTO heartbeat_events(ts,device_id,event_type,details) VALUES(?,?,?,?)',
+                    (int(time.time()), device_id, event_type, payload),
+                )
+
+    def record_heartbeat(self, device_id, data, observed_ip, timeout_seconds):
+        now = int(time.time())
+        health = json.dumps(data.get('health', {}), sort_keys=True)
+        status = json.dumps(data.get('status', {}), sort_keys=True)
+        with self.lock:
+            row = self.conn.execute('SELECT last_reachable FROM devices WHERE device_id=?', (device_id,)).fetchone()
+            full_row = self.conn.execute('SELECT * FROM devices WHERE device_id=?', (device_id,)).fetchone()
+            if full_row is not None:
+                recent = now - int(full_row['last_seen']) <= int(timeout_seconds)
+                same_boot = (not data.get('boot_id')) or data.get('boot_id') == full_row['boot_id']
+                same_source = observed_ip == full_row['observed_ip']
+                if full_row['last_reachable'] and recent and not same_boot and not same_source:
+                    self.conn.execute(
+                        'INSERT INTO heartbeat_events(ts,device_id,event_type,details) VALUES(?,?,?,?)',
+                        (now, device_id, 'duplicate_device_id', json.dumps({
+                            'existing_observed_ip': full_row['observed_ip'],
+                            'new_observed_ip': observed_ip,
+                            'existing_boot_id': full_row['boot_id'],
+                            'new_boot_id': data.get('boot_id'),
+                        }, sort_keys=True)),
+                    )
+                    self.conn.commit()
+                    raise ValueError('duplicate device_id from another reachable source')
+            with self.conn:
+                if row is None:
+                    self.conn.execute(
+                        'INSERT INTO heartbeat_events(ts,device_id,event_type,details) VALUES(?,?,?,?)',
+                        (now, device_id, 'device_registered', json.dumps({'hostname': data.get('hostname'), 'observed_ip': observed_ip}, sort_keys=True)),
+                    )
+                elif not row['last_reachable']:
+                    self.conn.execute(
+                        'INSERT INTO heartbeat_events(ts,device_id,event_type,details) VALUES(?,?,?,?)',
+                        (now, device_id, 'device_online', json.dumps({'hostname': data.get('hostname'), 'observed_ip': observed_ip}, sort_keys=True)),
+                    )
+                if row is None:
+                    self.conn.execute('''
+                        INSERT INTO devices(
+                            device_id,hostname,ip_address,observed_ip,boot_id,first_seen,last_seen,
+                            last_sequence,last_health,last_status,last_reachable,offline_since
+                        )
+                        VALUES(?,?,?,?,?,?,?,?,?,?,1,NULL)
+                    ''', (
+                        device_id, data.get('hostname'), data.get('ip_address'), observed_ip, data.get('boot_id'),
+                        now, now, data.get('sequence'), health, status,
+                    ))
+                else:
+                    self.conn.execute('''
+                        UPDATE devices
+                        SET hostname=?, ip_address=?, observed_ip=?, boot_id=?, last_seen=?,
+                            last_sequence=?, last_health=?, last_status=?, last_reachable=1, offline_since=NULL
+                        WHERE device_id=?
+                    ''', (
+                        data.get('hostname'), data.get('ip_address'), observed_ip, data.get('boot_id'),
+                        now, data.get('sequence'), health, status, device_id,
+                    ))
+                self.conn.execute('''
+                    INSERT INTO heartbeat_events(ts,device_id,event_type,details)
+                    VALUES(?,?,?,?)
+                ''', (now, device_id, 'heartbeat', json.dumps({'sequence': data.get('sequence'), 'hostname': data.get('hostname')}, sort_keys=True)))
+
+    def mark_offline_overdue(self, timeout_seconds):
+        now = int(time.time())
+        cutoff = now - int(timeout_seconds)
+        changed = []
+        with self.lock:
+            rows = self.conn.execute('''
+                SELECT device_id, hostname, last_seen FROM devices
+                WHERE last_reachable=1 AND last_seen < ?
+            ''', (cutoff,)).fetchall()
+            for row in rows:
+                with self.conn:
+                    self.conn.execute(
+                        'UPDATE devices SET last_reachable=0, offline_since=? WHERE device_id=?',
+                        (now, row['device_id']),
+                    )
+                    self.conn.execute(
+                        'INSERT INTO heartbeat_events(ts,device_id,event_type,details) VALUES(?,?,?,?)',
+                        (now, row['device_id'], 'device_offline', json.dumps({'hostname': row['hostname'], 'last_seen': row['last_seen']}, sort_keys=True)),
+                    )
+                    changed.append(row['device_id'])
+        return changed
+
+    def registry(self, timeout_seconds):
+        self.mark_offline_overdue(timeout_seconds)
+        now = int(time.time())
+        with self.lock:
+            rows = self.conn.execute('SELECT * FROM devices').fetchall()
+        result = {}
+        for row in rows:
+            age = max(0, now - int(row['last_seen']))
+            online = bool(row['last_reachable']) and age <= timeout_seconds
+            try:
+                health = json.loads(row['last_health'] or '{}')
+            except ValueError:
+                health = {}
+            try:
+                status = json.loads(row['last_status'] or '{}')
+            except ValueError:
+                status = {}
+            result[row['device_id']] = {
+                'hostname': row['hostname'],
+                'ip_address': row['ip_address'],
+                'observed_ip': row['observed_ip'],
+                'last_seen_seconds_ago': round(float(age), 1),
+                'online': online,
+                'last_known_online': bool(row['last_reachable']),
+                'offline_since': row['offline_since'],
+                'health': health,
+                'status': {'state': status.get('state'), 'modules': status.get('modules', {})},
+                'last_sequence': row['last_sequence'],
+            }
+        return result
 
 def uptime():
     with open('/proc/uptime') as f:
@@ -106,11 +293,20 @@ class State(object):
         self.seq = 0
         self.hostname = socket.gethostname()
         self.device_id = mac_address(cfg['identity_interface'])
+        self.conflict_device_id = normalize_device_id(cfg['conflict_device_id']) if cfg.get('conflict_device_id') else None
+        self.allowed_device_ids = normalize_allowlist(cfg.get('allowed_device_ids', []))
         self.saved = read_json(cfg['state_file'], {}) or {}
         self.faults = self.saved.get('faults', {})
         self.modules = self.saved.get('modules', {})
         self.pulses = {}  # Not carried across restarts; must be freshly asserted.
         self.peers = {}
+        self.store = None
+        self.store_error = None
+        if cfg['role'] == 'conflict':
+            try:
+                self.store = ConflictStore(cfg['registry_db'])
+            except sqlite3.Error as e:
+                self.store_error = 'registry database unavailable: {}'.format(e)
         self.peer_health = None
         self.last_ack = None
         self.last_error = 'not yet connected'
@@ -119,6 +315,10 @@ class State(object):
 
     def save(self):
         atomic_json(self.cfg['state_file'], {'faults': self.faults, 'modules': self.modules})
+
+    def set_store_error(self, error):
+        with self.lock:
+            self.store_error = error
 
     def control(self, payload):
         action = payload.get('action')
@@ -151,6 +351,7 @@ class State(object):
             last_ack = self.last_ack
             peer_health = copy.deepcopy(self.peer_health)
             last_error = self.last_error
+            store_error = self.store_error
             started = self.started
             first_poll = self.last_poll_started
             seq = self.seq
@@ -196,15 +397,14 @@ class State(object):
         now_wall = int(time.time())
         registry = {}
         if cfg['role'] == 'conflict':
-            for ident, entry in peers.items():
-                age = now - entry['seen_mono']
-                registry[ident] = {
-                    'hostname': entry['hostname'], 'ip_address': entry['ip_address'],
-                    'observed_ip': entry['observed_ip'], 'last_seen_seconds_ago': round(age, 1),
-                    'online': age <= cfg['peer_timeout_seconds'],
-                    'health': entry['health'], 'status': entry['status'],
-                    'last_sequence': entry['sequence']
-                }
+            if self.store:
+                try:
+                    registry = self.store.registry(cfg['peer_timeout_seconds'])
+                    store_error = None
+                except sqlite3.Error as e:
+                    store_error = 'registry database unavailable: {}'.format(e)
+            if store_error:
+                faults.append({'type': 'registry_db', 'detail': store_error})
         # Peer faults belong to registry, not own health: prevents reciprocal fault cascades.
         result = {
             'protocol': 'hcm-heartbeat', 'version': VERSION,
@@ -252,14 +452,12 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(count).decode('utf-8'))
             if data.get('protocol') != 'hcm-heartbeat' or data.get('version') != VERSION:
                 raise ValueError('unsupported protocol')
-            mac = data['device_id'].lower()
-            if len(mac.split(':')) != 6 or any(len(x) != 2 for x in mac.split(':')):
-                raise ValueError('invalid MAC')
+            mac = normalize_device_id(data['device_id'])
             if not isinstance(data['hostname'], str) or not data['hostname']:
                 raise ValueError('invalid hostname')
             if not isinstance(data['sequence'], int) or not isinstance(data['health'], dict) or not isinstance(data['status'], dict):
                 raise ValueError('invalid heartbeat')
-            allow = self.server.state.cfg.get('allowed_device_ids', [])
+            allow = self.server.state.allowed_device_ids
             if allow and mac not in allow:
                 return self.send_json(403, {'error': 'unregistered device'})
             with self.server.state.lock:
@@ -270,6 +468,12 @@ class Handler(BaseHTTPRequestHandler):
                     'seen_mono': time.monotonic(), 'sequence': data['sequence']
                 }
                 self.server.state.seq += 1
+                if self.server.state.store:
+                    try:
+                        self.server.state.store.record_heartbeat(mac, data, self.client_address[0], self.server.state.cfg['peer_timeout_seconds'])
+                        self.server.state.set_store_error(None)
+                    except sqlite3.Error as e:
+                        self.server.state.set_store_error('registry database unavailable: {}'.format(e))
             reply = self.server.state.snapshot()
             reply['reply_to'] = data['sequence']
             reply['reply_boot_id'] = data.get('boot_id')
@@ -310,12 +514,12 @@ def client_loop(state):
                 if len(raw) > MAX_BODY:
                     raise ValueError('response too long')
                 reply = json.loads(raw.decode('utf-8'))
-            expected_mac = cfg.get('conflict_device_id')
+            expected_mac = state.conflict_device_id
             if reply.get('protocol') != 'hcm-heartbeat' or reply.get('version') != VERSION or reply.get('reply_to') != seq or reply.get('reply_boot_id') != state.boot_id:
                 raise ValueError('invalid acknowledgment')
             if reply.get('hostname') != cfg['conflict_hostname']:
                 raise ValueError('wrong conflict hostname')
-            if expected_mac and reply.get('device_id', '').lower() != expected_mac.lower():
+            if expected_mac and normalize_device_id(reply.get('device_id', '')) != expected_mac:
                 raise ValueError('wrong conflict device ID')
             if not isinstance(reply.get('health'), dict) or not isinstance(reply.get('status'), dict):
                 raise ValueError('missing conflict health/status')
@@ -363,6 +567,8 @@ def serve(cfg):
         pass
     web.server_close()
     unix.server_close()
+    if state.store:
+        state.store.close()
     if os.path.exists(sockpath):
         os.unlink(sockpath)
 
@@ -392,6 +598,7 @@ def main():
         p.error('role must be device or conflict')
     defaults = {'port': 6004, 'bind_address': '0.0.0.0', 'advertise_ip': '',
                 'identity_interface': 'eth0', 'state_file': '/var/lib/hcm-heartbeat/state.json',
+                'registry_db': '/var/lib/hcm-heartbeat/registry.sqlite3',
                 'socket_path': '/run/hcm-heartbeat/control.sock', 'services': [], 'watchdogs': {},
                 'min_available_memory_percent': 5, 'root_disk_percent_fail': 95,
                 'thermal_celsius_fail': 90, 'interval_seconds': 5, 'peer_timeout_seconds': 15,

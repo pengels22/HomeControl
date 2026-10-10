@@ -49,10 +49,10 @@ class UpdateOrchestrator:
     async def update_module(self, hostname: str, command: list[str] | None = None, return_timeout_s: int = 180) -> dict:
         async with self._lock:
             async with db.acquire() as conn:
-                row = await conn.fetchrow('SELECT module_uuid, ip_address FROM modules WHERE hostname=$1', hostname)
+                row = await conn.fetchrow('SELECT device_id, module_uuid::text AS module_uuid, ip_address FROM modules WHERE hostname=$1', hostname)
             if not row:
                 raise KeyError(hostname)
-            module_uuid, ip = str(row['module_uuid']), str(row['ip_address'])
+            module_key, ip = row['device_id'] or str(row['module_uuid']), str(row['ip_address'])
             await self._firewall('open', ip)
             try:
                 result = await self._request_update(ip, command)
@@ -60,7 +60,7 @@ class UpdateOrchestrator:
                     raise RuntimeError(f'update failed: {result}')
                 deadline = asyncio.get_running_loop().time() + return_timeout_s
                 while asyncio.get_running_loop().time() < deadline:
-                    conn = registry.connections.get(module_uuid)
+                    conn = registry.connections.get(module_key)
                     if conn and conn.last_heartbeat:
                         return {'ok': True, 'module': hostname, 'update': result, 'verified': True}
                     await asyncio.sleep(2)

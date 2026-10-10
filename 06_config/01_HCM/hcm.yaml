@@ -1,11 +1,39 @@
 config_version: 1
 network:
-  vlan60:
-    address: 192.168.60.1/24
-    rcm_pool: 192.168.60.20-29
-    lcm_pool: 192.168.60.30-39
-    sim_pool: 192.168.60.40-49
-    pnl_pool: 192.168.60.50-89
+  control:
+    active_profile: development_control
+    profiles:
+      development_control:
+        vlan: 20
+        subnet: 192.168.20.0/24
+        hcm_address: 192.168.20.27
+        assignment_enabled: true
+        pools:
+          RCM: {start: 192.168.20.20, end: 192.168.20.29}
+          LCM: {start: 192.168.20.30, end: 192.168.20.39}
+          SIM: {start: 192.168.20.40, end: 192.168.20.49}
+          PNL: {start: 192.168.20.50, end: 192.168.20.89}
+        note: Current development/control network. Do not migrate running devices automatically.
+      production_control:
+        vlan: 40
+        subnet: null
+        hcm_address: null
+        assignment_enabled: false
+        require_explicit_subnet: true
+        pools:
+          RCM: null
+          LCM: null
+          SIM: null
+          PNL: null
+        note: Production control subnet and pools require explicit approval before assignment.
+  heartbeat_supervisory:
+    vlan: 60
+    conflict_manager_address: 192.168.60.2
+    port: 6004
+    implementation: 00_Heartbeat Unified Heartbeat V3
+    note: VLAN 60 is heartbeat/supervisory only; no normal module control traffic.
+  vlan140:
+    applicable: false
 services:
   module_tcp_port: 6501
   update_port: 6503

@@ -13,33 +13,38 @@ Module types:
 
 ## Networking
 
-- Dedicated HCM VLAN: 60
-- Network: 192.168.60.0/24
-- HCM: 192.168.60.1
-- RCM: .20-.29
-- LCM: .30-.39
-- SIM: .40-.49
-- PNL: .50+
+- VLAN 20: current HCM development/control network.
+- VLAN 40: future dedicated production HCM control network. Subnet and module
+  pools are not approved yet.
+- VLAN 60: heartbeat/supervisory network only.
+- VLAN 140: not applicable to this HCM installation.
+- Conflict Manager heartbeat address: 192.168.60.2 on eth0.60.
+- Heartbeat TCP port: 6004.
+- Unified Heartbeat V3 in `00_Heartbeat/` is the standard heartbeat
+  implementation.
 
-Switch:
-- Port 1: U1,T20 -> OPI6 NIC 1
-- Port 2: U60 -> OPI6 NIC 2
-- Ports 3-16: U60 -> modules
+Do not migrate existing running devices from VLAN 20 yet. Do not invent a VLAN
+40 subnet. VLAN 60 must not carry normal app, module-control, update, web UI, or
+database traffic.
 
-VLAN 60 receives no normal Internet access.
-HCM provides local NTP.
-During staged updates HCM temporarily opens WAN access only for the module being updated.
+HCM provides local NTP on the approved control network. During staged updates,
+HCM temporarily opens WAN access only for the module being updated.
 
 ## Commissioning
 
 New modules boot with a generic hostname matching module type.
 HCM automatically:
 1. identifies module type
-2. assigns next number and address from the correct pool
-3. records the permanent assignment
-4. causes the module to reboot with its permanent identity
-5. verifies its return
-6. pushes the base configuration for that module type
+2. reads the normalized MAC-derived device ID from the designated physical interface
+3. assigns next hostname and approved control-network address
+4. records the permanent assignment
+5. causes the module to reboot with its permanent identity
+6. verifies its return
+7. pushes the base configuration for that module type
+
+The normalized device ID is the physical interface MAC address converted to
+lowercase with colons removed, for example `48:b0:2d:87:db:16` becomes
+`48b02d87db16`. It replaces generated module UUIDs and is not a 128-bit UUID.
 
 ## Communications
 
@@ -74,10 +79,14 @@ HCM remains the central authentication authority.
 
 ## Output priority
 
-1. Maintenance Lock
-2. Life Safety
+1. Maintenance Lockout
+2. Fire/Life Safety
 3. Local Override
 4. HCM Rules/User Commands
+
+Maintenance lockout is the highest-priority output inhibit. While active, no
+controlled output may energize, including during fire response. Fire detection,
+fault reporting, event logging, and communication must continue where possible.
 
 ## LCM analog dimming
 
@@ -146,7 +155,7 @@ LOW = fire active.
 
 Fire:
 - enters life-safety mode
-- turns on all available, non-maintenance-locked lights
+- when maintenance lockout is inactive, turns on designated emergency lighting outputs
 - shuts HVAC down
 - sends critical iOS app alert
 - issues fire TTS warning

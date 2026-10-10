@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import ipaddress
 import json
 import logging
 import ssl
@@ -10,21 +11,69 @@ from typing import Any
 from importlib import import_module
 from . import db
 from .settings import settings
+from homecontrol_identity import InvalidDeviceId, maybe_normalize_device_id
 
 protocol = import_module('07_servises.common.protocol')
 log = logging.getLogger(__name__)
 
-RANGES = {
-    'RCM': range(20, 30),
-    'LCM': range(30, 40),
-    'SIM': range(40, 50),
-    'PNL': range(50, 90),
-}
+MODULE_TYPES = ('RCM', 'LCM', 'SIM', 'PNL')
+
+class ControlNetworkPlan:
+    def __init__(self, profile_name: str, data: dict[str, Any]):
+        self.profile_name = profile_name
+        self.vlan = data.get('vlan')
+        self.subnet = data.get('subnet')
+        self.pools = data.get('pools') or {}
+        self.require_explicit_subnet = bool(data.get('require_explicit_subnet', False))
+        self.assignment_enabled = data.get('assignment_enabled', True)
+        if self.assignment_enabled is None:
+            self.assignment_enabled = True
+        if not self.subnet:
+            if self.require_explicit_subnet:
+                raise RuntimeError(f'control network profile {profile_name} requires an approved subnet')
+            raise RuntimeError(f'control network profile {profile_name} has no subnet')
+        self.network = ipaddress.ip_network(str(self.subnet), strict=False)
+        if int(self.vlan) == 60:
+            raise RuntimeError('VLAN 60 is reserved for heartbeat/supervisory traffic and cannot be used for control assignment')
+        if not self.assignment_enabled:
+            raise RuntimeError(f'control network profile {profile_name} is not enabled for assignment')
+
+    def addresses_for(self, module_type: str) -> list[str]:
+        pool = self.pools.get(module_type)
+        if not pool:
+            raise RuntimeError(f'control network profile {self.profile_name} has no {module_type} pool')
+        start = ipaddress.ip_address(str(pool['start']))
+        end = ipaddress.ip_address(str(pool['end']))
+        if start.version != 4 or end.version != 4 or start > end:
+            raise RuntimeError(f'invalid {module_type} control pool in {self.profile_name}')
+        if start not in self.network or end not in self.network:
+            raise RuntimeError(f'{module_type} control pool is outside {self.profile_name} subnet')
+        if self.network.network_address in (start, end) or self.network.broadcast_address in (start, end):
+            raise RuntimeError(f'{module_type} control pool uses reserved subnet address')
+        return [str(ipaddress.ip_address(value)) for value in range(int(start), int(end) + 1)]
+
+def load_control_network_plan() -> ControlNetworkPlan:
+    path = Path(settings.config_root) / '01_HCM' / 'hcm.yaml'
+    if not path.exists():
+        raise RuntimeError(f'HCM control network configuration missing: {path}')
+    import yaml
+    data = yaml.safe_load(path.read_text()) or {}
+    control = (data.get('network') or {}).get('control') or {}
+    profile_name = control.get('active_profile')
+    profiles = control.get('profiles') or {}
+    if not profile_name:
+        raise RuntimeError('network.control.active_profile is required')
+    profile = profiles.get(profile_name)
+    if not profile:
+        raise RuntimeError(f'control network profile {profile_name} is not defined')
+    return ControlNetworkPlan(profile_name, profile)
 
 class ModuleConnection:
     def __init__(self, reader, writer):
         self.reader = reader; self.writer = writer
+        self.device_id: str | None = None
         self.module_uuid: str | None = None
+        self.connection_key: str | None = None
         self.hostname: str | None = None
         self.last_heartbeat = 0.0
         self.pending: dict[str, asyncio.Future] = {}
@@ -78,27 +127,47 @@ class ModuleRegistry:
 
     async def _assign(self, ident: dict[str, Any]) -> dict[str, Any]:
         typ = str(ident.get('module_type','')).upper()
-        if typ not in RANGES:
+        if typ not in MODULE_TYPES:
             raise ValueError(f'unsupported module type {typ}')
-        module_uuid = ident['module_uuid']
+        device_id = self._device_id_from_ident(ident)
+        module_uuid = ident.get('module_uuid')
+        if not device_id and not module_uuid:
+            raise ValueError('identify requires device_id or legacy module_uuid')
+        identity_label = device_id or module_uuid
         async with db.acquire() as conn:
-            row = await conn.fetchrow('SELECT hostname, ip_address FROM modules WHERE module_uuid=$1', module_uuid)
+            row = await conn.fetchrow('''
+                SELECT hostname, ip_address
+                FROM modules
+                WHERE ($1::text IS NOT NULL AND device_id=$1)
+                   OR ($2::text IS NOT NULL AND module_uuid::text=$2)
+            ''', device_id, module_uuid)
             if row:
                 return {'hostname': row['hostname'], 'ip_address': str(row['ip_address']), 'reboot_required': False}
             if not settings.commissioning_enabled:
-                raise PermissionError(f'commissioning disabled for unknown {typ} module {module_uuid}')
-            used = {int(str(r['ip_address']).split('.')[-1]) for r in await conn.fetch('SELECT ip_address FROM modules WHERE module_type=$1', typ)}
-            octet = next((n for n in RANGES[typ] if n not in used), None)
-            if octet is None:
+                raise PermissionError(f'commissioning disabled for unknown {typ} module {identity_label}')
+            plan = load_control_network_plan()
+            addresses = plan.addresses_for(typ)
+            used = {str(r['ip_address']) for r in await conn.fetch('SELECT ip_address FROM modules WHERE module_type=$1', typ)}
+            ip = next((candidate for candidate in addresses if candidate not in used), None)
+            if ip is None:
                 raise RuntimeError(f'no addresses left in {typ} pool')
-            seq = octet - RANGES[typ].start + 1
+            seq = addresses.index(ip) + 1
             hostname = f'{typ}{seq:02d}'
-            ip = f'192.168.60.{octet}'
             await conn.execute('''
-                INSERT INTO modules(module_uuid,module_type,hostname,ip_address,software_version,last_seen,online)
-                VALUES($1,$2,$3,$4,$5,now(),true)
-            ''', module_uuid, typ, hostname, ip, ident.get('software_version'))
+                INSERT INTO modules(device_id,module_uuid,module_type,hostname,ip_address,software_version,last_seen,online)
+                VALUES($1,$2,$3,$4,$5,$6,now(),true)
+            ''', device_id, module_uuid, typ, hostname, ip, ident.get('software_version'))
             return {'hostname': hostname, 'ip_address': ip, 'reboot_required': True}
+
+    def _device_id_from_ident(self, ident: dict[str, Any]) -> str | None:
+        raw = ident.get('device_id')
+        if raw:
+            return maybe_normalize_device_id(raw)
+        legacy = ident.get('module_uuid')
+        try:
+            return maybe_normalize_device_id(legacy)
+        except InvalidDeviceId:
+            return None
 
     async def _base_config(self, module_type: str) -> dict[str, Any]:
         path = Path(settings.config_root) / {
@@ -120,17 +189,24 @@ class ModuleRegistry:
             if settings.tls_enabled and settings.tls_require_client_cert and not writer.get_extra_info('peercert'):
                 raise protocol.ProtocolError('client certificate required')
             ident = first.get('payload', {})
-            conn.module_uuid = ident['module_uuid']
+            conn.device_id = self._device_id_from_ident(ident)
+            conn.module_uuid = ident.get('module_uuid')
+            conn.connection_key = conn.device_id or conn.module_uuid
             assignment = await self._assign(ident)
             conn.hostname = assignment['hostname']
-            self.connections[conn.module_uuid] = conn
+            self.connections[conn.connection_key] = conn
             if ident.get('hostname') != assignment['hostname'] or ident.get('assigned_ip') != assignment['ip_address']:
                 await conn.send('assignment', assignment)
             else:
                 await conn.send('config', await self._base_config(ident['module_type']))
 
             async with db.acquire() as dbc:
-                await dbc.execute('UPDATE modules SET online=true,last_seen=now(),software_version=$2 WHERE module_uuid=$1', conn.module_uuid, ident.get('software_version'))
+                await dbc.execute('''
+                    UPDATE modules
+                    SET online=true,last_seen=now(),software_version=$3
+                    WHERE ($1::text IS NOT NULL AND device_id=$1)
+                       OR ($2::text IS NOT NULL AND module_uuid::text=$2)
+                ''', conn.device_id, conn.module_uuid, ident.get('software_version'))
 
             while True:
                 msg = await protocol.read_frame(reader)
@@ -139,14 +215,22 @@ class ModuleRegistry:
                 if typ == 'heartbeat':
                     conn.last_heartbeat = time.time()
                     async with db.acquire() as dbc:
-                        await dbc.execute('''UPDATE modules SET online=true,last_seen=now(),last_state=$2::jsonb WHERE module_uuid=$1''', conn.module_uuid, json.dumps(payload))
+                        await dbc.execute('''
+                            UPDATE modules SET online=true,last_seen=now(),last_state=$3::jsonb
+                            WHERE ($1::text IS NOT NULL AND device_id=$1)
+                               OR ($2::text IS NOT NULL AND module_uuid::text=$2)
+                        ''', conn.device_id, conn.module_uuid, json.dumps(payload))
                     await conn.send('heartbeat_ack', {'ts': time.time()})
                 elif typ == 'state':
                     async with db.acquire() as dbc:
-                        await dbc.execute('''UPDATE modules SET last_state=$2::jsonb,last_seen=now() WHERE module_uuid=$1''', conn.module_uuid, json.dumps(payload))
+                        await dbc.execute('''
+                            UPDATE modules SET last_state=$3::jsonb,last_seen=now()
+                            WHERE ($1::text IS NOT NULL AND device_id=$1)
+                               OR ($2::text IS NOT NULL AND module_uuid::text=$2)
+                        ''', conn.device_id, conn.module_uuid, json.dumps(payload))
                 elif typ == 'fault':
                     async with db.acquire() as dbc:
-                        await dbc.execute('''INSERT INTO faults(module_uuid,code,severity,details) VALUES($1,$2,$3,$4::jsonb)''', conn.module_uuid, payload.get('code','unknown'), payload.get('severity','warning'), json.dumps(payload))
+                        await dbc.execute('''INSERT INTO faults(device_id,module_uuid,code,severity,details) VALUES($1,$2,$3,$4,$5::jsonb)''', conn.device_id, conn.module_uuid, payload.get('code','unknown'), payload.get('severity','warning'), json.dumps(payload))
                 elif typ == 'command_ack':
                     rid = msg.get('request_id')
                     fut = conn.pending.get(rid)
@@ -156,11 +240,15 @@ class ModuleRegistry:
         except Exception:
             log.exception('module connection error from %s', peer)
         finally:
-            if conn.module_uuid:
-                self.connections.pop(conn.module_uuid, None)
+            if conn.connection_key:
+                self.connections.pop(conn.connection_key, None)
                 try:
                     async with db.acquire() as dbc:
-                        await dbc.execute('UPDATE modules SET online=false WHERE module_uuid=$1', conn.module_uuid)
+                        await dbc.execute('''
+                            UPDATE modules SET online=false
+                            WHERE ($1::text IS NOT NULL AND device_id=$1)
+                               OR ($2::text IS NOT NULL AND module_uuid::text=$2)
+                        ''', conn.device_id, conn.module_uuid)
                 except Exception:
                     log.exception('failed marking module offline')
             writer.close()
@@ -169,9 +257,10 @@ class ModuleRegistry:
 
     async def command_by_hostname(self, hostname: str, payload: dict[str, Any], timeout: float = 10.0) -> dict[str, Any]:
         async with db.acquire() as conn:
-            row = await conn.fetchrow('SELECT module_uuid FROM modules WHERE hostname=$1', hostname)
+            row = await conn.fetchrow('SELECT device_id, module_uuid::text AS module_uuid FROM modules WHERE hostname=$1', hostname)
         if not row: raise KeyError(hostname)
-        mc = self.connections.get(str(row['module_uuid']))
+        key = row['device_id'] or str(row['module_uuid'])
+        mc = self.connections.get(key)
         if not mc: raise ConnectionError(f'{hostname} offline')
         return await mc.command(payload, timeout=timeout)
 

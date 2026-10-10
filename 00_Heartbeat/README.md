@@ -61,18 +61,27 @@ sudo hcm-heartbeat show
 ```
 To test dropped response: stop Conflict's v3 service for >=20s, then check Jetson status and restart it. `systemctl` automatically restarts on crashes, not deliberately stopped services.
 
-## Future VLAN 60
+## VLAN 60 Heartbeat Network
 
-On Conflict change `bind_address` and `advertise_ip` to `192.168.60.2`, change `identity_interface` to `eth0` when installed, and give `eth0.60` address `192.168.60.2/24` with proper routing/VLAN tagging. On devices change `conflict_address` to `192.168.60.2`. Their `advertise_ip` should be their actual heartbeat source IP. Restart after configuration changes. Do NOT change Conflict bind address before VLAN 60 is operational.
+VLAN 60 is permanently reserved for heartbeat/supervisory traffic. On Conflict,
+change `bind_address` and `advertise_ip` to `192.168.60.2`, change
+`identity_interface` to `eth0` when installed, and give `eth0.60` address
+`192.168.60.2/24` with proper routing/VLAN tagging. On devices change
+`conflict_address` to `192.168.60.2`. Their `advertise_ip` should be their
+actual heartbeat source IP. Restart after configuration changes. Do NOT change
+Conflict bind address before VLAN 60 is operational.
+
+VLAN 20 remains the current development/control network. VLAN 40 is the future
+production control network, but its subnet is not approved yet.
 
 ## Configuration
 
 - `services`: monitored systemd unit names (only services genuinely installed on the system).
 - `watchdogs`: object `{ "sensors": 10 }` means device must receive a `hcm-heartbeat pulse sensors` at least every 10 s. Configure and restart daemon before registering the actual sender.
-- `allowed_device_ids`: MAC allowlist on Conflict. Empty list permits any sender (not recommended on shared networks).
-- `conflict_device_id`: optional expected Conflict MAC for devices; fill it once physical interface ID is finalized.
+- `allowed_device_ids`: device ID allowlist on Conflict. Target format is the normalized designated-interface MAC address, lowercase with colons removed. Empty list permits any sender, which is not recommended on shared networks.
+- `conflict_device_id`: optional expected Conflict device ID for devices; fill it once physical interface ID is finalized.
 - `maintenance_lockout`: boolean status only; does not suppress critical faults or disable life-safety logic.
-- `identity_interface`: physical device interface read from `/sys/class/net/.../address`. It need not carry the heartbeat packets.
+- `identity_interface`: physical device interface read from `/sys/class/net/.../address`. It need not carry the heartbeat packets. Target device IDs are normalized to 12 lowercase hexadecimal characters without colons.
 
 ### Security / safety
 

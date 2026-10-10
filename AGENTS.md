@@ -12,19 +12,25 @@ architecture unless a change is explicitly approved.
 - User automations and UI logic use logical device names, not hardware addresses.
 - RCM, LCM, SIM, and PNL devices communicate with HCM over persistent TLS-protected TCP.
 - Do not create direct app-to-module control paths.
-- VLAN 60 modules must not require normal Internet access.
+- VLAN 20 is the current HCM development/control network; do not migrate running devices yet.
+- VLAN 40 is reserved for the future production HCM control network; do not invent a subnet.
+- VLAN 60 is permanently reserved for heartbeat and supervisory traffic on TCP 6004.
+- VLAN 140 is not applicable to this HCM installation.
 - Life-safety behavior must remain separated from convenience automation.
-- Maintenance Lock has higher output priority than Life Safety.
+- Maintenance Lockout has higher output priority than Fire/Life Safety.
 - Do not silently change hardware pinouts, network ranges, relay numbering, fail states,
   or HVAC timing.
 
-## Pinned network ranges
+## Pinned network decisions
 
-- HCM: 192.168.60.1
-- RCM: 192.168.60.20-29
-- LCM: 192.168.60.30-39
-- SIM: 192.168.60.40-49
-- PNL: 192.168.60.50+
+- Current development/control VLAN: 20
+- Future production/control VLAN: 40, subnet not yet approved
+- Heartbeat/supervisory VLAN: 60
+- Conflict Manager heartbeat address: 192.168.60.2 on eth0.60
+- Heartbeat TCP port: 6004
+- Unified Heartbeat V3 in `00_Heartbeat/` is the standard implementation
+- Device IDs are normalized MAC addresses from the designated physical interface:
+  lowercase, colons removed, exactly 12 hexadecimal characters
 
 ## Pinned relay naming
 

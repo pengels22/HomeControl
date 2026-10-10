@@ -7,12 +7,19 @@ case "${1:-}" in
  *) echo 'Usage: sudo ./install.sh jetson|conflict' >&2; exit 1 ;;
 esac
 cd "$(dirname "$0")"
+if [ ! -f ../homecontrol_identity.py ]; then
+    echo 'Missing ../homecontrol_identity.py; run installer from a complete HomeControl checkout.' >&2
+    exit 1
+fi
 python3 - <<'PY'
 import ast
-ast.parse(open('hcm_heartbeat.py').read())
+for path in ('hcm_heartbeat.py', '../homecontrol_identity.py'):
+    with open(path) as f:
+        ast.parse(f.read(), filename=path)
 PY
 mkdir -p /usr/local/lib/hcm-heartbeat /etc/hcm-heartbeat
 install -m 755 hcm_heartbeat.py /usr/local/lib/hcm-heartbeat/hcm_heartbeat.py
+install -m 644 ../homecontrol_identity.py /usr/local/lib/hcm-heartbeat/homecontrol_identity.py
 install -m 755 hcm-heartbeat /usr/local/bin/hcm-heartbeat
 if [ -e /etc/hcm-heartbeat/config.json ]; then
     echo 'Existing v3 config preserved; check new template manually.'

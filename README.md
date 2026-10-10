@@ -23,21 +23,25 @@ HCM is the central controller. It owns device management, PostgreSQL, the rules 
 authentication, fault management, updates, backups, web UI, Zigbee2MQTT integration,
 media control, wall-panel management, and life-safety orchestration.
 
-### HCM control network
+### HCM networks
 
-- VLAN 60: `192.168.60.0/24`
-- HCM/router: `192.168.60.1`
-- RCM: `192.168.60.20-29`
-- LCM: `192.168.60.30-39`
-- SIM: `192.168.60.40-49`
-- PNL: `192.168.60.50+`
-- Switch port 1: OPI6 NIC 1, `U1,T20`
-- Switch port 2: OPI6 NIC 2, `U60`
-- Switch ports 3-16: HCM modules, `U60`
+- VLAN 20: current HCM development/control network. Do not migrate existing
+  running devices yet.
+- VLAN 40: future dedicated production HCM control network. The subnet and
+  module pools are not approved yet.
+- VLAN 60: permanent heartbeat/supervisory network only, using Unified
+  Heartbeat V3 on TCP 6004.
+- Conflict Manager heartbeat address: `192.168.60.2` on `eth0.60`.
+- VLAN 140: not applicable to this HCM installation.
 
-Modules self-identify by type on first boot. HCM assigns the next hostname/IP in the
-correct pool, the module reboots with its permanent identity, and HCM pushes the base
-configuration for that module type.
+Modules self-identify using the normalized MAC address of the designated
+physical network interface: lowercase, colons removed, 12 hexadecimal
+characters. Human-readable hostnames and logical device names remain separate.
+HCM assigns hostnames and approved control-network addressing, records the
+assignment, and pushes the base configuration for that module type.
+Control-network assignment is configured in `06_config/01_HCM/hcm.yaml`;
+VLAN 20 is the active development/control profile, VLAN 40 is disabled until an
+approved subnet is supplied, and VLAN 60 is not valid for module-control pools.
 
 ### Module communication
 
@@ -56,9 +60,9 @@ configuration for that module type.
   2. Life Safety
   3. Local Override
   4. HCM Rules/User Commands
-- VLAN 60 has no normal Internet access.
+- VLAN 60 carries heartbeat/supervisory traffic only and has no normal Internet access.
 - During updates, HCM temporarily opens egress only for the module being updated.
-- HCM provides NTP to VLAN 60.
+- HCM control-network NTP is provided on the approved control network, not VLAN 60.
 - Local-first and no-code administration are design goals.
 
 ## Current implementation status
@@ -98,14 +102,16 @@ stored in the iOS app.
 ### 01_HCM
 
 Central HCM software for the Orange Pi 6. Responsibilities include device
-commissioning and management, DHCP and hostname assignment for VLAN 60, NTP,
+commissioning and management, DHCP and hostname assignment for the approved HCM
+control network, NTP,
 the rules engine, authentication, fault management, update orchestration,
 PostgreSQL integration, web UI, Zigbee2MQTT integration, media control,
 wall-panel management, life-safety orchestration, HVAC thermostat and zoning
 logic, and the iOS app API.
 
-- NIC 1: VLAN 1 untagged and VLAN 20 tagged
-- NIC 2: VLAN 60 at `192.168.60.1`
+- Current development/control network: VLAN 20
+- Future production/control network: VLAN 40, subnet not yet approved
+- Heartbeat/supervisory network: VLAN 60, Conflict Manager at `192.168.60.2`
 
 ### 02_SIM
 

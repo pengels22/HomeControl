@@ -2,10 +2,26 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS modules (
     id BIGSERIAL PRIMARY KEY,
-    module_uuid UUID UNIQUE NOT NULL,
+    device_id TEXT UNIQUE CHECK (
+        device_id IS NULL OR (
+            device_id ~ '^[0-9a-f]{12}$'
+            AND device_id <> '000000000000'
+            AND device_id <> 'ffffffffffff'
+            AND device_id !~ '^[0-9a-f][13579bdf]'
+        )
+    ),
+    identity_interface TEXT,
+    module_uuid UUID UNIQUE,
     module_type TEXT NOT NULL CHECK (module_type IN ('RCM','LCM','SIM','PNL')),
     hostname TEXT UNIQUE NOT NULL,
     ip_address INET UNIQUE NOT NULL,
+    heartbeat_ip INET,
+    control_session_online BOOLEAN NOT NULL DEFAULT FALSE,
+    supervision_state TEXT NOT NULL DEFAULT 'unknown'
+        CHECK (supervision_state IN ('unknown','online','degraded','fault','offline','stale','unavailable')),
+    supervision_last_seen TIMESTAMPTZ,
+    supervision_fresh_until TIMESTAMPTZ,
+    last_health JSONB NOT NULL DEFAULT '{}'::jsonb,
     hardware_revision TEXT,
     software_version TEXT,
     config_version INTEGER NOT NULL DEFAULT 0,
@@ -74,6 +90,14 @@ CREATE TABLE IF NOT EXISTS room_hvac (
 
 CREATE TABLE IF NOT EXISTS faults (
     id BIGSERIAL PRIMARY KEY,
+    device_id TEXT CHECK (
+        device_id IS NULL OR (
+            device_id ~ '^[0-9a-f]{12}$'
+            AND device_id <> '000000000000'
+            AND device_id <> 'ffffffffffff'
+            AND device_id !~ '^[0-9a-f][13579bdf]'
+        )
+    ),
     module_uuid UUID,
     logical_device_id BIGINT REFERENCES logical_devices(id),
     code TEXT NOT NULL,
@@ -160,7 +184,9 @@ CREATE TABLE IF NOT EXISTS safety_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_modules_online ON modules(online);
+CREATE INDEX IF NOT EXISTS idx_modules_device_id ON modules(device_id) WHERE device_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_faults_active ON faults(active, severity);
+CREATE INDEX IF NOT EXISTS idx_faults_device_id ON faults(device_id) WHERE device_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_output_intents_active ON output_intents(logical_device_id, active, source);
 CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token_hash) WHERE revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_auth_challenges_challenge ON auth_challenges(challenge) WHERE consumed_at IS NULL;

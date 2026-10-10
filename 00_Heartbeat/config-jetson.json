@@ -4,6 +4,7 @@
   "advertise_ip": "192.168.20.27",
   "port": 6004,
   "identity_interface": "eth0",
+  "registry_db": "/var/lib/hcm-heartbeat/registry.sqlite3",
   "conflict_address": "192.168.20.26",
   "conflict_hostname": "conflict",
   "interval_seconds": 5,

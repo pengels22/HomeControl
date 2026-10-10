@@ -157,16 +157,21 @@ From the HCM repo checkout, copy a config folder to a device and run its
 installer:
 
 ```bash
-10_scripts/provision_device_config.sh RCM orangepi@192.168.60.20
-10_scripts/provision_device_config.sh LCM orangepi@192.168.60.30
-10_scripts/provision_device_config.sh SIM orangepi@192.168.60.40
-10_scripts/provision_device_config.sh PNL orangepi@192.168.60.50
+10_scripts/provision_device_config.sh RCM orangepi@<rcm-vlan20-address>
+10_scripts/provision_device_config.sh LCM orangepi@<lcm-vlan20-address>
+10_scripts/provision_device_config.sh SIM orangepi@<sim-vlan20-address>
+10_scripts/provision_device_config.sh PNL orangepi@<pnl-vlan20-address>
 ```
 
 The helper copies `06_config/common` and the selected device config folder to
 the remote device, then runs that folder's `install.sh`. If a Linux module
 folder is copied by itself, its `install.sh` can still bootstrap by cloning or
 pulling the repo into `/opt/HomeControl` first.
+
+VLAN 20 is the current development/control network. VLAN 40 is the future
+production control network, but its subnet and module addresses are not approved
+yet. VLAN 60 is reserved for Unified Heartbeat V3 supervisory traffic and must
+not be used for provisioning or normal module control.
 
 ## RMC
 

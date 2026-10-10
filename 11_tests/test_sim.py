@@ -1,9 +1,14 @@
 from importlib import import_module
+import json
+import shutil
+import tempfile
+from pathlib import Path
 
 import pytest
 
 sim = import_module('02_SIM.main')
 common_can = import_module('07_servises.common.can')
+common_agent = import_module('07_servises.common.agent')
 
 
 def test_sim_builds_three_can_interfaces_from_config():
@@ -20,6 +25,40 @@ def test_sim_builds_three_can_interfaces_from_config():
     assert list(state) == ['can0', 'can1', 'can2']
     assert state['can0']['label'] == 'CAN A'
     assert state['can2']['bitrate'] == 125000
+
+
+@pytest.mark.asyncio
+async def test_module_agent_reports_to_local_heartbeat_v3_socket(tmp_path):
+    received = []
+    short_dir = Path(tempfile.mkdtemp(prefix='hcm-', dir='/tmp'))
+    sock = short_dir / 'hb.sock'
+
+    async def handle(reader, writer):
+        received.append(json.loads((await reader.readline()).decode('utf-8')))
+        writer.write(b'{"ok": true}\\n')
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    server = await sim.asyncio.start_unix_server(handle, path=str(sock))
+    try:
+        agent = common_agent.ModuleAgent('SIM', {
+            'identity_path': str(tmp_path / 'identity.json'),
+            'heartbeat_v3': {'socket_path': str(sock), 'watchdog_name': 'sim_app'},
+        })
+        await agent.heartbeat_status('sim_app', 'running')
+        await agent.heartbeat_fault('sim_fault', 'offline')
+        await agent.heartbeat_pulse()
+    finally:
+        server.close()
+        await server.wait_closed()
+        shutil.rmtree(str(short_dir), ignore_errors=True)
+
+    assert received == [
+        {'action': 'status_set', 'name': 'sim_app', 'value': 'running'},
+        {'action': 'fault_set', 'name': 'sim_fault', 'value': 'offline'},
+        {'action': 'pulse', 'name': 'sim_app'},
+    ]
 
 
 def test_sim_can_setup_plan_loads_gs_usb_for_hexa_board():
