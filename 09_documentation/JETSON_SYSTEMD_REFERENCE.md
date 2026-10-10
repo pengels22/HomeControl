@@ -1,5 +1,10 @@
 # Jetson systemd service inventory (verified 2026-10-10)
 
+## Additional installed monitor (2026-10-10)
+
+The Jetson now also runs enabled `hcm-watchdog.timer`, invoking `hcm-watchdog.service` approximately every 30 seconds. The service runs `/usr/local/sbin/hcm-watchdog` (source: `10_scripts/hcm-watchdog.py`), checks HTTP directly at HCM's dynamic Docker control-network address, requires three failed checks before HCM-only restart and records at most three restart attempts per 15-minute sliding window. One controlled `docker kill hcm-test` was successfully recovered, including return-route refresh, without stopping PostgreSQL or Heartbeat V3. See [watchdog runbook](JETSON_HCM_WATCHDOG_2026-10-10.md). The 3-in-15-minute limit and alerts have not been tested/delivered.
+
+
 This is a configuration inventory, not an automated installer. See [the full deployment runbook](JETSON_HCM_DEPLOYMENT_2026-10-10.md).
 
 | Unit | Responsibility | Boot status |
