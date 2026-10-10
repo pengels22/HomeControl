@@ -1,5 +1,12 @@
 # HomeControl
 
+## Current live network and Phase 4 handoff (2026-10-10)
+
+**Verified live deployment overrides legacy networking snapshots further down this README:** Jetson Ethernet 192.168.20.27 (metric 100), Wi-Fi 192.168.20.25 (metric 300 saved; runtime 600 pending reconnect); Conflict USB Ethernet 192.168.20.26 (metric 100), Wi-Fi 192.168.20.24 (metric 300 configured). All four addresses use VLAN 20 DHCP reservations; Ethernet is the intended primary path. Jetson and Conflict heartbeat V3 exchange status over Ethernet/TCP 6004. Jetson HCM at http://192.168.20.27:8080 returned HTTP 200; HCM, Postgres, heartbeat and watchdog timer were active after the network change and a Jetson reboot. The obsolete Wi-Fi return-route policy rule 1100, hcm-routing.service prerequisite and HCM ExecStartPost routing hook are removed/disabled; do **not** restore them. Wi-Fi source rule 1000/table 200 remains.
+
+The VLAN 40/60 addresses listed below are **design targets only**, not live addresses. For Phase 4 read [the mandatory Codex implementation contract](09_documentation/PHASE4_CODEX_IMPLEMENTATION_2026-10-10.md) and the [updated live deployment runbook](09_documentation/JETSON_HCM_DEPLOYMENT_2026-10-10.md). Do not reapply legacy deployment examples.
+
+
 ### Verified HCM application crash recovery (2026-10-10)
 
 A Python 3.6 systemd-timer watchdog now checks the live HCM container through its Docker bridge every ~30 seconds. In a controlled `docker kill hcm-test` test, it detected three consecutive failed HTTP checks, restarted HCM, restored policy routing, and left PostgreSQL and Heartbeat V3 active. The 3-restarts/15-minute suppression and alerts remain **untested/not delivered**. See [watchdog runbook](09_documentation/JETSON_HCM_WATCHDOG_2026-10-10.md) and [versioned script](10_scripts/hcm-watchdog.py).
