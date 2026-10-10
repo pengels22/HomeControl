@@ -1,5 +1,10 @@
 # First-pass code status
 
+## Subsequent live Jetson milestone (2026-10-10)
+
+This file describes the initial code milestone. Since then, the HCM dashboard, PostgreSQL schema, login/session flow, HCM Docker networks and four systemd service boot sequence were tested on an actual Jetson Xavier NX. The system recovered successfully after a full host reboot. See [runbook](JETSON_HCM_DEPLOYMENT_2026-10-10.md) for evidence and pending hardening. Live physical module GPIO/CAN, safety relays, production TLS and crash recovery are *not* implied by a working dashboard.
+
+
 This repository now contains runnable scaffolding rather than documentation-only placeholders.
 
 Implemented in this pass:
