@@ -1,5 +1,12 @@
 # Jetson Xavier NX HCM Deployment Runbook
 
+## Post-reboot HCM watchdog milestone — 2026-10-10
+
+The initial deployment snapshot below predated the watchdog. HCM application liveness monitoring and automatic HCM-only restart are **now installed and successfully tested** on this Jetson. Three successive failed HTTP checks after a controlled `docker kill hcm-test` led to `systemctl restart hcm.service`, routing restoration and a healthy follow-up check; PostgreSQL and Heartbeat V3 remained active. The watchdog code, systemd service/timer, installation steps and untested limitations are documented in [HCM watchdog runbook](JETSON_HCM_WATCHDOG_2026-10-10.md).
+
+Older statements below that “continuous HCM health supervision is not implemented” describe the earlier reboot milestone and are superseded as of this dated update. PostgreSQL health supervision, USB recovery, durable backup/restore, HTTPS and alerts remain open.
+
+
 **Verified:** 2026-10-10 on the Jetson Xavier NX development host. This documents an **existing working test deployment**, not a production-grade or turnkey installer. Commands below are for inspection/recovery unless explicitly marked as commissioning examples. Do not copy live credentials into Git.
 
 ## Proven status and scope
