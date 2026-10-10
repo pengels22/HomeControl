@@ -10,3 +10,7 @@ Items intentionally deferred:
 - final per-circuit fuse sizing
 - final build drawings / conduit schedules / terminal schedules
 - final manufacturer BOM quantities and revision control
+
+## Jetson deployment follow-up (2026-10-10)
+
+The initial Jetson Docker/PostgreSQL/Heartbeat deployment and reboot validation are complete; refer to [the deployment runbook](JETSON_HCM_DEPLOYMENT_2026-10-10.md). Remaining: continuous crash recovery, secure admin credentials and HTTPS, USB backup and restore testing, stable authorized-client routing, and hardware safety commissioning. The existing dashboard does not establish production readiness.
