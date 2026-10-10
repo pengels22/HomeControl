@@ -1,5 +1,10 @@
 # HCM Implementation Status
 
+## 2026-10-10 live deployment addendum
+
+This older matrix primarily describes repository-level verification. Subsequent operator testing confirmed **real** PostgreSQL schema and password/session login, the HCM FastAPI dashboard in Docker on Jetson Xavier NX, and successful automatic boot of the HCM, routing, PostgreSQL and independent Heartbeat V3 services after a full Jetson reboot. The USB data volume remained mounted and the dashboard loaded. Authentication SQL interval binding and web login visibility were corrected in the committed source. See [deployment runbook](../JETSON_HCM_DEPLOYMENT_2026-10-10.md) and [dated status](../JETSON_2026-10-10_STATUS.md). The statements below describing database connectivity, Jetson runtime, or systemd as unverified are superseded **for this specific development deployment only**. Physical GPIO, real safety paths, TLS, continuous crash recovery and backup/restore remain unverified.
+
+
 This status reflects repository review, not hardware validation.
 
 ## Status Key
