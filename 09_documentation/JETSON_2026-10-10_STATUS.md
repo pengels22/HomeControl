@@ -1,5 +1,12 @@
 # Jetson HCM verified deployment status — 2026-10-10
 
+## Watchdog validation update (2026-10-10, 11:45 EDT)
+
+The watchdog was installed on Jetson with a timer every approximately 30 seconds. Following a deliberately killed HCM container, three consecutive failed direct-container HTTP checks triggered an HCM-only systemd restart, which succeeded and restored the Wi-Fi return route. The post-restart watchdog health check returned HEALTHY, the failure counter returned to zero, and PostgreSQL and Heartbeat V3 were active. See [watchdog runbook](JETSON_HCM_WATCHDOG_2026-10-10.md).
+
+The original “continuous HCM health monitoring not implemented” statement below was correct at the earlier reboot milestone but is now **superseded for the HCM application**. The restart limit is coded but untested; delivery of alerts and DB/USB fault recovery are still pending.
+
+
 See [full deployment runbook](JETSON_HCM_DEPLOYMENT_2026-10-10.md).
 
 ## Validated
