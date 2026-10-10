@@ -150,6 +150,13 @@ class FakeRegistryConn:
         return None
 
 
+LAB1_CERT = {
+    'subjectAltName': (
+        ('URI', 'urn:homecontrol:device:2ccf675d3414'),
+    )
+}
+
+
 class BlockingRegistryConn(FakeRegistryConn):
     def __init__(self):
         super().__init__()
@@ -473,6 +480,101 @@ def test_mutual_tls_requires_ca(monkeypatch):
         reg._ssl_context()
 
 
+def test_module_listener_rejects_published_insecure_configuration(monkeypatch):
+    monkeypatch.setattr(registry_mod.settings, 'allow_insecure_module_listener', False)
+    monkeypatch.setattr(registry_mod.settings, 'tls_enabled', False)
+    reg = registry_mod.ModuleRegistry()
+
+    with pytest.raises(RuntimeError, match='requires TLS'):
+        reg._validate_module_listener_security()
+
+
+def test_module_listener_allows_explicit_local_insecure_configuration(monkeypatch):
+    monkeypatch.setattr(registry_mod.settings, 'allow_insecure_module_listener', True)
+    monkeypatch.setattr(registry_mod.settings, 'tls_enabled', False)
+    reg = registry_mod.ModuleRegistry()
+
+    reg._validate_module_listener_security()
+
+
+def test_module_listener_requires_certificate_identity_in_secure_mode(monkeypatch):
+    monkeypatch.setattr(registry_mod.settings, 'allow_insecure_module_listener', False)
+    monkeypatch.setattr(registry_mod.settings, 'tls_enabled', True)
+    monkeypatch.setattr(registry_mod.settings, 'tls_require_client_cert', True)
+    monkeypatch.setattr(registry_mod.settings, 'module_cert_identity_required', False)
+    reg = registry_mod.ModuleRegistry()
+
+    with pytest.raises(RuntimeError, match='device identity'):
+        reg._validate_module_listener_security()
+
+
+@pytest.mark.asyncio
+async def test_lab1_commissioning_preserves_hostname_and_ip(monkeypatch):
+    conn = FakeRegistryConn()
+    monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
+    monkeypatch.setattr(registry_mod.settings, 'commissioning_enabled', True)
+    reg = registry_mod.ModuleRegistry()
+
+    assignment = await reg._assign({
+        'module_type': 'LCM',
+        'device_id': '2c:cf:67:5d:34:14',
+        'hostname': 'LAB1-old',
+        'assigned_ip': '192.168.20.99',
+        'software_version': 'lab',
+    })
+
+    assert assignment == {
+        'hostname': 'lab1',
+        'ip_address': '192.168.20.36',
+        'reboot_required': False,
+    }
+    module = conn._find('2ccf675d3414', None)
+    assert module['hostname'] == 'lab1'
+    assert module['ip_address'] == '192.168.20.36'
+    assert module['module_type'] == 'LCM'
+
+
+@pytest.mark.asyncio
+async def test_lab1_rejects_unassigned_as_physical_module_role(monkeypatch):
+    conn = FakeRegistryConn()
+    monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
+    reg = registry_mod.ModuleRegistry()
+
+    with pytest.raises(ValueError, match='unsupported module type'):
+        await reg._assign({
+            'module_type': 'UNASSIGNED',
+            'device_id': '2ccf675d3414',
+        })
+
+
+@pytest.mark.asyncio
+async def test_lab1_rejects_roles_outside_simulator_allowlist(monkeypatch):
+    conn = FakeRegistryConn()
+    monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
+    reg = registry_mod.ModuleRegistry()
+
+    with pytest.raises(ValueError, match='LAB1 does not support'):
+        await reg._assign({
+            'module_type': 'PNL',
+            'device_id': '2ccf675d3414',
+        })
+
+
+@pytest.mark.asyncio
+async def test_regular_lcm_assignment_skips_lab1_reserved_ip(monkeypatch):
+    conn = FakeRegistryConn()
+    monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
+    monkeypatch.setattr(registry_mod.settings, 'commissioning_enabled', True)
+    reg = registry_mod.ModuleRegistry()
+
+    assignments = [
+        await reg._assign({'module_type': 'LCM', 'device_id': f'48b02d87db1{i}'})
+        for i in range(7)
+    ]
+
+    assert '192.168.20.36' not in {item['ip_address'] for item in assignments}
+
+
 @pytest.mark.asyncio
 async def test_registered_module_receives_config_and_heartbeat_ack(monkeypatch):
     conn = FakeRegistryConn()
@@ -519,3 +621,91 @@ async def test_registered_module_receives_config_and_heartbeat_ack(monkeypatch):
     assert reply == {'type': 'config', 'payload': {'version': 7, 'config': {'module_type': 'RCM'}}}
     assert ack['type'] == 'heartbeat_ack'
     assert conn.modules['rcm-a']['last_state'] == '{"module_uuid": "rcm-a", "state": {"relays": {}}}'
+
+
+@pytest.mark.asyncio
+async def test_registration_handler_accepts_matching_client_certificate(monkeypatch):
+    conn = FakeRegistryConn()
+    monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
+    monkeypatch.setattr(registry_mod.settings, 'tls_enabled', True)
+    monkeypatch.setattr(registry_mod.settings, 'tls_require_client_cert', True)
+    monkeypatch.setattr(registry_mod.settings, 'module_cert_identity_required', True)
+    reg = registry_mod.ModuleRegistry()
+
+    async def base_config(module_type):
+        return {'version': 1, 'config': {'module_type': module_type}}
+
+    original_get_extra_info = asyncio.StreamWriter.get_extra_info
+
+    def get_extra_info(self, name, default=None):
+        if name == 'peercert':
+            return LAB1_CERT
+        return original_get_extra_info(self, name, default)
+
+    monkeypatch.setattr(asyncio.StreamWriter, 'get_extra_info', get_extra_info)
+    monkeypatch.setattr(reg, '_base_config', base_config)
+    server = await asyncio.start_server(reg.handle_client, '127.0.0.1', 0)
+    port = server.sockets[0].getsockname()[1]
+
+    reader, writer = await asyncio.open_connection('127.0.0.1', port)
+    await protocol.write_frame(writer, {
+        'type': 'identify',
+        'payload': {
+            'module_type': 'LCM',
+            'device_id': '2c:cf:67:5d:34:14',
+            'hostname': 'LAB1-stale',
+            'assigned_ip': '192.168.20.99',
+            'software_version': 'lab',
+        },
+    })
+    reply = await protocol.read_frame(reader)
+
+    writer.close()
+    await writer.wait_closed()
+    server.close()
+    await server.wait_closed()
+
+    assert reply == {'type': 'config', 'payload': {'version': 1, 'config': {'module_type': 'LCM'}}}
+    assert conn._find('2ccf675d3414', None)['hostname'] == 'lab1'
+
+
+@pytest.mark.asyncio
+async def test_registration_handler_rejects_certificate_impersonation_before_db_write(monkeypatch):
+    conn = FakeRegistryConn()
+    monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
+    monkeypatch.setattr(registry_mod.settings, 'tls_enabled', True)
+    monkeypatch.setattr(registry_mod.settings, 'tls_require_client_cert', True)
+    monkeypatch.setattr(registry_mod.settings, 'module_cert_identity_required', True)
+    reg = registry_mod.ModuleRegistry()
+
+    original_get_extra_info = asyncio.StreamWriter.get_extra_info
+
+    def get_extra_info(self, name, default=None):
+        if name == 'peercert':
+            return LAB1_CERT
+        return original_get_extra_info(self, name, default)
+
+    monkeypatch.setattr(asyncio.StreamWriter, 'get_extra_info', get_extra_info)
+    server = await asyncio.start_server(reg.handle_client, '127.0.0.1', 0)
+    port = server.sockets[0].getsockname()[1]
+
+    reader, writer = await asyncio.open_connection('127.0.0.1', port)
+    await protocol.write_frame(writer, {
+        'type': 'identify',
+        'payload': {
+            'module_type': 'LCM',
+            'device_id': '48:b0:2d:87:db:16',
+            'hostname': 'LCM01',
+            'assigned_ip': '192.168.20.30',
+        },
+    })
+
+    with pytest.raises(asyncio.IncompleteReadError):
+        await protocol.read_frame(reader)
+    writer.close()
+    await writer.wait_closed()
+    server.close()
+    await server.wait_closed()
+
+    assert conn.executed == []
+    assert conn.modules == {}

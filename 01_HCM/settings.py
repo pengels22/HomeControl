@@ -23,7 +23,12 @@ class Settings(BaseSettings):
     tls_key: str | None = None
     tls_ca: str | None = None
     tls_require_client_cert: bool = hcm_globals.HCM_TLS_Require_Client_Cert
+    module_cert_identity_required: bool = True
+    allow_insecure_module_listener: bool = False
     commissioning_enabled: bool = hcm_globals.Commissioning_Enabled
+    lab1_device_id: str = '2ccf675d3414'
+    lab1_hostname: str = 'lab1'
+    lab1_ip_address: str = '192.168.20.36'
     auth_rp_id: str = 'homecontrol.local'
     auth_challenge_ttl_s: int = ms_to_s(hcm_globals.Auth_Challenge_TTL)
     auth_session_ttl_s: int = ms_to_s(hcm_globals.Auth_Session_TTL)

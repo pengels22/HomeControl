@@ -3,6 +3,7 @@ import asyncio
 import ipaddress
 import json
 import logging
+import re
 import ssl
 import time
 import uuid
@@ -18,6 +19,8 @@ protocol = import_module('07_servises.common.protocol')
 log = logging.getLogger(__name__)
 
 MODULE_TYPES = ('RCM', 'LCM', 'SIM', 'PNL')
+LAB1_SIMULATED_MODULE_TYPES = {'RCM', 'SIM', 'LCM'}
+DEVICE_URI_PREFIX = 'urn:homecontrol:device:'
 
 
 @asynccontextmanager
@@ -111,6 +114,7 @@ class ModuleRegistry:
         self.server: asyncio.AbstractServer | None = None
 
     async def start(self):
+        self._validate_module_listener_security()
         self.server = await asyncio.start_server(
             self.handle_client,
             settings.module_host,
@@ -134,6 +138,23 @@ class ModuleRegistry:
         if settings.tls_require_client_cert:
             ctx.verify_mode = ssl.CERT_REQUIRED
         return ctx
+
+    def _certificate_identity_enforced(self) -> bool:
+        return bool(
+            settings.tls_enabled
+            and settings.tls_require_client_cert
+            and settings.module_cert_identity_required
+        )
+
+    def _validate_module_listener_security(self) -> None:
+        if settings.allow_insecure_module_listener:
+            return
+        if not settings.tls_enabled:
+            raise RuntimeError('HCM module listener requires TLS unless HCM_ALLOW_INSECURE_MODULE_LISTENER is enabled')
+        if not settings.tls_require_client_cert:
+            raise RuntimeError('HCM module listener requires client certificates')
+        if not settings.module_cert_identity_required:
+            raise RuntimeError('HCM module listener requires client certificate device identity enforcement')
 
     async def stop(self):
         if self.server:
@@ -219,6 +240,10 @@ class ModuleRegistry:
         if not device_id and not module_uuid:
             raise ValueError('identify requires device_id or legacy module_uuid')
         identity_label = device_id or module_uuid
+        lab1_device_id = maybe_normalize_device_id(settings.lab1_device_id)
+        is_lab1 = device_id == lab1_device_id
+        if is_lab1 and typ not in LAB1_SIMULATED_MODULE_TYPES:
+            raise ValueError(f'LAB1 does not support simulated role {typ}')
         async with db.acquire() as conn:
             async with _transaction(conn):
                 rows = await conn.fetch('''
@@ -252,9 +277,31 @@ class ModuleRegistry:
                     return {'hostname': row['hostname'], 'ip_address': str(row['ip_address']), 'reboot_required': False}
                 if not settings.commissioning_enabled:
                     raise PermissionError(f'commissioning disabled for unknown {typ} module {identity_label}')
+                if is_lab1:
+                    await conn.execute('''
+                        INSERT INTO modules(
+                            device_id,module_uuid,identity_interface,module_type,hostname,
+                            ip_address,software_version,last_seen,online,control_session_online
+                        )
+                        VALUES($1,$2,$3,$4,$5,$6,$7,now(),true,true)
+                    ''',
+                        device_id,
+                        module_uuid,
+                        ident.get('identity_interface') or (ident.get('identity') or {}).get('interface'),
+                        typ,
+                        settings.lab1_hostname,
+                        settings.lab1_ip_address,
+                        ident.get('software_version'),
+                    )
+                    return {
+                        'hostname': settings.lab1_hostname,
+                        'ip_address': settings.lab1_ip_address,
+                        'reboot_required': False,
+                    }
                 plan = load_control_network_plan()
                 addresses = plan.addresses_for(typ)
                 used = {str(r['ip_address']) for r in await conn.fetch('SELECT ip_address FROM modules WHERE module_type=$1', typ)}
+                used.add(settings.lab1_ip_address)
                 ip = next((candidate for candidate in addresses if candidate not in used), None)
                 if ip is None:
                     raise RuntimeError(f'no addresses left in {typ} pool')
@@ -347,6 +394,63 @@ class ModuleRegistry:
                     DO UPDATE SET details=EXCLUDED.details, updated_at=now()
                 ''', module_id, name, json.dumps(details))
 
+    @staticmethod
+    def verify_client_identity(peercert, ident):
+        """Bind an authenticated client certificate to its claimed device ID."""
+        if not isinstance(ident, dict):
+            raise protocol.ProtocolError('invalid identification payload')
+
+        raw_id = ident.get('device_id')
+        if not isinstance(raw_id, str):
+            raise protocol.ProtocolError('certificate registration requires device_id')
+
+        try:
+            device_id = maybe_normalize_device_id(raw_id)
+        except (TypeError, ValueError):
+            raise protocol.ProtocolError('invalid device_id') from None
+
+        if not isinstance(device_id, str) or not re.fullmatch(r'[0-9a-f]{12}', device_id):
+            raise protocol.ProtocolError('invalid certificate device_id')
+
+        if not isinstance(peercert, dict):
+            raise protocol.ProtocolError('client certificate required')
+
+        san = peercert.get('subjectAltName', ())
+        if not isinstance(san, (tuple, list)):
+            raise protocol.ProtocolError('invalid certificate SAN')
+
+        if not all(isinstance(item, (tuple, list)) and len(item) == 2 for item in san):
+            raise protocol.ProtocolError('invalid certificate SAN')
+
+        uri_sans = [value for kind, value in san if kind == 'URI']
+        device_uris = [
+            value for value in uri_sans
+            if isinstance(value, str) and value.startswith(DEVICE_URI_PREFIX)
+        ]
+        if len(device_uris) != 1:
+            raise protocol.ProtocolError('client certificate requires exactly one device URI SAN')
+        uri_device_id = device_uris[0][len(DEVICE_URI_PREFIX):]
+        try:
+            cert_device_id = maybe_normalize_device_id(uri_device_id)
+        except InvalidDeviceId:
+            raise protocol.ProtocolError('invalid certificate device URI SAN') from None
+
+        if cert_device_id != device_id:
+            raise protocol.ProtocolError('client certificate device identity mismatch')
+
+        return device_id
+
+    def _verified_ident(self, peercert, ident: dict[str, Any]) -> dict[str, Any]:
+        if not self._certificate_identity_enforced():
+            return ident
+        device_id = self.verify_client_identity(peercert, ident)
+        verified = dict(ident)
+        verified['device_id'] = device_id
+        return verified
+
+    def _preserve_local_assignment(self, device_id: str | None) -> bool:
+        return device_id == maybe_normalize_device_id(settings.lab1_device_id)
+
     async def handle_client(self, reader, writer):
         conn = ModuleConnection(reader, writer)
         peer = writer.get_extra_info('peername')
@@ -354,16 +458,21 @@ class ModuleRegistry:
             first = await protocol.read_frame(reader)
             if first.get('type') != 'identify':
                 raise protocol.ProtocolError('first message must be identify')
-            if settings.tls_enabled and settings.tls_require_client_cert and not writer.get_extra_info('peercert'):
-                raise protocol.ProtocolError('client certificate required')
             ident = first.get('payload', {})
+            ident = self._verified_ident(writer.get_extra_info('peercert'), ident)
             conn.device_id = self._device_id_from_ident(ident)
             conn.module_uuid = ident.get('module_uuid')
             conn.connection_key = conn.device_id or conn.module_uuid
             assignment = await self._assign(ident)
             conn.hostname = assignment['hostname']
             await self._activate_connection(conn, ident)
-            if ident.get('hostname') != assignment['hostname'] or ident.get('assigned_ip') != assignment['ip_address']:
+            if (
+                not self._preserve_local_assignment(conn.device_id)
+                and (
+                    ident.get('hostname') != assignment['hostname']
+                    or ident.get('assigned_ip') != assignment['ip_address']
+                )
+            ):
                 await conn.send('assignment', assignment)
             else:
                 await conn.send('config', await self._base_config(ident['module_type']))
