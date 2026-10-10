@@ -1,5 +1,10 @@
 # HCM Unified Heartbeat v3
 
+## Verified Ethernet-first deployment (2026-10-10)
+
+The Jetson remains on the current VLAN 20 development network: primary `eth0=192.168.20.27`, secondary `wlan0=192.168.20.25`. Conflict Manager uses primary USB Ethernet `enx6c6e07545f03=192.168.20.26` and secondary `wlan0=192.168.20.24`. Conflict's `identity_interface=wlan0` and device ID `3c53bbf7adb2` are **intentional** even though traffic uses USB Ethernet. Jetson `identity_interface=eth0`, advertises `192.168.20.27`, and sends to Conflict `192.168.20.26:6004`. Live Conflict /status verified Jetson online/healthy with recent heartbeat. Legacy instructions below to change Conflict identity to `eth0` or move to `192.168.60.2` describe **future migration only**; do not apply them to this live installation. HCM application work must not restart or alter this independent host daemon. See [Phase 4 implementation contract](../09_documentation/PHASE4_CODEX_IMPLEMENTATION_2026-10-10.md).
+
+
 ## Live Jetson deployment clarification (2026-10-10)
 
 The independent host-based `hcm-heartbeat.service` (Python 3.6, TCP 6004) was confirmed active after a complete Jetson reboot alongside the Dockerized HCM application. The 2026-10-10 installation still uses the existing VLAN 20/Conflict addressing; **VLAN 60 migration is not complete**. Do not replace or restart Heartbeat V3 as part of HCM container updates. See [Jetson runbook](../09_documentation/JETSON_HCM_DEPLOYMENT_2026-10-10.md) for current service boundaries. Older passages below describe historic migrations and may not match the installed state.
