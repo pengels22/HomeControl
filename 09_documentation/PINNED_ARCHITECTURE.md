@@ -1,5 +1,10 @@
 # Pinned Architecture Baseline
 
+## Runtime deployment clarification (2026-10-10)
+
+The approved future-state network and safety requirements below remain unchanged. The current Jetson development HCM application runs in Docker on VLAN 20, its PostgreSQL database uses a separate private Docker bridge and mounted USB, and host Heartbeat V3 remains independent on the existing TCP 6004 network. VLAN 40 control and VLAN 60 heartbeat migration have **not** been performed. Read [Jetson runbook](JETSON_HCM_DEPLOYMENT_2026-10-10.md). Successful UI/database commissioning does not validate production safety I/O or hardwired fire actions.
+
+
 ## Core
 
 HCM is the central controller.
