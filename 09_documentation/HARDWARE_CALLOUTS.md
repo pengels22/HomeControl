@@ -1,5 +1,8 @@
 # Hardware Callouts
 
+> **Status note (2026-10-10):** The hardware selections below remain design references. Although the Jetson development software deployment passed a full reboot test on 2026-10-10, the external safety I/O hardware, relays and electrical protection have not been validated as part of it. See [Jetson runbook](JETSON_HCM_DEPLOYMENT_2026-10-10.md).
+
+
 Selected / pinned hardware families:
 
 - MCP23017 16-bit I2C GPIO expansion
