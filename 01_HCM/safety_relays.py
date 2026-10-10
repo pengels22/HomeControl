@@ -34,11 +34,23 @@ class SafetyRelay:
 class SimulatedSafetyRelayBackend:
     def __init__(self):
         self.states: dict[str, bool] = {}
+        self.input_states: dict[str, bool | None] = {'alarm_contact': False}
 
     async def write(self, relay: SafetyRelay, active: bool) -> None:
         if relay.direction != 'output':
             raise ValueError('%s is not an output relay' % relay.name)
         self.states[relay.name] = bool(active)
+
+    def read(self, relay: SafetyRelay) -> bool | None:
+        if relay.direction != 'input':
+            raise ValueError('%s is not an input relay' % relay.name)
+        value = self.input_states.get(relay.name)
+        if value is None:
+            return None
+        return bool(value)
+
+    def set_input(self, name: str, value: bool | None) -> None:
+        self.input_states[name] = None if value is None else bool(value)
 
 
 class HCMSafetyRelayController:
@@ -56,6 +68,7 @@ class HCMSafetyRelayController:
         return {
             'mode': 'simulated_gpio',
             'maintenance_lockout_exempt': True,
+            'alarm_contact': self.read_input('alarm_contact'),
             'relays': {name: relay.as_dict() for name, relay in self.relays.items()},
         }
 
@@ -66,6 +79,22 @@ class HCMSafetyRelayController:
         if relay.direction != 'output':
             raise ValueError('%s is an input, not a relay output' % name)
         return relay
+
+    def _validate_input(self, name: str) -> SafetyRelay:
+        if name not in self.relays:
+            raise KeyError(name)
+        relay = self.relays[name]
+        if relay.direction != 'input':
+            raise ValueError('%s is an output, not an input' % name)
+        return relay
+
+    def read_input(self, name: str) -> bool | None:
+        return self.backend.read(self._validate_input(name))
+
+    def set_simulated_input(self, name: str, value: bool | None) -> dict[str, Any]:
+        self._validate_input(name)
+        self.backend.set_input(name, value)
+        return {'ok': True, 'name': name, 'value': self.read_input(name)}
 
     def _validate_pulse_ms(self, duration_ms: int | None) -> int:
         value = int(self.globals.Door_Open_Pulse if duration_ms is None else duration_ms)

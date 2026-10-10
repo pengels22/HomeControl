@@ -3,6 +3,7 @@ from pathlib import Path
 from importlib import import_module
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import pytest
+from types import SimpleNamespace
 hvac = import_module('01_HCM.hvac')
 hcm_db = import_module('01_HCM.db')
 HVACController = hvac.HVACController
@@ -21,6 +22,22 @@ def controller(events):
     h.DAMPER_LEAD_S = 0
     h.FAN_LEAD_S = 0
     return h
+
+
+def hvac_globals(**overrides):
+    values = dict(
+        HVAC_Deadband_F=2.0,
+        HVAC_Damper_Lead=25,
+        HVAC_Fan_Lead=35,
+        HVAC_Fan_Postrun=4000,
+        HVAC_Cool_Min_Run=5000,
+        HVAC_Heat_Min_Run=6000,
+        HVAC_Cool_Restart_Lockout=7000,
+        HVAC_Heat_Restart_Lockout=8000,
+        HVAC_Default_Setpoint_F=67.0,
+    )
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
 
 class FakeAcquire:
@@ -168,3 +185,16 @@ async def test_hvac_state_persists_mode_and_setpoint(monkeypatch):
     await h.persist_state()
 
     assert conn.executed[0][1:] == ('HEAT', 68)
+
+
+def test_hvac_uses_global_configured_defaults_and_ms_timings():
+    events = []
+    h = HVACController(lambda n, v: None, lambda r, v: None, globals_=hvac_globals())
+
+    assert h.state.setpoint_f == 67.0
+    assert h.DEADBAND_F == 2.0
+    assert h.DAMPER_LEAD_S == 0.025
+    assert h.FAN_LEAD_S == 0.035
+    assert h.FAN_POSTRUN_S == 4.0
+    assert h.COOL_RESTART_LOCKOUT_S == 7.0
+    assert h.HEAT_RESTART_LOCKOUT_S == 8.0

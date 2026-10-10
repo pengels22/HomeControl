@@ -6,17 +6,19 @@ import secrets
 import time
 from typing import Any
 from fastapi import Header, HTTPException
+from importlib import import_module
 from . import db
 from .settings import settings
 
 # First pass local auth. Replace challenge verification with platform passkey/WebAuthn once RP ID is finalized.
 _sessions: dict[str, tuple[str,str,float]] = {}
-PASSWORD_ITERATIONS = 260_000
+global_config = import_module('07_servises.common.global_config')
+PASSWORD_ITERATIONS = int(global_config.load_global_config('HCM').Auth_Password_PBKDF2_Iterations)
 
 
-def create_session(user: str, role: str='ADMIN', ttl_s: int=3600) -> str:
+def create_session(user: str, role: str='ADMIN', ttl_s: int | None = None) -> str:
     token = secrets.token_urlsafe(32)
-    _sessions[token] = (user, role, time.time()+ttl_s)
+    _sessions[token] = (user, role, time.time() + (ttl_s or settings.auth_session_ttl_s))
     return token
 
 def _token_hash(token: str) -> str:

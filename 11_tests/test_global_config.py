@@ -76,6 +76,18 @@ def test_global_config_rejects_invalid_component():
         global_config.load_global_config('BAD')
 
 
+def test_global_config_validation_rejects_bad_type_and_range():
+    values = global_config.load_global_config('HCM').as_dict()
+    values['Door_Open_Pulse'] = '3000'
+    with pytest.raises(global_config.GlobalConfigError):
+        global_config._validate('HCM', values)
+
+    values = global_config.load_global_config('HCM').as_dict()
+    values['Heartbeat_TCP_Port'] = 6005
+    with pytest.raises(global_config.GlobalConfigError):
+        global_config._validate('HCM', values)
+
+
 def test_phase3_pinned_values_are_available():
     hcm = global_config.load_global_config('HCM')
     sim = global_config.load_global_config('SIM')

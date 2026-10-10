@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from importlib import import_module
 from . import db
 from .devices import apply_active_intent, command_logical
@@ -11,6 +12,7 @@ from .priority import OutputSource, clear_source
 log = logging.getLogger(__name__)
 fire_input_mod = import_module('07_servises.common.fire_input')
 arbiter_mod = import_module('07_servises.common.safety_arbiter')
+global_config = import_module('07_servises.common.global_config')
 
 
 class SafetyHeartbeatReporter:
@@ -42,13 +44,24 @@ class SafetyHeartbeatReporter:
         await self._send(payload)
 
 class SafetyController:
-    def __init__(self, hvac, emergency_lighting_logical_names: list[str] | None = None, heartbeat: SafetyHeartbeatReporter | None = None):
+    def __init__(self, hvac, emergency_lighting_logical_names: list[str] | None = None, heartbeat: SafetyHeartbeatReporter | None = None, safety_relays=None, globals_=None):
+        self.globals = globals_ or global_config.load_global_config('HCM')
         self.hvac = hvac
         self.fire_active = False
+        self.alarm_contact_active = False
+        self.alarm_contact_fault = True
         self.maintenance_lockout_active = False
-        self.fire_input = fire_input_mod.DebouncedFireInput(alarm_level=True, debounce_seconds=0.25)
+        self.fire_input = fire_input_mod.DebouncedFireInput(
+            alarm_level=bool(self.globals.Fire_Input_Alarm_High),
+            debounce_seconds=float(self.globals.Fire_Contact_Debounce) / 1000.0,
+        )
+        self.alarm_contact_input = fire_input_mod.DebouncedFireInput(
+            alarm_level=bool(self.globals.Fire_Input_Alarm_High),
+            debounce_seconds=float(self.globals.Alarm_Contact_Debounce) / 1000.0,
+        )
         self.emergency_lighting_logical_names = list(emergency_lighting_logical_names or [])
         self.heartbeat = heartbeat or SafetyHeartbeatReporter()
+        self.safety_relays = safety_relays
 
     def state(self) -> str:
         if self.fire_active and self.maintenance_lockout_active:
@@ -68,6 +81,38 @@ class SafetyController:
         if sample.changed:
             await self.set_fire(sample.fire_active)
         return sample
+
+    async def sample_alarm_contact(self, level: bool | None, now: float | None = None):
+        sample = self.alarm_contact_input.sample(level, time.monotonic() if now is None else now)
+        if sample.fault:
+            if not self.alarm_contact_fault:
+                async with db.acquire() as conn:
+                    await conn.execute('INSERT INTO safety_events(event_type,active,details) VALUES($1,$2,$3::jsonb)', 'alarm_contact_fault', True, '{"reason":"unknown_or_invalid"}')
+            self.alarm_contact_fault = True
+            await self.heartbeat.status('alarm_contact', 'unknown')
+            await self.heartbeat.fault('alarm_contact_fault', 'alarm contact unknown or disconnected')
+            return sample
+
+        if self.alarm_contact_fault:
+            async with db.acquire() as conn:
+                await conn.execute('INSERT INTO safety_events(event_type,active,details) VALUES($1,$2,$3::jsonb)', 'alarm_contact_fault', False, '{}')
+        self.alarm_contact_fault = False
+        await self.heartbeat.fault('alarm_contact_fault', None)
+        if sample.changed:
+            self.alarm_contact_active = sample.fire_active
+            async with db.acquire() as conn:
+                await conn.execute('INSERT INTO safety_events(event_type,active,details) VALUES($1,$2,$3::jsonb)', 'alarm_contact', self.alarm_contact_active, '{}')
+            await self.heartbeat.status('alarm_contact', 'active' if self.alarm_contact_active else 'inactive')
+        return sample
+
+    async def sample_alarm_contact_from_backend(self, now: float | None = None):
+        if self.safety_relays is None:
+            return await self.sample_alarm_contact(None, now)
+        try:
+            level = self.safety_relays.read_input('alarm_contact')
+        except Exception:
+            level = None
+        return await self.sample_alarm_contact(level, now)
 
     async def set_maintenance_lockout(self, active: bool):
         self.maintenance_lockout_active = bool(active)

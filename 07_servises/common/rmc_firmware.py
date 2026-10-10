@@ -6,6 +6,7 @@ import time
 import uuid
 import zlib
 from dataclasses import dataclass, field
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ PACKAGE_MAGIC = "HCMFW"
 PACKAGE_VERSION = 1
 TARGET_MODULE = "RMC"
 DEFAULT_BLOCK_SIZE = 4
+global_config = import_module('07_servises.common.global_config')
 
 RMC_FIRMWARE_COMMANDS = {
     "UPDATE_ENTER_BOOTLOADER": 0x01,
@@ -111,6 +113,18 @@ def make_package(
         "build_id": build_id,
         "session_id": session_id or str(uuid.uuid4()),
         "created_at": time.time(),
+    }
+
+
+def build_time_config(globals_=None) -> dict[str, Any]:
+    cfg = globals_ or global_config.load_global_config("RMC")
+    return {
+        "CAN_BITRATE": int(cfg.CAN_Bitrate),
+        "HEARTBEAT_INTERVAL_MS": int(cfg.Heartbeat_Interval),
+        "RMC_FIRMWARE_BLOCK_SIZE": int(cfg.RMC_Firmware_Block_Size),
+        "SENSOR_RETRY_INTERVAL_MS": int(cfg.Sensor_Retry_Interval),
+        "SERIAL_BAUD": int(cfg.Serial_Baud),
+        "TELEMETRY_INTERVAL_MS": int(cfg.Telemetry_Interval),
     }
 
 

@@ -80,6 +80,15 @@ def test_password_hash_does_not_store_plain_text_and_verifies():
     assert not auth.verify_password('wrong password', password_hash)
 
 
+def test_in_memory_session_uses_configured_default_ttl(monkeypatch):
+    monkeypatch.setattr(auth.settings, 'auth_session_ttl_s', 7)
+    monkeypatch.setattr(auth.time, 'time', lambda: 100.0)
+
+    token = auth.create_session('patrick', 'ADMIN')
+
+    assert auth._sessions[token] == ('patrick', 'ADMIN', 107.0)
+
+
 @pytest.mark.asyncio
 async def test_password_login_creates_persistent_session(monkeypatch):
     conn = FakeAuthConn()

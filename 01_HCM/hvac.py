@@ -3,7 +3,14 @@ import asyncio
 import time
 from dataclasses import dataclass
 from enum import Enum
+from importlib import import_module
 from typing import Awaitable, Callable
+
+global_config = import_module('07_servises.common.global_config')
+hcm_globals = global_config.load_global_config('HCM')
+
+def ms_to_seconds(value: int) -> float:
+    return float(value) / 1000.0
 
 class Mode(str, Enum):
     OFF='OFF'; HEAT='HEAT'; COOL='COOL'; FAN='FAN'
@@ -20,7 +27,7 @@ class RoomReading:
 @dataclass
 class HVACState:
     mode: Mode = Mode.OFF
-    setpoint_f: float = 70.0
+    setpoint_f: float = hcm_globals.HVAC_Default_Setpoint_F
     fan: bool = False
     heat: bool = False
     cool: bool = False
@@ -30,16 +37,30 @@ class HVACState:
     postrun_until: float = 0.0
 
 class HVACController:
-    DEADBAND_F = 1.0
-    DAMPER_LEAD_S = 0.5
-    FAN_LEAD_S = 0.5
-    FAN_POSTRUN_S = 60.0
-    COOL_MIN_RUN_S = 120.0
-    HEAT_MIN_RUN_S = 60.0
-    RESTART_LOCKOUT_S = 300.0
+    DEADBAND_F = hcm_globals.HVAC_Deadband_F
+    DAMPER_LEAD_S = ms_to_seconds(hcm_globals.HVAC_Damper_Lead)
+    FAN_LEAD_S = ms_to_seconds(hcm_globals.HVAC_Fan_Lead)
+    FAN_POSTRUN_S = ms_to_seconds(hcm_globals.HVAC_Fan_Postrun)
+    COOL_MIN_RUN_S = ms_to_seconds(hcm_globals.HVAC_Cool_Min_Run)
+    HEAT_MIN_RUN_S = ms_to_seconds(hcm_globals.HVAC_Heat_Min_Run)
+    COOL_RESTART_LOCKOUT_S = ms_to_seconds(hcm_globals.HVAC_Cool_Restart_Lockout)
+    HEAT_RESTART_LOCKOUT_S = ms_to_seconds(hcm_globals.HVAC_Heat_Restart_Lockout)
+    RESTART_LOCKOUT_S = COOL_RESTART_LOCKOUT_S
 
-    def __init__(self, output: Callable[[str,bool], Awaitable[None]], damper: Callable[[RoomReading,bool], Awaitable[None]]):
+    def __init__(self, output: Callable[[str,bool], Awaitable[None]], damper: Callable[[RoomReading,bool], Awaitable[None]], globals_=None):
+        if globals_ is not None:
+            self.DEADBAND_F = float(globals_.HVAC_Deadband_F)
+            self.DAMPER_LEAD_S = ms_to_seconds(globals_.HVAC_Damper_Lead)
+            self.FAN_LEAD_S = ms_to_seconds(globals_.HVAC_Fan_Lead)
+            self.FAN_POSTRUN_S = ms_to_seconds(globals_.HVAC_Fan_Postrun)
+            self.COOL_MIN_RUN_S = ms_to_seconds(globals_.HVAC_Cool_Min_Run)
+            self.HEAT_MIN_RUN_S = ms_to_seconds(globals_.HVAC_Heat_Min_Run)
+            self.COOL_RESTART_LOCKOUT_S = ms_to_seconds(globals_.HVAC_Cool_Restart_Lockout)
+            self.HEAT_RESTART_LOCKOUT_S = ms_to_seconds(globals_.HVAC_Heat_Restart_Lockout)
+            self.RESTART_LOCKOUT_S = self.COOL_RESTART_LOCKOUT_S
         self.state = HVACState()
+        if globals_ is not None:
+            self.state.setpoint_f = float(globals_.HVAC_Default_Setpoint_F)
         self.rooms: dict[str, RoomReading] = {}
         self.output = output
         self.damper = damper
@@ -215,14 +236,14 @@ class HVACController:
                 if self.state.cool:
                     if avg <= self.state.setpoint_f and now - (self.state.call_started_at or now) >= self.COOL_MIN_RUN_S:
                         await self._stop_conditioning(now, immediate_fan_off=False)
-                elif avg >= self.state.setpoint_f + self.DEADBAND_F and now - self.state.last_cool_off >= self.RESTART_LOCKOUT_S:
+                elif avg >= self.state.setpoint_f + self.DEADBAND_F and now - self.state.last_cool_off >= self.COOL_RESTART_LOCKOUT_S:
                     await self._start_conditioning(cooling=True)
 
             elif mode == Mode.HEAT:
                 if self.state.heat:
                     if avg >= self.state.setpoint_f and now - (self.state.call_started_at or now) >= self.HEAT_MIN_RUN_S:
                         await self._stop_conditioning(now, immediate_fan_off=False)
-                elif avg <= self.state.setpoint_f - self.DEADBAND_F and now - self.state.last_heat_off >= self.RESTART_LOCKOUT_S:
+                elif avg <= self.state.setpoint_f - self.DEADBAND_F and now - self.state.last_heat_off >= self.HEAT_RESTART_LOCKOUT_S:
                     await self._start_conditioning(cooling=False)
 
             if not self.state.heat and not self.state.cool and self.state.fan and mode != Mode.FAN and now >= self.state.postrun_until:

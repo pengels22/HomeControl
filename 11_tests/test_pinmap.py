@@ -47,3 +47,9 @@ async def test_rcm_agent_reports_pinout_address_on_relay_command():
     assert result['value'] is True
     assert result['requested_value'] is True
     assert result['arbitration']['effective_state']['energized'] is True
+
+
+def test_rcm_uses_global_relay_count_and_default_state():
+    agent = rcm.RCMAgent({'relay_count': 2, 'default_relay_on': True})
+
+    assert agent.relays.snapshot() == {'A1': True, 'A2': True}

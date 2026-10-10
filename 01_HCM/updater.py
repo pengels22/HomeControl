@@ -13,6 +13,7 @@ from .registry import registry
 
 protocol = import_module('07_servises.common.protocol')
 rmc_firmware = import_module('07_servises.common.rmc_firmware')
+global_config = import_module('07_servises.common.global_config')
 log = logging.getLogger(__name__)
 
 
@@ -23,9 +24,12 @@ class UpdateOrchestrator:
     can replace the hook without changing updater sequencing.
     """
 
-    def __init__(self, hook: str = '07_servises/firewall_update_hook.sh', update_port: int = 6503):
+    def __init__(self, hook: str = '07_servises/firewall_update_hook.sh', update_port: int | None = None, globals_=None):
+        self.globals = globals_ or global_config.load_global_config('HCM')
         self.hook = Path(hook)
-        self.update_port = update_port
+        self.update_port = int(update_port or self.globals.API_Update_Port)
+        self.module_return_timeout_s = float(self.globals.Updater_Module_Return_Timeout) / 1000.0
+        self.module_poll_interval_s = float(self.globals.Updater_Module_Poll_Interval) / 1000.0
         self._lock = asyncio.Lock()
 
     async def _firewall(self, action: str, ip: str) -> None:
@@ -46,7 +50,7 @@ class UpdateOrchestrator:
             writer.close()
             await writer.wait_closed()
 
-    async def update_module(self, hostname: str, command: list[str] | None = None, return_timeout_s: int = 180) -> dict:
+    async def update_module(self, hostname: str, command: list[str] | None = None, return_timeout_s: int | None = None) -> dict:
         async with self._lock:
             async with db.acquire() as conn:
                 row = await conn.fetchrow('SELECT device_id, module_uuid::text AS module_uuid, ip_address FROM modules WHERE hostname=$1', hostname)
@@ -58,12 +62,12 @@ class UpdateOrchestrator:
                 result = await self._request_update(ip, command)
                 if not result.get('ok') and not result.get('dry_run'):
                     raise RuntimeError(f'update failed: {result}')
-                deadline = asyncio.get_running_loop().time() + return_timeout_s
+                deadline = asyncio.get_running_loop().time() + (return_timeout_s if return_timeout_s is not None else self.module_return_timeout_s)
                 while asyncio.get_running_loop().time() < deadline:
                     conn = registry.connections.get(module_key)
                     if conn and conn.last_heartbeat:
                         return {'ok': True, 'module': hostname, 'update': result, 'verified': True}
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(self.module_poll_interval_s)
                 raise TimeoutError(f'{hostname} did not return heartbeat after update')
             finally:
                 await self._firewall('close', ip)

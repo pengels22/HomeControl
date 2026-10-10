@@ -8,12 +8,15 @@ common_cfg = import_module('07_servises.common.config')
 common_hw = import_module('07_servises.common.hardware')
 common_pinmap = import_module('07_servises.common.pinmap')
 common_io = import_module('07_servises.common.io')
+common_global_config = import_module('07_servises.common.global_config')
 common_safety = import_module('07_servises.common.safety_arbiter')
 
 class RCMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
         super().__init__('RCM', config)
-        names = [f'{bank}{ch}' for bank in 'ABCD' for ch in range(1, 9)]
+        self.global_config = common_global_config.load_global_config('RCM')
+        relay_count = int(config.get('relay_count', self.global_config.RCM_Relay_Count))
+        names = [f'{bank}{ch}' for bank in 'ABCD' for ch in range(1, 9)][:relay_count]
         pinout_path = config.get(
             'pinout_path',
             str(Path(__file__).resolve().parents[1] / '06_config/04_RCM/Pinout.md'),
@@ -22,6 +25,10 @@ class RCMAgent(common_agent.ModuleAgent):
         common_pinmap.require_channels(self.pinout, names)
         self.io_mode = common_io.io_mode(config)
         self.relays = common_hw.DigitalBank(names)
+        default_on = bool(config.get('default_relay_on', self.global_config.RCM_Default_Relay_On))
+        if default_on:
+            for ch in names:
+                self.relays.set(ch, True)
         self.fail_actions = config.get('fail_actions', {})
         safety_cfg = config.get('safety', {})
         self.safety = common_safety.SafetyArbiter(

@@ -3,6 +3,7 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -151,6 +152,21 @@ async def test_sim_can_restart_12v_loop_power_switch():
     assert result['arbitration']['effective_state']['energized'] is True
     assert state['hexa_board']['switching_12v']['sw2']['label'] == 'Loop B power'
     assert state['hexa_board']['switching_12v']['sw2']['value'] is True
+
+
+@pytest.mark.asyncio
+async def test_sim_restart_uses_global_default_delay(monkeypatch):
+    base = sim.common_global_config.load_global_config('SIM').as_dict()
+    base['Hexa_12V_Restart_Off_Time'] = 10
+    monkeypatch.setattr(sim.common_global_config, 'load_global_config', lambda component: SimpleNamespace(**base))
+    cfg = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+    agent = sim.SIMAgent(cfg)
+
+    started = sim.time.time()
+    result = await agent.apply_command({'op': 'restart_hexa_12v', 'channel': 'sw2'})
+
+    assert result['power_off_s'] == 0.01
+    assert sim.time.time() - started >= 0.009
 
 
 @pytest.mark.asyncio

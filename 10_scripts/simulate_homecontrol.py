@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT))
 
 common_can = import_module("07_servises.common.can")
 common_cfg = import_module("07_servises.common.config")
+common_global_config = import_module("07_servises.common.global_config")
 common_pairing = import_module("07_servises.common.pairing_glyph")
 common_rmc_fw = import_module("07_servises.common.rmc_firmware")
 common_safety = import_module("07_servises.common.safety_arbiter")
@@ -75,6 +76,7 @@ class HomeControlSimulator:
         self.safety_events: list[dict[str, Any]] = []
         self.heartbeat_safety_reports: list[dict[str, Any]] = []
         self.rcm_names = {f"{bank}{ch}": f"Relay {bank}{ch}" for bank in "ABCD" for ch in range(1, 9)}
+        self.lcm_globals = common_global_config.load_global_config("LCM")
         self.lcm_fades: dict[str, asyncio.Task] = {}
         self.lcm_names = self.default_lcm_names()
         self.pairing_code = "482913"
@@ -303,6 +305,10 @@ class HomeControlSimulator:
         duration_s: float = 3.0,
         steps: int = 30,
     ) -> dict[str, Any]:
+        if duration_s == 3.0:
+            duration_s = float(self.lcm_globals.Lighting_Default_Fade_Time) / 1000.0
+        if steps == 30:
+            steps = int(self.lcm_globals.Lighting_Default_Fade_Steps)
         ch = channel.upper()
         self.lcm_dimmer_percent(ch)
         if self.safety_conditions["maintenance_lockout"]:

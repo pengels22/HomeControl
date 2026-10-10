@@ -29,9 +29,9 @@ async def hvac_damper(room, open_: bool):
     # Spring-open/power-close actuator: relay OFF=open, ON=closed.
     await command_logical(room.damper_logical_device, {'op':'set_relay','value':not open_})
 
-hvac = HVACController(hvac_output, hvac_damper)
-safety = SafetyController(hvac)
 safety_relays = HCMSafetyRelayController()
+hvac = HVACController(hvac_output, hvac_damper)
+safety = SafetyController(hvac, safety_relays=safety_relays)
 rules = RulesEngine()
 api.hvac = hvac
 api.safety = safety
@@ -44,9 +44,10 @@ async def lifespan(app: FastAPI):
     await registry.start()
     rule_task = asyncio.create_task(rules.run())
     hvac_task = asyncio.create_task(hvac_loop())
+    alarm_task = asyncio.create_task(alarm_contact_loop())
     yield
     rules.running=False
-    rule_task.cancel(); hvac_task.cancel()
+    rule_task.cancel(); hvac_task.cancel(); alarm_task.cancel()
     await safety_relays.shutdown()
     await registry.stop(); await db.close()
 
@@ -55,6 +56,12 @@ async def hvac_loop():
         await asyncio.sleep(1)
         try: await hvac.evaluate()
         except Exception: log.exception('HVAC evaluation failed')
+
+async def alarm_contact_loop():
+    while True:
+        await asyncio.sleep(0.1)
+        try: await safety.sample_alarm_contact_from_backend()
+        except Exception: log.exception('Alarm contact monitoring failed')
 
 app = FastAPI(title='HomeControl HCM', version='0.1.0', lifespan=lifespan)
 app.include_router(api.router)

@@ -7,11 +7,13 @@ common_agent = import_module('07_servises.common.agent')
 common_cfg = import_module('07_servises.common.config')
 common_hw = import_module('07_servises.common.hardware')
 common_io = import_module('07_servises.common.io')
+common_global_config = import_module('07_servises.common.global_config')
 common_safety = import_module('07_servises.common.safety_arbiter')
 
 class LCMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
         super().__init__('LCM', config)
+        self.global_config = common_global_config.load_global_config('LCM')
         self.relay_map = {str(i): f'A{i}' for i in range(1, 9)}
         self.relay_map.update({str(i): f'B{i - 8}' for i in range(9, 13)})
         self.hv_dimmer_map = {str(i): f'HV-{i - 12}' for i in range(13, 17)}
@@ -38,6 +40,12 @@ class LCMAgent(common_agent.ModuleAgent):
         self.safety = common_safety.SafetyArbiter(
             emergency_lighting_channels=set(safety_cfg.get('emergency_lighting_channels', [])),
             hvac_shutdown_channels=set(safety_cfg.get('hvac_shutdown_channels', [])),
+        )
+
+    def _clamp_percent(self, value):
+        return max(
+            float(self.global_config.Lighting_Dimmer_Min_Percent),
+            min(float(self.global_config.Lighting_Dimmer_Max_Percent), float(value)),
         )
 
     def _safety_requires_output_shutdown(self, conditions):
@@ -107,20 +115,24 @@ class LCMAgent(common_agent.ModuleAgent):
             return {'ok': True, 'kind': 'relay', 'channel': logical, 'value': self.relays.get(logical), 'arbitration': decision.as_dict()}
         if logical in self.hv_dimmer_map:
             physical = self.hv_dimmer_map[logical]
-            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), physical, payload, payload.get('source', 'module_api')))
+            bounded = {**payload, 'percent': self._clamp_percent(self._percent(payload))}
+            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), physical, bounded, payload.get('source', 'module_api')))
             self.hv_dimmers.set_percent(physical, float(decision.final_command.get('percent', 0.0)))
             return {'ok': True, 'kind': 'hv_dimmer', 'channel': logical, 'physical': physical, **self.hv_dimmers.snapshot()[physical], 'arbitration': decision.as_dict()}
         if logical in self.hv_dimmers.values:
-            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), logical, payload, payload.get('source', 'module_api')))
+            bounded = {**payload, 'percent': self._clamp_percent(self._percent(payload))}
+            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), logical, bounded, payload.get('source', 'module_api')))
             self.hv_dimmers.set_percent(logical, float(decision.final_command.get('percent', 0.0)))
             return {'ok': True, 'kind': 'hv_dimmer', 'channel': logical, **self.hv_dimmers.snapshot()[logical], 'arbitration': decision.as_dict()}
         if logical in self.lv_dimmer_map:
             physical = self.lv_dimmer_map[logical]
-            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), physical, payload, payload.get('source', 'module_api')))
+            bounded = {**payload, 'percent': self._clamp_percent(self._percent(payload))}
+            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), physical, bounded, payload.get('source', 'module_api')))
             self.lv_dimmers.set_percent(physical, float(decision.final_command.get('percent', 0.0)))
             return {'ok': True, 'kind': 'lv_dimmer', 'channel': logical, 'physical': physical, **self.lv_dimmers.snapshot()[physical], 'arbitration': decision.as_dict()}
         if logical in self.lv_dimmers.values:
-            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), logical, payload, payload.get('source', 'module_api')))
+            bounded = {**payload, 'percent': self._clamp_percent(self._percent(payload))}
+            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), logical, bounded, payload.get('source', 'module_api')))
             self.lv_dimmers.set_percent(logical, float(decision.final_command.get('percent', 0.0)))
             return {'ok': True, 'kind': 'lv_dimmer', 'channel': logical, **self.lv_dimmers.snapshot()[logical], 'arbitration': decision.as_dict()}
         raise KeyError(logical)

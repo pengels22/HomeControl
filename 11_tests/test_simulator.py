@@ -1,5 +1,6 @@
 from importlib import import_module
 from urllib.parse import parse_qs, urlparse
+from types import SimpleNamespace
 
 import pytest
 
@@ -65,6 +66,29 @@ async def test_simulator_lcm_dimmer_fades_to_target():
 
     assert result == {'ok': True, 'channel': '10-1', 'target_percent': 75.0, 'fade_s': 0.01}
     assert sim.lcm.lv_dimmers.snapshot()['10-1']['percent'] == 75
+
+
+@pytest.mark.asyncio
+async def test_simulator_lcm_fade_uses_global_defaults(monkeypatch):
+    real_loader = simulator.common_global_config.load_global_config
+
+    def fake_loader(component):
+        cfg = real_loader(component)
+        if component == 'LCM':
+            values = cfg.as_dict()
+            values['Lighting_Default_Fade_Time'] = 20
+            values['Lighting_Default_Fade_Steps'] = 2
+            return SimpleNamespace(**values)
+        return cfg
+
+    monkeypatch.setattr(simulator.common_global_config, 'load_global_config', fake_loader)
+    sim = simulator.HomeControlSimulator()
+
+    result = await sim.set_lcm_dimmer_fade('10-1', 50)
+    await sim.lcm_fades['10-1']
+
+    assert result['fade_s'] == 0.02
+    assert sim.lcm.lv_dimmers.snapshot()['10-1']['percent'] == 50
 
 
 @pytest.mark.asyncio

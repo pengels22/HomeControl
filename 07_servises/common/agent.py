@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 from homecontrol_identity import InvalidDeviceId, normalize_device_id
+from . import global_config
 from .protocol import read_frame, write_frame
 
 log = logging.getLogger(__name__)
@@ -21,9 +22,22 @@ class ModuleAgent:
     def __init__(self, module_type: str, config: dict[str, Any]):
         self.module_type = module_type.upper()
         self.config = config
+        try:
+            self.global_config = global_config.load_global_config(self.module_type)
+        except global_config.GlobalConfigError:
+            self.global_config = None
         self.hcm_host = config.get('hcm_host', '192.168.20.27')
         self.hcm_port = int(config.get('hcm_port', 6501))
         self.heartbeat_s = float(config.get('heartbeat_seconds', 5))
+        self.reconnect_initial_s = float(config.get(
+            'reconnect_initial_s',
+            (getattr(self.global_config, 'Module_Connect_Backoff_Initial', 1000) / 1000.0) if self.global_config else 1.0,
+        ))
+        self.reconnect_max_s = float(config.get(
+            'reconnect_max_s',
+            (getattr(self.global_config, 'Module_Connect_Backoff_Max', 30000) / 1000.0) if self.global_config else 30.0,
+        ))
+        self.hcm_auth_timeout_s = float(config.get('hcm_auth_timeout_s', 5.0))
         self.identity_path = Path(config.get('identity_path', './runtime/identity.json'))
         self.identity_path.parent.mkdir(parents=True, exist_ok=True)
         self.identity = self._load_identity()
@@ -245,7 +259,7 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
         async def require_hcm_user(authorization: str | None = Header(default=None)) -> dict[str, Any]:
             if not authorization or not authorization.startswith('Bearer '):
                 raise HTTPException(401, 'missing bearer token')
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=self.hcm_auth_timeout_s) as client:
                 try:
                     response = await client.get(f'{self.hcm_api_url}/auth/session', headers={'Authorization': authorization})
                 except httpx.HTTPError as exc:
@@ -260,7 +274,7 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
 
         @app.post('/api/module/login')
         async def login(body: dict[str, Any]):
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=self.hcm_auth_timeout_s) as client:
                 try:
                     response = await client.post(f'{self.hcm_api_url}/auth/login', json=body)
                 except httpx.HTTPError as exc:
@@ -397,16 +411,16 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
         web_task = None
         if self.web.get('enabled', False):
             web_task = asyncio.create_task(self._run_web())
-        delay = 1
+        delay = self.reconnect_initial_s
         try:
             while self.running:
                 try:
                     await self._session()
-                    delay = 1
+                    delay = self.reconnect_initial_s
                 except (OSError, asyncio.IncompleteReadError, ConnectionError) as exc:
                     log.warning('%s disconnected: %s', self.module_type, exc)
                     await asyncio.sleep(delay)
-                    delay = min(delay * 2, 30)
+                    delay = min(delay * 2, self.reconnect_max_s)
         finally:
             if web_task:
                 web_task.cancel()

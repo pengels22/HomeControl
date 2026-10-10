@@ -41,3 +41,15 @@ def test_lcm_lv_dimmers_share_dac_address_across_mux_channels():
     assert second['mux_channel'] == 1
     assert agent.i2c_bus.writes[0] == (0x70, 0x01, 0)
     assert agent.i2c_bus.writes[2] == (0x70, 0x02, 0)
+
+
+def test_lcm_dimmer_uses_global_min_max_bounds(monkeypatch):
+    agent = lcm.LCMAgent({})
+    agent.global_config.Lighting_Dimmer_Max_Percent = 60
+    agent.global_config.Lighting_Dimmer_Min_Percent = 10
+
+    high = agent._set_channel('10-1', {'percent': 95})
+    low = agent._set_channel('10-2', {'percent': 1})
+
+    assert high['percent'] == 60.0
+    assert low['percent'] == 10.0

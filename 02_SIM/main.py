@@ -14,6 +14,9 @@ common_safety = import_module('07_servises.common.safety_arbiter')
 class SIMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
         super().__init__('SIM', config)
+        self.global_config = common_global_config.load_global_config('SIM')
+        config.setdefault('can_bitrate', self.global_config.CAN_Bitrate)
+        config.setdefault('can_enabled', self.global_config.CAN_Enabled)
         self.rmc_nodes = {}
         self.io_mode = common_io.io_mode(config)
         self.can_network = common_can.SocketCANNetwork.from_config(config)
@@ -25,7 +28,6 @@ class SIMAgent(common_agent.ModuleAgent):
             for name, item in self._hexa_section('dio').get('channels', {}).items()
         }
         self.hexa_switching_state = self._initial_output_state('switching_12v', 'outputs')
-        self.global_config = common_global_config.load_global_config('SIM')
         self.safety = common_safety.SafetyArbiter()
         self.hexa_restart_tasks = {}
         self.hexa_usb_links = {}
@@ -46,6 +48,28 @@ class SIMAgent(common_agent.ModuleAgent):
         off_below = item.get('off_below_v')
         low = item.get('warning_low_v')
         high = item.get('warning_high_v')
+        label = str(item.get('label', '')).lower()
+        if off_below is None:
+            if '3.3' in label:
+                off_below = self.global_config.Hexa_3V3_Bus_Off_Below_V
+            elif '5' in label and 'v' in label:
+                off_below = self.global_config.Hexa_5V_Bus_Off_Below_V
+            elif '12' in label or 'loop' in label:
+                off_below = self.global_config.Hexa_12V_Loop_Off_Below_V
+        if low is None:
+            if '3.3' in label:
+                low = self.global_config.Hexa_3V3_Bus_Low_Warning_V
+            elif '5' in label and 'v' in label:
+                low = self.global_config.Hexa_5V_Bus_Low_Warning_V
+            elif '12' in label or 'loop' in label:
+                low = self.global_config.Hexa_12V_Loop_Low_Warning_V
+        if high is None:
+            if '3.3' in label:
+                high = self.global_config.Hexa_3V3_Bus_High_Warning_V
+            elif '5' in label and 'v' in label:
+                high = self.global_config.Hexa_5V_Bus_High_Warning_V
+            elif '12' in label or 'loop' in label:
+                high = self.global_config.Hexa_12V_Loop_High_Warning_V
         off = off_below is not None and value < float(off_below)
         ok = not off and (low is None or value >= float(low)) and (high is None or value <= float(high))
         status = 'OFF' if off else 'OK' if ok else 'FAULT'

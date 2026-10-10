@@ -31,6 +31,14 @@ def test_rmc_firmware_frame_plan_uses_classical_can_payloads_and_target_node():
     assert frames[-1]['command'] == 'UPDATE_REBOOT'
 
 
+def test_rmc_build_time_config_uses_global_values():
+    cfg = rmc_fw.build_time_config()
+
+    assert cfg['CAN_BITRATE'] == 250000
+    assert cfg['RMC_FIRMWARE_BLOCK_SIZE'] == 4
+    assert cfg['TELEMETRY_INTERVAL_MS'] == 5000
+
+
 @pytest.mark.asyncio
 async def test_sim_stages_and_completes_rmc_firmware_update(tmp_path):
     cfg = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')

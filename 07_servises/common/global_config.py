@@ -20,11 +20,34 @@ COMPONENT_FILES = {
 REQUIRED = {
     'HCM': {
         'Alarm_Contact_Debounce': (int, 0, 60000),
+        'API_HCM_Port': (int, 1, 65535),
+        'API_Module_Port': (int, 1, 65535),
+        'API_Update_Port': (int, 1, 65535),
+        'Auth_Challenge_TTL': (int, 1000, 3600000),
+        'Auth_Password_PBKDF2_Iterations': (int, 100000, 1000000),
+        'Auth_Session_TTL': (int, 1000, 86400000),
+        'Commissioning_Enabled': (bool, None, None),
+        'Fire_Contact_Debounce': (int, 0, 60000),
+        'Fire_Input_Alarm_High': (bool, None, None),
         'Door_Open_Pulse': (int, 250, 10000),
         'Door_Open_Pulse_Min': (int, 0, 10000),
         'Door_Open_Pulse_Max': (int, 250, 60000),
+        'HCM_Dev_Mode': (bool, None, None),
+        'HCM_TLS_Enabled': (bool, None, None),
+        'HCM_TLS_Require_Client_Cert': (bool, None, None),
         'Heartbeat_TCP_Port': (int, 1, 65535),
+        'HVAC_Cool_Min_Run': (int, 0, 3600000),
+        'HVAC_Cool_Restart_Lockout': (int, 0, 3600000),
+        'HVAC_Damper_Lead': (int, 0, 60000),
+        'HVAC_Deadband_F': ((int, float), 0, 20),
+        'HVAC_Default_Setpoint_F': ((int, float), 45, 90),
+        'HVAC_Fan_Lead': (int, 0, 60000),
+        'HVAC_Fan_Postrun': (int, 0, 3600000),
+        'HVAC_Heat_Min_Run': (int, 0, 3600000),
+        'HVAC_Heat_Restart_Lockout': (int, 0, 3600000),
         'Safety_Aux_Relay_Pulse': (int, 0, 60000),
+        'Updater_Module_Poll_Interval': (int, 1, 60000),
+        'Updater_Module_Return_Timeout': (int, 1, 3600000),
     },
     'SIM': {
         'CAN_Bitrate': (int, 1, 1000000),
@@ -40,19 +63,27 @@ REQUIRED = {
         'Lighting_Dimmer_Min_Percent': (int, 0, 100),
         'Safety_Fail_Safe_On_Unknown': (bool, None, None),
     },
-    'RCM': {
+        'RCM': {
         'Module_Connect_Backoff_Initial': (int, 0, 60000),
         'Module_Connect_Backoff_Max': (int, 1, 300000),
         'Safety_Fail_Safe_On_Unknown': (bool, None, None),
+        'RCM_Default_Relay_On': (bool, None, None),
+        'RCM_Relay_Count': (int, 1, 32),
     },
     'PNL': {
         'Module_Connect_Backoff_Initial': (int, 0, 60000),
         'Module_Connect_Backoff_Max': (int, 1, 300000),
+        'Panel_Auto_Refresh_Interval': (int, 1, 300000),
+        'Panel_Default_Brightness': (int, 0, 100),
+        'Panel_Require_Authentication': (bool, None, None),
         'Web_Enabled': (bool, None, None),
     },
     'RMC': {
         'CAN_Bitrate': (int, 1, 1000000),
         'Heartbeat_Interval': (int, 1, 300000),
+        'RMC_Firmware_Block_Size': (int, 1, 4),
+        'Sensor_Retry_Interval': (int, 1, 300000),
+        'Serial_Baud': (int, 1, 1000000),
         'Telemetry_Interval': (int, 1, 300000),
     },
 }
@@ -98,7 +129,11 @@ def _validate(component, values):
     for name, (expected_type, minimum, maximum) in required.items():
         value = values[name]
         if not isinstance(value, expected_type):
-            raise GlobalConfigError('%s.%s must be %s' % (component, name, expected_type.__name__))
+            if isinstance(expected_type, tuple):
+                type_name = ' or '.join(t.__name__ for t in expected_type)
+            else:
+                type_name = expected_type.__name__
+            raise GlobalConfigError('%s.%s must be %s' % (component, name, type_name))
         if minimum is not None and value < minimum:
             raise GlobalConfigError('%s.%s must be >= %s' % (component, name, minimum))
         if maximum is not None and value > maximum:
