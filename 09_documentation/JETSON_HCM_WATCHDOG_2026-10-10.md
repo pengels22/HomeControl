@@ -1,5 +1,10 @@
 # HCM watchdog: Jetson installation and recovery verification
 
+## 2026-10-10 network and lifecycle update
+
+The successful watchdog crash-injection test described below took place **before** the later Ethernet-first migration. The Jetson now runs Ethernet `192.168.20.27`, Wi-Fi `192.168.20.25`; HCM's old `hcm-routing.service` dependency and the `hcm-update-routing` post-start hook were disabled, and route rule 1100 was removed. The watchdog still targets HCM alone and must never change networking or restart PostgreSQL/Heartbeat V3. Later read-only checks confirmed `hcm-watchdog.timer` active, `hcm` and its Docker container running, and dashboard HTTP 200. **Crash recovery was not re-injected after the routing cleanup**; its earlier tested behavior and untested suppression/alert limits are accurately described in this document. See [live deployment addendum](JETSON_HCM_DEPLOYMENT_2026-10-10.md) and [Phase 4 Codex contract](PHASE4_CODEX_IMPLEMENTATION_2026-10-10.md).
+
+
 **Verified on 2026-10-10** on the Jetson Xavier NX, Ubuntu 18.04/systemd 237/host Python 3.6. This is a record of the **running development deployment**, not validation of production fault tolerance.
 
 ## Versioned files
