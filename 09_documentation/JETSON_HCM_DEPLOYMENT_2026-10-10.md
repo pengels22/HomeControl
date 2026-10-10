@@ -1,5 +1,13 @@
 # Jetson Xavier NX HCM Deployment Runbook
 
+## Phase 4 deployment verification — 2026-10-10 (current)
+
+The Jetson development HCM now runs **`homecontrol-hcm:phase4`**, built from Git commit **`e19a4a5`**, in the existing `hcm-test` container. The previous `phase3` and `phase3-backup` images were retained. Phase 4 migrations `003` and `004` were applied to the live `homecontrol` database after a zero-conflict preflight and a verified-readable custom-format backup (`/home/jetson/hcm-phase4-deployment-20261010-144428.dump`; sensitive). Container inspection reference: `/home/jetson/hcm-phase3-container-backup.json` (sensitive). Verify actual rollback container presence before relying on it.
+
+The migrations also succeeded against a restored Jetson DB clone on macOS, and the exact checkout passed **154 automated tests**, including **7/7 PostgreSQL integration tests** on a disposable PostgreSQL 16 server. After deployment: dashboard `http://192.168.20.27:8080/` returned 200, `/api/v1/health` returned `{"ok":true}`, authenticated GETs for `/api/v1/modules`, `/api/v1/logical-devices`, and `/api/v1/device-bindings` returned 200; unauthenticated GETs returned 401. Phase 4 Docker `hcm-test`, PostgreSQL `hcm-postgres`, host `hcm-heartbeat.service`, and `hcm-watchdog.timer` were healthy/active at smoke test time. PostgreSQL live connectivity and the new management tables were checked from inside the application container. No physical modules were commissioned.
+
+**Do not follow the historic Phase 3 rebuild recipe below verbatim**: it tags images `phase3` and references retired network routing. The live network is VLAN 20, Jetson `eth0=192.168.20.27`; there is no legacy priority-1100 route hook or `hcm-routing.service` dependency. Keep using the systemd-managed two-network container and protected `/etc/hcm/hcm.env`. The root Compose configuration exposes PostgreSQL and is development-only. Heartbeat end-to-end Conflict Manager status, physical safety checks, durable restore, notification/suppression and post-upgrade watchdog failure injection remain untested in this deployment. Refer to [the full Phase 4 validation record](PHASE4_PROGRESS_2026-10-10.md).
+
 ## Live network cutover addendum — 2026-10-10 (supersedes historic paths below)
 
 **Current verified Jetson:** `eth0=192.168.20.27/24` via Netplan/networkd DHCP, preferred metric 100; `wlan0=192.168.20.25/24` via NetworkManager `Lab 42` DHCP, metric 300 saved in profile (runtime 600 last checked prior to reconnect). Conflict Manager: USB Ethernet `192.168.20.26` metric 100, Wi-Fi `192.168.20.24` metric 300. Both devices remain on VLAN 20. The earlier Jetson static Ethernet `192.168.1.63` and Wi-Fi `192.168.20.27` descriptions below are **historical**.
