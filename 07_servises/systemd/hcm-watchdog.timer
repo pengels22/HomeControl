@@ -1,0 +1,11 @@
+[Unit]
+Description=HomeControl HCM Health Check Timer
+
+[Timer]
+OnBootSec=60
+OnUnitInactiveSec=30
+AccuracySec=1
+Unit=hcm-watchdog.service
+
+[Install]
+WantedBy=timers.target
