@@ -134,6 +134,9 @@ This status reflects repository review, not hardware validation.
 | Fire GPIO input | Planned/conflict | Pinout exists; polarity conflict unresolved. |
 | Maintenance lock block | Implemented/tested | Blocks logical-device commands. |
 | Maintenance lockout priority | Implemented/tested | Shared arbiter exposes requested/effective state and inhibits energize commands across HCM, RCM, LCM, SIM, and simulator paths. |
+| Input/output classification | Implemented/tested | SIM DI/AI inputs are not lockout-controlled outputs; DIO outputs and 12 V switching remain arbitrated. |
+| HCM safety relays | Implemented/tested | Simulated door-request and auxiliary safety relays are ADMIN-controlled and documented as lockout-exempt; real GPIO remains disabled. |
+| Global config loader | Implemented/tested | Loads validated flat defaults from numbered config directories with file provenance. |
 | Fire input abstraction | Implemented/tested | Simulated debounced input helper; real GPIO remains intentionally disabled. |
 | Phase 3 safety arbitration | Implemented/tested | See `HCM_PHASE3_SAFETY_ARBITRATION.md`; hardware validation remains outstanding. |
 | Safety event persistence | Partial | Events inserted; latching/recovery policy incomplete. |

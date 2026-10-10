@@ -234,6 +234,7 @@ class HomeControlSimulator:
         payload = {"op": "safety_state", "conditions": dict(self.safety_conditions)}
         await self.rcm.apply_command(payload)
         await self.lcm.apply_command(payload)
+        await self.sim.apply_command(payload)
         self.heartbeat_safety_reports.append({
             "ts": time.time(),
             "maintenance_lockout": self.safety_conditions["maintenance_lockout"],
@@ -246,12 +247,21 @@ class HomeControlSimulator:
         self.safety_events.append({"ts": time.time(), "type": "maintenance_lockout", "active": bool(active)})
         await self._publish_safety_conditions()
         if active:
+            for task in list(self.lcm_fades.values()):
+                task.cancel()
+            self.lcm_fades.clear()
             for channel in list(self.rcm.relays.values):
                 await self.rcm.apply_command({"op": "set_relay", "channel": channel, "value": False, "source": "maintenance"})
             for channel in list(self.lcm.relays.values):
                 await self.lcm.apply_command({"op": "set_relay", "channel": channel, "value": False, "source": "maintenance"})
             for channel in list(self.lcm.hv_dimmers.values) + list(self.lcm.lv_dimmers.values):
                 await self.lcm.apply_command({"op": "set_dimmer", "channel": channel, "percent": 0, "source": "maintenance"})
+            hexa = self.sim.hexa_state()
+            for channel, item in hexa["dio"].items():
+                if item.get("direction") == "output":
+                    await self.sim.apply_command({"op": "set_hexa_dio", "channel": channel, "value": False, "source": "maintenance"})
+            for channel in list(hexa["switching_12v"]):
+                await self.sim.apply_command({"op": "set_hexa_12v", "channel": channel, "value": False, "source": "maintenance"})
         return {"ok": True, "safety": self.safety_state()}
 
     async def set_fire_alarm(self, active: bool) -> dict[str, Any]:
@@ -295,6 +305,9 @@ class HomeControlSimulator:
     ) -> dict[str, Any]:
         ch = channel.upper()
         self.lcm_dimmer_percent(ch)
+        if self.safety_conditions["maintenance_lockout"]:
+            result = await self.lcm.apply_command({"op": "set_dimmer", "channel": ch, "percent": percent, "source": "user"})
+            return {"ok": False, "channel": ch, "target_percent": max(0.0, min(100.0, float(percent))), "fade_s": duration_s, "inhibited": True, "arbitration": result.get("arbitration")}
         existing = self.lcm_fades.get(ch)
         if existing:
             existing.cancel()

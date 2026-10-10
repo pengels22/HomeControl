@@ -11,6 +11,7 @@ from . import db
 from .registry import registry
 from .hvac import HVACController
 from .safety import SafetyController
+from .safety_relays import HCMSafetyRelayController
 from .rules import RulesEngine
 from . import api
 from .devices import command_logical
@@ -30,9 +31,11 @@ async def hvac_damper(room, open_: bool):
 
 hvac = HVACController(hvac_output, hvac_damper)
 safety = SafetyController(hvac)
+safety_relays = HCMSafetyRelayController()
 rules = RulesEngine()
 api.hvac = hvac
 api.safety = safety
+api.safety_relays = safety_relays
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -44,6 +47,7 @@ async def lifespan(app: FastAPI):
     yield
     rules.running=False
     rule_task.cancel(); hvac_task.cancel()
+    await safety_relays.shutdown()
     await registry.stop(); await db.close()
 
 async def hvac_loop():

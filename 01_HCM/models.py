@@ -27,6 +27,14 @@ class MaintenanceLockoutIn(BaseModel):
     logical_name: str
     active: bool
 
+class SafetyRelayPulseIn(BaseModel):
+    relay: Literal['door_request', 'auxiliary'] = 'door_request'
+    duration_ms: int | None = None
+
+class SafetyRelayStateIn(BaseModel):
+    relay: Literal['door_request', 'auxiliary']
+    active: bool
+
 class AuthChallengeIn(BaseModel):
     username: str
 

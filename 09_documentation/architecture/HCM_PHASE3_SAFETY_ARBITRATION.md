@@ -26,6 +26,13 @@ lockout, fire, and fault conditions. In SIM, DIO channels configured with
 `direction: input` reject output commands and can only be updated through
 simulated input injection; AIO channels are read-only telemetry.
 
+The dedicated HCM safety I/O is classified separately from normal module
+outputs. `alarm_contact` is an input on physical pin 15/GPIO393. `door_request`
+is a simulated dry-contact output on physical pin 16/GPIO256 and `auxiliary` is
+a simulated output on physical pin 18/GPIO344. These HCM safety relays are not
+normal automation outputs and are documented as lockout-exempt; API access still
+requires an ADMIN session and real GPIO is not enabled in Phase 3.
+
 ## Priority Table
 
 | Priority | Condition/source | Effective behavior |
@@ -83,6 +90,23 @@ Real GPIO remains disabled for this phase. Actual relay polarity, electrical
 limits, input protection, and disconnected/floating behavior must be validated
 before deployment.
 
+## Global Configuration
+
+Global defaults are loaded through `07_servises/common/global_config.py` from the
+existing numbered configuration directories:
+
+- `06_config/01_HCM/global_var.py`
+- `06_config/02_SIM/global_config_SIM.py`
+- `06_config/03_LCM/global_config_LCM.py`
+- `06_config/04_RCM/global_config_RCM.py`
+- `06_config/05_PNL/global_config_PNL.py`
+- `06_config/06_RMC/global_config_RMC.py`
+
+The loader validates required values and preserves file provenance. Runtime
+integration in this phase uses HCM door pulse bounds and SIM Hexa 12 V restart
+timing. The SIM and RMC CAN bitrate mismatch remains visible in tests and must
+be resolved before any firmware/CAN deployment.
+
 ## Unified Heartbeat V3
 
 `SafetyController` reports safety status and faults through the existing local
@@ -102,6 +126,7 @@ local arbitration.
 |---|---|---|
 | Maintenance lockout active | Command applicable outputs de-energized and inhibit energize requests. | Physical maintenance isolation and lockout/tagout. |
 | Digital/analog input active during lockout | Inputs continue to report; no output arbitration is applied to DI/AI channels. | Input electrical conditioning and supervision. |
+| HCM door request or auxiliary relay active during lockout | Dedicated HCM safety relays remain outside normal output lockout arbitration and require ADMIN API access. | Verify intended fire/access-control behavior, relay contact state, and hardwired interlocks. |
 | Fire alarm active | Log/report fire, de-energize HVAC shutdown relay coils, energize configured emergency lighting only if not locked out. | Emergency lighting circuit assignment and hardwired fire/HVAC shutdown. |
 | Fire input unknown | Conservative output inhibit in arbiter. | Supervised input circuit, pull resistors, protection, and fault detection. |
 | HCM to module communication loss | Modules can receive/hold local `communication_loss` safety condition and de-energize. | Independent watchdog/fail-state behavior after processor/network loss. |

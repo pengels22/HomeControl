@@ -68,6 +68,38 @@ async def test_simulator_lcm_dimmer_fades_to_target():
 
 
 @pytest.mark.asyncio
+async def test_simulator_lockout_cancels_lcm_fades_and_sim_outputs_only():
+    sim = simulator.HomeControlSimulator()
+
+    await sim.sim.apply_command({'op': 'set_hexa_dio', 'channel': 'dio3', 'value': True})
+    await sim.sim.apply_command({'op': 'set_hexa_12v', 'channel': 'sw1', 'value': True})
+    await sim.sim.apply_command({'op': 'inject_hexa_di', 'channel': 'dio1', 'value': True})
+    await sim.set_lcm_dimmer_fade('10-1', 75, duration_s=1, steps=10)
+
+    result = await sim.set_maintenance_lockout(True)
+    state = await sim.state()
+
+    assert result['ok'] is True
+    assert sim.lcm_fades == {}
+    assert state['sim']['hexa_board']['dio']['dio1']['value'] is True
+    assert state['sim']['hexa_board']['dio']['dio3']['value'] is False
+    assert state['sim']['hexa_board']['switching_12v']['sw1']['value'] is False
+
+
+@pytest.mark.asyncio
+async def test_simulator_refuses_new_lcm_fade_during_lockout():
+    sim = simulator.HomeControlSimulator()
+
+    await sim.set_maintenance_lockout(True)
+    result = await sim.set_lcm_dimmer_fade('10-1', 75, duration_s=0.01, steps=2)
+
+    assert result['ok'] is False
+    assert result['inhibited'] is True
+    assert result['arbitration']['reason'] == 'maintenance_lockout'
+    assert '10-1' not in sim.lcm_fades
+
+
+@pytest.mark.asyncio
 async def test_simulator_lcm_relay_control():
     sim = simulator.HomeControlSimulator()
 

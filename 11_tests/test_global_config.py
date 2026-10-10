@@ -1,0 +1,52 @@
+import ast
+from importlib import import_module
+from pathlib import Path
+
+import pytest
+
+
+global_config = import_module('07_servises.common.global_config')
+
+
+def assignment_names(path):
+    tree = ast.parse(path.read_text())
+    names = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id[0].isupper():
+                    names.append(target.id)
+    return names
+
+
+def test_global_configs_load_from_numbered_directories_with_paths():
+    for component in ('HCM', 'SIM', 'LCM', 'RCM', 'PNL', 'RMC'):
+        cfg = global_config.load_global_config(component)
+
+        assert cfg.component == component
+        assert Path(cfg.path).exists()
+        assert cfg.as_dict()
+
+
+def test_global_configs_remain_alphabetized():
+    root = global_config.find_repo_root()
+    for path in global_config.COMPONENT_FILES.values():
+        names = assignment_names(root / path)
+
+        assert names == sorted(names, key=str.casefold), str(path)
+
+
+def test_global_config_rejects_invalid_component():
+    with pytest.raises(global_config.GlobalConfigError):
+        global_config.load_global_config('BAD')
+
+
+def test_phase3_pinned_values_are_available():
+    hcm = global_config.load_global_config('HCM')
+    sim = global_config.load_global_config('SIM')
+    rmc = global_config.load_global_config('RMC')
+
+    assert hcm.Heartbeat_TCP_Port == 6004
+    assert hcm.Door_Open_Pulse == 3000
+    assert sim.Hexa_12V_Restart_Off_Time == 5000
+    assert sim.CAN_Bitrate != rmc.CAN_Bitrate

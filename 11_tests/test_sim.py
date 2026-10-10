@@ -143,7 +143,12 @@ async def test_sim_can_restart_12v_loop_power_switch():
     result = await agent.apply_command({'op': 'restart_hexa_12v', 'channel': 'sw2', 'delay_s': 0})
     state = await agent.collect_state()
 
-    assert result == {'ok': True, 'channel': 'sw2', 'value': True, 'restarted': True, 'power_off_s': 0.0}
+    assert result['ok'] is True
+    assert result['channel'] == 'sw2'
+    assert result['value'] is True
+    assert result['restarted'] is True
+    assert result['power_off_s'] == 0.0
+    assert result['arbitration']['effective_state']['energized'] is True
     assert state['hexa_board']['switching_12v']['sw2']['label'] == 'Loop B power'
     assert state['hexa_board']['switching_12v']['sw2']['value'] is True
 

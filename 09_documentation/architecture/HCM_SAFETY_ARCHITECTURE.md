@@ -100,6 +100,8 @@ Maintenance lockout is explicitly part of the life-safety architecture and is
 the highest-priority output inhibit. When it is active:
 
 - No controlled output may energize.
+- DI and AI channels are inputs, not controlled outputs, and must continue
+  sensing/reporting.
 - Fire-response commands may not override maintenance lockout to energize an
   output.
 - Normal automation, local overrides, and remote commands may not energize
@@ -116,6 +118,11 @@ When maintenance lockout is inactive and a fire alarm occurs:
 
 The software must distinguish requested output state from the final output state
 after safety arbitration.
+
+Dedicated central HCM safety I/O is not a normal automation output class. The
+alarm contact is an input; the door-request and auxiliary safety relays are
+handled by the HCM safety-relay controller and are documented as lockout-exempt
+pending hardware validation.
 
 ## HVAC Safety
 

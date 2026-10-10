@@ -1,3 +1,4 @@
+import asyncio
 from importlib import import_module
 
 import pytest
@@ -170,3 +171,19 @@ async def test_sim_hexa_inputs_are_not_part_of_lockout():
     assert input_result == {'ok': True, 'channel': 'dio1', 'value': True, 'direction': 'input'}
     assert 'DIO1' not in agent.safety.snapshot()['outputs']
     assert (await agent.collect_state())['hexa_board']['dio']['dio1']['value'] is True
+
+
+@pytest.mark.asyncio
+async def test_sim_hexa_restart_does_not_reenergize_after_lockout():
+    cfg = sim_mod.common_cfg.load_yaml(sim_mod.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+    agent = sim_mod.SIMAgent(cfg)
+
+    restart = asyncio.ensure_future(agent.apply_command({'op': 'restart_hexa_12v', 'channel': 'sw1', 'delay_s': 0.05}))
+    await asyncio.sleep(0)
+    await agent.apply_command({'op': 'safety_state', 'conditions': {'maintenance_lockout': True}})
+    result = await restart
+    state = await agent.collect_state()
+
+    assert result['restarted'] is False
+    assert result['cancelled'] is True
+    assert state['hexa_board']['switching_12v']['sw1']['value'] is False

@@ -61,6 +61,10 @@ Required before safety behavior changes:
   data structures.
 - Tests assert that no hardware-driver-facing energize command is emitted during
   maintenance lockout.
+- SIM DI and AI inputs continue to report during maintenance lockout and do not
+  pass through output arbitration.
+- HCM door-request and auxiliary safety relays are tested as simulated,
+  lockout-exempt safety I/O, not normal automation outputs.
 
 ## Hardware Validation Tests
 

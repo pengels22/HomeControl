@@ -18,6 +18,8 @@ architecture unless a change is explicitly approved.
 - VLAN 140 is not applicable to this HCM installation.
 - Life-safety behavior must remain separated from convenience automation.
 - Maintenance Lockout has higher output priority than Fire/Life Safety.
+- Maintenance Lockout applies only to controlled outputs; DI and AI inputs must keep sensing/reporting.
+- Dedicated HCM safety relays/inputs are separately classified and are not normal automation outputs.
 - Do not silently change hardware pinouts, network ranges, relay numbering, fail states,
   or HVAC timing.
 

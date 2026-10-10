@@ -7,6 +7,7 @@ common_agent = import_module('07_servises.common.agent')
 common_can = import_module('07_servises.common.can')
 common_cfg = import_module('07_servises.common.config')
 common_io = import_module('07_servises.common.io')
+common_global_config = import_module('07_servises.common.global_config')
 common_rmc_fw = import_module('07_servises.common.rmc_firmware')
 common_safety = import_module('07_servises.common.safety_arbiter')
 
@@ -24,7 +25,9 @@ class SIMAgent(common_agent.ModuleAgent):
             for name, item in self._hexa_section('dio').get('channels', {}).items()
         }
         self.hexa_switching_state = self._initial_output_state('switching_12v', 'outputs')
+        self.global_config = common_global_config.load_global_config('SIM')
         self.safety = common_safety.SafetyArbiter()
+        self.hexa_restart_tasks = {}
         self.hexa_usb_links = {}
         self.rmc_firmware_cfg = config.get('rmc_firmware_updates', {})
         self.firmware_staging_root = Path(self.rmc_firmware_cfg.get('staging_root', '/var/lib/hcm/firmware-staging'))
@@ -144,6 +147,28 @@ class SIMAgent(common_agent.ModuleAgent):
         if not link:
             return {'ok': False, 'error': 'unknown_hexa_usb_link'}
         return {'ok': True, 'disconnected': link}
+
+    async def _set_hexa_12v_output(self, channel, value, source='module_api'):
+        if channel not in self.hexa_switching_state:
+            return {'ok': False, 'error': 'unknown_hexa_12v_channel'}
+        payload = {'op': 'set_hexa_12v', 'channel': channel, 'value': bool(value), 'source': source}
+        decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), channel, payload, source))
+        self.hexa_switching_state[channel] = bool(decision.final_command.get('value', False))
+        return {'ok': True, 'channel': channel, 'value': self.hexa_switching_state[channel], 'arbitration': decision.as_dict()}
+
+    def _cancel_hexa_restart(self, channel):
+        task = self.hexa_restart_tasks.pop(channel, None)
+        if task and not task.done():
+            task.cancel()
+
+    def _cancel_all_hexa_restarts(self):
+        for channel in list(self.hexa_restart_tasks):
+            self._cancel_hexa_restart(channel)
+
+    async def _restart_hexa_12v_output(self, channel, delay_s):
+        await self._set_hexa_12v_output(channel, False, source='module_restart')
+        await asyncio.sleep(max(0.0, float(delay_s)))
+        return await self._set_hexa_12v_output(channel, True, source='module_restart')
 
     def _record_rmc_frame(self, interface, arbitration_id, data):
         self.can_network.record_frame(interface, arbitration_id, data)
@@ -278,6 +303,19 @@ class SIMAgent(common_agent.ModuleAgent):
     async def apply_command(self, payload):
         if payload.get('op') == 'safety_state':
             self.safety.update_conditions(payload.get('conditions', {}))
+            if any(payload.get('conditions', {}).get(name) for name in ('maintenance_lockout', 'fire_input_fault', 'communication_loss', 'arbiter_fault')):
+                self._cancel_all_hexa_restarts()
+                for channel in list(self.hexa_switching_state):
+                    await self._set_hexa_12v_output(channel, False, source='safety_state')
+                for channel, direction in self.hexa_dio_directions.items():
+                    if direction == 'output':
+                        decision = self.safety.decide(common_safety.OutputRequest(
+                            self.identity.get('device_id'),
+                            channel,
+                            {'op': 'set_hexa_dio', 'channel': channel, 'value': False, 'source': 'safety_state'},
+                            'safety_state',
+                        ))
+                        self.hexa_dio_state[channel] = bool(decision.final_command.get('value', False))
             return {'ok': True, 'safety': self.safety.snapshot()}
         if payload.get('op') == 'configure_can':
             return {'ok': True, 'can': await self.can_network.configure(apply=bool(payload.get('apply', False)))}
@@ -310,20 +348,25 @@ class SIMAgent(common_agent.ModuleAgent):
             return {'ok': True, 'channel': channel, 'value': self.hexa_dio_state[channel], 'direction': direction}
         if payload.get('op') == 'set_hexa_12v':
             channel = str(payload['channel'])
-            if channel not in self.hexa_switching_state:
-                return {'ok': False, 'error': 'unknown_hexa_12v_channel'}
-            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), channel, payload, payload.get('source', 'module_api')))
-            self.hexa_switching_state[channel] = bool(decision.final_command.get('value', False))
-            return {'ok': True, 'channel': channel, 'value': self.hexa_switching_state[channel], 'arbitration': decision.as_dict()}
+            self._cancel_hexa_restart(channel)
+            return await self._set_hexa_12v_output(channel, payload.get('value', False), source=payload.get('source', 'module_api'))
         if payload.get('op') == 'restart_hexa_12v':
             channel = str(payload['channel'])
             if channel not in self.hexa_switching_state:
                 return {'ok': False, 'error': 'unknown_hexa_12v_channel'}
-            delay_s = float(payload.get('delay_s', 5))
-            self.hexa_switching_state[channel] = False
-            await asyncio.sleep(delay_s)
-            self.hexa_switching_state[channel] = True
-            return {'ok': True, 'channel': channel, 'value': True, 'restarted': True, 'power_off_s': delay_s}
+            delay_s = float(payload.get('delay_s', self.global_config.Hexa_12V_Restart_Off_Time / 1000.0))
+            self._cancel_hexa_restart(channel)
+            task = asyncio.ensure_future(self._restart_hexa_12v_output(channel, delay_s))
+            self.hexa_restart_tasks[channel] = task
+            try:
+                result = await task
+            except asyncio.CancelledError:
+                return {'ok': False, 'channel': channel, 'value': self.hexa_switching_state.get(channel, False), 'restarted': False, 'cancelled': True}
+            finally:
+                if self.hexa_restart_tasks.get(channel) is task:
+                    self.hexa_restart_tasks.pop(channel, None)
+            result.update({'restarted': result.get('value') is True, 'power_off_s': delay_s})
+            return result
         if payload.get('op') == 'link_hexa_usb':
             return self.link_hexa_usb(payload.get('name', ''), str(payload.get('port', '')))
         if payload.get('op') == 'disconnect_hexa_usb':

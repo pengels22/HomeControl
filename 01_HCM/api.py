@@ -15,6 +15,8 @@ from .models import (
     PasswordLoginIn,
     RmcFirmwareUpdateIn,
     RoomStateIn,
+    SafetyRelayPulseIn,
+    SafetyRelayStateIn,
     UserCreateIn,
 )
 from .auth import (
@@ -36,6 +38,7 @@ from .updater import updater
 router = APIRouter(prefix='/api/v1')
 hvac = None
 safety = None
+safety_relays = None
 
 @router.get('/health')
 async def health(): return {'ok': True}
@@ -163,3 +166,29 @@ async def maintenance_lockout(body: MaintenanceLockoutIn, user=Depends(require_u
     except KeyError as exc:
         raise HTTPException(404, str(exc))
     return {'ok': True, 'maintenance_locked': body.active, **result}
+
+@router.get('/safety/hcm-relays')
+async def safety_hcm_relays(user=Depends(require_user)):
+    if safety_relays is None:
+        raise HTTPException(503, 'HCM safety relay controller is not configured')
+    return safety_relays.status()
+
+@router.post('/safety/hcm-relays/pulse')
+async def safety_hcm_relay_pulse(body: SafetyRelayPulseIn, user=Depends(require_user)):
+    if user['role'] != 'ADMIN': raise HTTPException(403)
+    if safety_relays is None:
+        raise HTTPException(503, 'HCM safety relay controller is not configured')
+    try:
+        return await safety_relays.pulse(body.relay, body.duration_ms)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+
+@router.put('/safety/hcm-relays')
+async def safety_hcm_relay_state(body: SafetyRelayStateIn, user=Depends(require_user)):
+    if user['role'] != 'ADMIN': raise HTTPException(403)
+    if safety_relays is None:
+        raise HTTPException(503, 'HCM safety relay controller is not configured')
+    try:
+        return await safety_relays.set_output(body.relay, body.active)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
