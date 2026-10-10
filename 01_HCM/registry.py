@@ -6,6 +6,7 @@ import logging
 import ssl
 import time
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from importlib import import_module
@@ -17,6 +18,16 @@ protocol = import_module('07_servises.common.protocol')
 log = logging.getLogger(__name__)
 
 MODULE_TYPES = ('RCM', 'LCM', 'SIM', 'PNL')
+
+
+@asynccontextmanager
+async def _transaction(conn):
+    tx_factory = getattr(conn, "transaction", None)
+    if tx_factory is None:
+        yield
+        return
+    async with tx_factory():
+        yield
 
 class ControlNetworkPlan:
     def __init__(self, profile_name: str, data: dict[str, Any]):
@@ -94,6 +105,7 @@ class ModuleConnection:
 class ModuleRegistry:
     def __init__(self):
         self.connections: dict[str, ModuleConnection] = {}
+        self._connections_lock = asyncio.Lock()
         self.server: asyncio.AbstractServer | None = None
 
     async def start(self):
@@ -125,6 +137,19 @@ class ModuleRegistry:
         if self.server:
             self.server.close(); await self.server.wait_closed()
 
+    async def _register_connection(self, key: str, conn: ModuleConnection) -> None:
+        async with self._connections_lock:
+            self.connections[key] = conn
+
+    async def _unregister_connection(self, conn: ModuleConnection) -> bool:
+        if not conn.connection_key:
+            return False
+        async with self._connections_lock:
+            if self.connections.get(conn.connection_key) is conn:
+                self.connections.pop(conn.connection_key, None)
+                return True
+        return False
+
     async def _assign(self, ident: dict[str, Any]) -> dict[str, Any]:
         typ = str(ident.get('module_type','')).upper()
         if typ not in MODULE_TYPES:
@@ -135,40 +160,62 @@ class ModuleRegistry:
             raise ValueError('identify requires device_id or legacy module_uuid')
         identity_label = device_id or module_uuid
         async with db.acquire() as conn:
-            row = await conn.fetchrow('''
-                SELECT hostname, ip_address
-                FROM modules
-                WHERE ($1::text IS NOT NULL AND device_id=$1)
-                   OR ($2::text IS NOT NULL AND module_uuid::text=$2)
-            ''', device_id, module_uuid)
-            if row:
-                return {'hostname': row['hostname'], 'ip_address': str(row['ip_address']), 'reboot_required': False}
-            if not settings.commissioning_enabled:
-                raise PermissionError(f'commissioning disabled for unknown {typ} module {identity_label}')
-            plan = load_control_network_plan()
-            addresses = plan.addresses_for(typ)
-            used = {str(r['ip_address']) for r in await conn.fetch('SELECT ip_address FROM modules WHERE module_type=$1', typ)}
-            ip = next((candidate for candidate in addresses if candidate not in used), None)
-            if ip is None:
-                raise RuntimeError(f'no addresses left in {typ} pool')
-            seq = addresses.index(ip) + 1
-            hostname = f'{typ}{seq:02d}'
-            await conn.execute('''
-                INSERT INTO modules(
-                    device_id,module_uuid,identity_interface,module_type,hostname,
-                    ip_address,software_version,last_seen,online,control_session_online
+            async with _transaction(conn):
+                rows = await conn.fetch('''
+                    SELECT id, hostname, ip_address, device_id, module_uuid::text AS module_uuid
+                    FROM modules
+                    WHERE ($1::text IS NOT NULL AND device_id=$1)
+                       OR ($2::text IS NOT NULL AND module_uuid::text=$2)
+                    FOR UPDATE
+                ''', device_id, module_uuid)
+                ids = {int(row['id']) for row in rows}
+                if len(ids) > 1:
+                    raise ValueError('identify maps to conflicting module records')
+                if rows:
+                    row = rows[0]
+                    if device_id and row['device_id'] and row['device_id'] != device_id:
+                        raise ValueError('device_id conflicts with existing module record')
+                    if module_uuid and row['module_uuid'] and row['module_uuid'] != module_uuid:
+                        raise ValueError('module_uuid conflicts with existing module record')
+                    await conn.execute('''
+                        UPDATE modules
+                        SET device_id=COALESCE(device_id, $2),
+                            module_uuid=COALESCE(module_uuid, $3::uuid),
+                            identity_interface=COALESCE($4, identity_interface)
+                        WHERE id=$1
+                    ''',
+                        row['id'],
+                        device_id,
+                        module_uuid,
+                        ident.get('identity_interface') or (ident.get('identity') or {}).get('interface'),
+                    )
+                    return {'hostname': row['hostname'], 'ip_address': str(row['ip_address']), 'reboot_required': False}
+                if not settings.commissioning_enabled:
+                    raise PermissionError(f'commissioning disabled for unknown {typ} module {identity_label}')
+                plan = load_control_network_plan()
+                addresses = plan.addresses_for(typ)
+                used = {str(r['ip_address']) for r in await conn.fetch('SELECT ip_address FROM modules WHERE module_type=$1', typ)}
+                ip = next((candidate for candidate in addresses if candidate not in used), None)
+                if ip is None:
+                    raise RuntimeError(f'no addresses left in {typ} pool')
+                seq = addresses.index(ip) + 1
+                hostname = f'{typ}{seq:02d}'
+                await conn.execute('''
+                    INSERT INTO modules(
+                        device_id,module_uuid,identity_interface,module_type,hostname,
+                        ip_address,software_version,last_seen,online,control_session_online
+                    )
+                    VALUES($1,$2,$3,$4,$5,$6,$7,now(),true,true)
+                ''',
+                    device_id,
+                    module_uuid,
+                    ident.get('identity_interface') or (ident.get('identity') or {}).get('interface'),
+                    typ,
+                    hostname,
+                    ip,
+                    ident.get('software_version'),
                 )
-                VALUES($1,$2,$3,$4,$5,$6,$7,now(),true,true)
-            ''',
-                device_id,
-                module_uuid,
-                ident.get('identity_interface') or (ident.get('identity') or {}).get('interface'),
-                typ,
-                hostname,
-                ip,
-                ident.get('software_version'),
-            )
-            return {'hostname': hostname, 'ip_address': ip, 'reboot_required': True}
+                return {'hostname': hostname, 'ip_address': ip, 'reboot_required': True}
 
     def _device_id_from_ident(self, ident: dict[str, Any]) -> str | None:
         raw = ident.get('device_id')
@@ -210,9 +257,9 @@ class ModuleRegistry:
         return rows
 
     async def _store_capabilities(self, dbc, device_id: str | None, module_uuid: str | None, ident: dict[str, Any]) -> None:
-        capabilities = self._capability_rows(ident)
-        if not capabilities:
+        if 'capabilities' not in ident:
             return
+        capabilities = self._capability_rows(ident)
         row = await dbc.fetchrow('''
             SELECT id
             FROM modules
@@ -222,18 +269,23 @@ class ModuleRegistry:
         if not row:
             return
         module_id = int(row['id'])
-        await dbc.execute(
-            'DELETE FROM module_capabilities WHERE module_id=$1 AND NOT (capability=ANY($2::text[]))',
-            module_id,
-            [name for name, _details in capabilities],
-        )
-        for name, details in capabilities:
-            await dbc.execute('''
-                INSERT INTO module_capabilities(module_id, capability, details, updated_at)
-                VALUES($1,$2,$3::jsonb,now())
-                ON CONFLICT(module_id, capability)
-                DO UPDATE SET details=EXCLUDED.details, updated_at=now()
-            ''', module_id, name, json.dumps(details))
+        async with _transaction(dbc):
+            if ident.get('capabilities_full_snapshot') is True:
+                if capabilities:
+                    await dbc.execute(
+                        'DELETE FROM module_capabilities WHERE module_id=$1 AND NOT (capability=ANY($2::text[]))',
+                        module_id,
+                        [name for name, _details in capabilities],
+                    )
+                else:
+                    await dbc.execute('DELETE FROM module_capabilities WHERE module_id=$1', module_id)
+            for name, details in capabilities:
+                await dbc.execute('''
+                    INSERT INTO module_capabilities(module_id, capability, details, updated_at)
+                    VALUES($1,$2,$3::jsonb,now())
+                    ON CONFLICT(module_id, capability)
+                    DO UPDATE SET details=EXCLUDED.details, updated_at=now()
+                ''', module_id, name, json.dumps(details))
 
     async def handle_client(self, reader, writer):
         conn = ModuleConnection(reader, writer)
@@ -250,7 +302,7 @@ class ModuleRegistry:
             conn.connection_key = conn.device_id or conn.module_uuid
             assignment = await self._assign(ident)
             conn.hostname = assignment['hostname']
-            self.connections[conn.connection_key] = conn
+            await self._register_connection(conn.connection_key, conn)
             if ident.get('hostname') != assignment['hostname'] or ident.get('assigned_ip') != assignment['ip_address']:
                 await conn.send('assignment', assignment)
             else:
@@ -312,8 +364,10 @@ class ModuleRegistry:
         except Exception:
             log.exception('module connection error from %s', peer)
         finally:
+            should_mark_offline = False
             if conn.connection_key:
-                self.connections.pop(conn.connection_key, None)
+                should_mark_offline = await self._unregister_connection(conn)
+            if should_mark_offline:
                 try:
                     async with db.acquire() as dbc:
                         await dbc.execute('''
@@ -334,7 +388,8 @@ class ModuleRegistry:
             row = await conn.fetchrow('SELECT device_id, module_uuid::text AS module_uuid FROM modules WHERE hostname=$1', hostname)
         if not row: raise KeyError(hostname)
         key = row['device_id'] or str(row['module_uuid'])
-        mc = self.connections.get(key)
+        async with self._connections_lock:
+            mc = self.connections.get(key)
         if not mc: raise ConnectionError(f'{hostname} offline')
         return await mc.command(payload, timeout=timeout)
 

@@ -50,6 +50,20 @@ class FakeRegistryConn:
         raise AssertionError(f'unexpected fetchrow: {query}')
 
     async def fetch(self, query, *args):
+        if 'SELECT id, hostname, ip_address, device_id' in query:
+            device_id, module_uuid = args
+            rows = []
+            for key, row in self.modules.items():
+                if (device_id and row.get('device_id') == device_id) or (module_uuid and key == module_uuid):
+                    row.setdefault('id', len(rows) + 1)
+                    rows.append({
+                        'id': row['id'],
+                        'hostname': row['hostname'],
+                        'ip_address': row['ip_address'],
+                        'device_id': row.get('device_id'),
+                        'module_uuid': key if key != row.get('device_id') else row.get('module_uuid'),
+                    })
+            return rows
         if 'SELECT ip_address FROM modules WHERE module_type=$1' in query:
             return [
                 {'ip_address': row['ip_address']}
@@ -90,6 +104,16 @@ class FakeRegistryConn:
                 if len(args) > 2:
                     row['software_version'] = args[2]
                     row['identity_interface'] = args[3] or row.get('identity_interface')
+        elif 'SET device_id=COALESCE' in query:
+            module_id, device_id, module_uuid, identity_interface = args
+            for key, row in list(self.modules.items()):
+                if row['id'] == module_id:
+                    row['device_id'] = row.get('device_id') or device_id
+                    row['module_uuid'] = row.get('module_uuid') or module_uuid
+                    row['identity_interface'] = identity_interface or row.get('identity_interface')
+                    if module_uuid and key != module_uuid:
+                        self.modules[module_uuid] = row
+                    break
         elif 'INSERT INTO module_capabilities' in query:
             module_id, capability, details = args
             for row in self.modules.values():
@@ -97,13 +121,17 @@ class FakeRegistryConn:
                     row.setdefault('capabilities', {})[capability] = details
                     break
         elif 'DELETE FROM module_capabilities' in query:
-            module_id, capabilities = args
+            module_id = args[0]
             for row in self.modules.values():
                 if row['id'] == module_id:
                     existing = row.setdefault('capabilities', {})
-                    for capability in list(existing):
-                        if capability not in capabilities:
-                            existing.pop(capability, None)
+                    if len(args) == 1:
+                        existing.clear()
+                    else:
+                        capabilities = args[1]
+                        for capability in list(existing):
+                            if capability not in capabilities:
+                                existing.pop(capability, None)
                     break
         elif 'online=false' in query and 'UPDATE modules' in query:
             device_id, module_uuid = args
@@ -188,6 +216,88 @@ async def test_identify_capabilities_are_normalized_for_persistence(monkeypatch)
     assert set(capabilities) == {'telemetry', 'rmc-can', 'hexa-dio'}
     assert json.loads(capabilities['rmc-can']) == {'interfaces': ['can0']}
     assert conn.modules['48b02d87db16']['identity_interface'] == 'eth0'
+
+
+@pytest.mark.asyncio
+async def test_partial_capability_reports_do_not_delete_existing_capabilities(monkeypatch):
+    conn = FakeRegistryConn()
+    monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
+    monkeypatch.setattr(registry_mod.settings, 'commissioning_enabled', True)
+    reg = registry_mod.ModuleRegistry()
+    await reg._assign({'module_type': 'SIM', 'device_id': '48:b0:2d:87:db:16'})
+    conn.modules['48b02d87db16']['capabilities'] = {'telemetry': '{}', 'rmc-can': '{}'}
+
+    async with registry_mod.db.acquire() as dbc:
+        await reg._store_capabilities(dbc, '48b02d87db16', None, {
+            'capabilities': ['telemetry'],
+        })
+
+    assert set(conn.modules['48b02d87db16']['capabilities']) == {'telemetry', 'rmc-can'}
+
+
+@pytest.mark.asyncio
+async def test_full_capability_snapshot_replaces_existing_capabilities(monkeypatch):
+    conn = FakeRegistryConn()
+    monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
+    monkeypatch.setattr(registry_mod.settings, 'commissioning_enabled', True)
+    reg = registry_mod.ModuleRegistry()
+    await reg._assign({'module_type': 'SIM', 'device_id': '48:b0:2d:87:db:16'})
+    conn.modules['48b02d87db16']['capabilities'] = {'telemetry': '{}', 'rmc-can': '{}'}
+
+    async with registry_mod.db.acquire() as dbc:
+        await reg._store_capabilities(dbc, '48b02d87db16', None, {
+            'capabilities_full_snapshot': True,
+            'capabilities': ['telemetry'],
+        })
+
+    assert set(conn.modules['48b02d87db16']['capabilities']) == {'telemetry'}
+
+
+@pytest.mark.asyncio
+async def test_assign_rejects_conflicting_device_id_and_legacy_uuid(monkeypatch):
+    conn = FakeRegistryConn()
+    conn.modules['legacy-a'] = {
+        'id': 1,
+        'device_id': None,
+        'module_type': 'RCM',
+        'hostname': 'RCM01',
+        'ip_address': '192.168.20.20',
+        'online': False,
+    }
+    conn.modules['legacy-b'] = {
+        'id': 2,
+        'device_id': '48b02d87db16',
+        'module_type': 'RCM',
+        'hostname': 'RCM02',
+        'ip_address': '192.168.20.21',
+        'online': False,
+    }
+    monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
+    reg = registry_mod.ModuleRegistry()
+
+    with pytest.raises(ValueError, match='conflicting module records'):
+        await reg._assign({
+            'module_type': 'RCM',
+            'device_id': '48:b0:2d:87:db:16',
+            'module_uuid': 'legacy-a',
+        })
+
+
+@pytest.mark.asyncio
+async def test_old_connection_cannot_remove_newer_connection():
+    reg = registry_mod.ModuleRegistry()
+    old = registry_mod.ModuleConnection(None, None)
+    old.connection_key = '48b02d87db16'
+    new = registry_mod.ModuleConnection(None, None)
+    new.connection_key = '48b02d87db16'
+
+    await reg._register_connection(old.connection_key, old)
+    await reg._register_connection(new.connection_key, new)
+
+    assert await reg._unregister_connection(old) is False
+    assert reg.connections['48b02d87db16'] is new
+    assert await reg._unregister_connection(new) is True
+    assert '48b02d87db16' not in reg.connections
 
 
 def write_hcm_config(root: Path, active_profile: str, production_subnet: str | None = None) -> None:
