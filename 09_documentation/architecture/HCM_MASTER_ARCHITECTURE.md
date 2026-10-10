@@ -1,5 +1,10 @@
 # HCM Master Architecture
 
+## Deployed development implementation (2026-10-10)
+
+The Jetson Xavier NX now runs the HCM FastAPI server in a Python 3.13 container connected to PostgreSQL 16 via a private Docker bridge. The dashboard/authentication, data mount, networking and automatic boot of HCM/PostgreSQL/routing/host Heartbeat V3 have been operator validated. See [verified runbook](../JETSON_HCM_DEPLOYMENT_2026-10-10.md). This is a **development deployment** and does not establish readiness for hardware safety, production certificates, notifications, dynamic access rules, crash recovery or flash-storage durability. Future-state architectural requirements below remain goals rather than statements about live installation.
+
+
 This document reconciles the current repository with the newer HomeControl/HCM
 architecture brief. It is descriptive, not a silent migration plan. Items marked
 planned or unresolved must be confirmed before implementation changes.
