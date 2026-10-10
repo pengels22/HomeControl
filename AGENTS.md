@@ -1,5 +1,10 @@
 # AGENTS.md
 
+## Mandatory Phase 4 implementation instructions (2026-10-10)
+
+Before touching HCM Phase 4, **read [Phase 4 Codex implementation contract](09_documentation/PHASE4_CODEX_IMPLEMENTATION_2026-10-10.md)**, this complete file, README and the relevant 09_documentation runbooks. Inspect current code/migrations and propose minimal changes before editing. Do not silently revert the verified Ethernet-first VLAN 20 migration or revive older Wi-Fi routing requirements. Current Conflict endpoint is 192.168.20.26, Jetson is 192.168.20.27, and the old rule 1100/hcm-routing prerequisite were retired. Historic references below to Conflict on 192.168.60.2 and VLAN 60 are **future target architecture, not the installed deployment**. Explicit approval is required for deployed host changes.
+
+
 ## Active watchdog reference (2026-10-10)
 
 Jetson now has a successfully tested HCM-only watchdog. Maintain `10_scripts/hcm-watchdog.py`, `07_servises/systemd/hcm-watchdog.service` and `.timer`, and consult [watchdog deployment record](09_documentation/JETSON_HCM_WATCHDOG_2026-10-10.md) when changing the Docker service lifecycle. The installed watchdog must never restart PostgreSQL or host Heartbeat V3, and should suppress recovery when `hcm.service` is intentionally stopped. Do not claim phone notifications or 3/15-minute rate limiting have been validated.
