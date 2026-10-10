@@ -1,5 +1,8 @@
 # HCM Heartbeat Spec
 
+> **Status note (2026-10-10):** The independent native Unified Heartbeat V3 service on Jetson remained active through HCM commissioning and automatically returned active after a full Jetson reboot (2026-10-10). HCM runs separately in Docker; neither its Docker container nor database should become a requirement for the host heartbeat. VLAN 60 is still a future staged migration. See [Jetson runbook](../JETSON_HCM_DEPLOYMENT_2026-10-10.md).
+
+
 This document describes Unified Heartbeat V3 as implemented in `00_Heartbeat/`.
 It also identifies conflicts with the separate HCM/module heartbeat currently
 implemented under `07_servises/common/agent.py` and `01_HCM/registry.py`.
