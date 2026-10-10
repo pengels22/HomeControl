@@ -44,6 +44,24 @@ before Jetson deployment:
   rollback on audit failure, duplicate binding rejection and unique-index
   concurrency protection.
 
+## Final hardening update
+
+The final pre-deployment hardening pass tightened the remaining module session
+ordering and deployment-review checks:
+
+- Registry activation and disconnect cleanup now use a per-device session lock.
+  The active-connection map update and matching online/offline database write
+  are serialized for each device identity, so a stale disconnect cannot write
+  offline after a replacement connection has become active.
+- Added deterministic registry coverage for the reconnect interleaving without
+  time-based sleeps.
+- Added `08_database/004_phase4_registry_hardening_preflight.sql`, a read-only
+  query that identifies existing active binding rows that would violate
+  migration `004` partial unique indexes before a deployment window.
+- Expanded gated PostgreSQL integration tests for explicit room assignment
+  clearing, `NULL` channel binding conflicts, and module replacement preserving
+  logical-device identity.
+
 ## Boundaries preserved
 
 - No Heartbeat V3 changes.
@@ -62,11 +80,19 @@ before Jetson deployment:
 ```sh
 .venv/bin/python -m py_compile 01_HCM/management.py 01_HCM/api.py 01_HCM/models.py 01_HCM/registry.py
 .venv/bin/python -m pytest 11_tests/test_registry.py 11_tests/test_management_api.py 11_tests/test_api.py 11_tests/test_identity.py
+.venv/bin/python -m pytest 11_tests/test_phase4_postgres_integration.py
 .venv/bin/python -m pytest
 ```
 
-The pytest run passed with Python 3.14 deprecation warnings from
-`pytest-asyncio`. Those warnings do not indicate HCM test failures.
+Latest local results:
+
+- `py_compile`: passed.
+- Focused registry/management/API/identity tests: `38 passed`.
+- PostgreSQL integration file without `HCM_TEST_DATABASE_URL`: `7 skipped`.
+- Full pytest: `147 passed, 7 skipped`.
+
+The pytest runs emitted Python 3.14 deprecation warnings from `pytest-asyncio`.
+Those warnings do not indicate HCM test failures.
 
 PostgreSQL integration tests require a disposable test database URL:
 
@@ -76,6 +102,10 @@ HCM_TEST_DATABASE_URL=postgresql://... .venv/bin/python -m pytest 11_tests/test_
 
 They intentionally skip when `HCM_TEST_DATABASE_URL` is not set. They must not
 point at the live Jetson database.
+
+No local PostgreSQL server, `initdb`, `psql`, or Docker runtime was available on
+the development machine during this pass, so the real PostgreSQL integration
+tests were not executed against a disposable server here.
 
 ## Deployment note
 

@@ -150,6 +150,26 @@ class FakeRegistryConn:
         return None
 
 
+class BlockingRegistryConn(FakeRegistryConn):
+    def __init__(self):
+        super().__init__()
+        self.events = []
+        self.offline_started = asyncio.Event()
+        self.release_offline = asyncio.Event()
+
+    async def execute(self, query, *args):
+        if 'online=false' in query and 'UPDATE modules' in query:
+            self.events.append('offline-start')
+            self.offline_started.set()
+            await self.release_offline.wait()
+            await super().execute(query, *args)
+            self.events.append('offline-finish')
+            return
+        if 'SET online=true' in query:
+            self.events.append('online')
+        await super().execute(query, *args)
+
+
 @pytest.mark.asyncio
 async def test_assign_uses_configured_development_control_network(monkeypatch):
     conn = FakeRegistryConn()
@@ -298,6 +318,59 @@ async def test_old_connection_cannot_remove_newer_connection():
     assert reg.connections['48b02d87db16'] is new
     assert await reg._unregister_connection(new) is True
     assert '48b02d87db16' not in reg.connections
+
+
+@pytest.mark.asyncio
+async def test_replaced_connection_cannot_mark_new_session_offline(monkeypatch):
+    key = '48b02d87db16'
+    conn = BlockingRegistryConn()
+    conn.modules[key] = {
+        'id': 1,
+        'device_id': key,
+        'module_type': 'LCM',
+        'hostname': 'LCM01',
+        'ip_address': '192.168.20.30',
+        'online': True,
+        'control_session_online': True,
+    }
+    monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
+
+    reg = registry_mod.ModuleRegistry()
+    old = registry_mod.ModuleConnection(None, None)
+    old.device_id = key
+    old.connection_key = key
+    new = registry_mod.ModuleConnection(None, None)
+    new.device_id = key
+    new.connection_key = key
+    await reg._register_connection(key, old)
+
+    activate_waiting = asyncio.Event()
+    release_activate = asyncio.Event()
+
+    async def transition_hook(event, hook_key, hook_conn):
+        if event == 'activate_waiting' and hook_key == key and hook_conn is new:
+            activate_waiting.set()
+            await release_activate.wait()
+
+    reg._session_transition_hook = transition_hook
+
+    offline_task = asyncio.create_task(reg._mark_offline_if_current(old))
+    await conn.offline_started.wait()
+    activate_task = asyncio.create_task(reg._activate_connection(new, {'software_version': '0.2'}))
+    await activate_waiting.wait()
+
+    assert reg.connections.get(key) is None
+    assert conn.modules[key]['online'] is True
+
+    release_activate.set()
+    conn.release_offline.set()
+    assert await offline_task is True
+    await activate_task
+
+    assert conn.events == ['offline-start', 'offline-finish', 'online']
+    assert reg.connections[key] is new
+    assert conn.modules[key]['online'] is True
+    assert conn.modules[key]['control_session_online'] is True
 
 
 def write_hcm_config(root: Path, active_profile: str, production_subnet: str | None = None) -> None:

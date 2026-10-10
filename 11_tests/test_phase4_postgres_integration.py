@@ -170,3 +170,148 @@ async def test_concurrent_duplicate_binding_update_loses_to_unique_index(monkeyp
         await conn.execute("UPDATE device_bindings SET enabled=true WHERE id=$1", b1)
         with pytest.raises(asyncpg.UniqueViolationError):
             await conn.execute("UPDATE device_bindings SET enabled=true WHERE id=$1", b2)
+
+
+@pytest.mark.asyncio
+async def test_room_assignment_can_be_cleared_with_audit(monkeypatch):
+    async with postgres_conn() as conn:
+        monkeypatch.setattr(management.db, 'acquire', lambda: SingleConnectionAcquire(conn))
+        room_id = await conn.fetchval(
+            "INSERT INTO rooms(name, floor) VALUES('Kitchen','1') RETURNING id"
+        )
+        await management.create_logical_device(
+            logical_name='Kitchen Pendant',
+            device_class='light',
+            room_id=room_id,
+            actor='patrick',
+        )
+
+        updated = await management.update_logical_device(
+            'Kitchen Pendant',
+            actor='patrick',
+            room_id=None,
+        )
+
+        assert updated['room_id'] is None
+        stored_room_id = await conn.fetchval(
+            "SELECT room_id FROM logical_devices WHERE logical_name='Kitchen Pendant'"
+        )
+        assert stored_room_id is None
+        audit_count = await conn.fetchval(
+            """
+            SELECT count(*)
+            FROM device_management_events
+            WHERE action='logical_device.update'
+              AND target_type='logical_device'
+            """
+        )
+        assert audit_count == 1
+
+
+@pytest.mark.asyncio
+async def test_null_channel_active_binding_conflicts_are_rejected(monkeypatch):
+    async with postgres_conn() as conn:
+        monkeypatch.setattr(management.db, 'acquire', lambda: SingleConnectionAcquire(conn))
+        module_id = await conn.fetchval(
+            """
+            INSERT INTO modules(device_id, module_type, hostname, ip_address, online)
+            VALUES('48b02d87db18','PNL','PNL01','192.168.20.50',true)
+            RETURNING id
+            """
+        )
+        await conn.execute(
+            "INSERT INTO module_capabilities(module_id, capability) VALUES($1,'panel')",
+            module_id,
+        )
+        await conn.execute(
+            "INSERT INTO logical_devices(logical_name, device_class) VALUES('Wall Panel','panel')"
+        )
+        await conn.execute(
+            "INSERT INTO logical_devices(logical_name, device_class) VALUES('Entry Panel','panel')"
+        )
+
+        await management.create_binding(
+            logical_name='Wall Panel',
+            module_identifier='PNL01',
+            channel=None,
+            actor='patrick',
+            binding_type='primary',
+        )
+        with pytest.raises(management.ValidationError):
+            await management.create_binding(
+                logical_name='Entry Panel',
+                module_identifier='PNL01',
+                channel=None,
+                actor='patrick',
+                binding_type='primary',
+            )
+
+        entry_id = await conn.fetchval(
+            "SELECT id FROM logical_devices WHERE logical_name='Entry Panel'"
+        )
+        with pytest.raises(asyncpg.UniqueViolationError):
+            await conn.execute(
+                """
+                INSERT INTO device_bindings(logical_device_id, module_id, channel, binding_type, enabled)
+                VALUES($1,$2,NULL,'primary',true)
+                """,
+                entry_id,
+                module_id,
+            )
+
+
+@pytest.mark.asyncio
+async def test_module_replacement_preserves_logical_device_identity(monkeypatch):
+    async with postgres_conn() as conn:
+        monkeypatch.setattr(management.db, 'acquire', lambda: SingleConnectionAcquire(conn))
+        old_module_id = await conn.fetchval(
+            """
+            INSERT INTO modules(device_id, module_type, hostname, ip_address, online)
+            VALUES('48b02d87db16','LCM','LCM01','192.168.20.30',true)
+            RETURNING id
+            """
+        )
+        new_module_id = await conn.fetchval(
+            """
+            INSERT INTO modules(device_id, module_type, hostname, ip_address, online)
+            VALUES('48b02d87db1a','LCM','LCM02','192.168.20.31',true)
+            RETURNING id
+            """
+        )
+        for module_id in (old_module_id, new_module_id):
+            await conn.execute(
+                "INSERT INTO module_capabilities(module_id, capability) VALUES($1,'analog-out-8')",
+                module_id,
+            )
+        logical_id = await conn.fetchval(
+            """
+            INSERT INTO logical_devices(logical_name, device_class)
+            VALUES('Kitchen Light','light')
+            RETURNING id
+            """
+        )
+        await conn.execute(
+            """
+            INSERT INTO device_bindings(logical_device_id,module_id,channel,enabled)
+            VALUES($1,$2,'10-1',true)
+            """,
+            logical_id,
+            old_module_id,
+        )
+
+        await conn.execute("DELETE FROM modules WHERE id=$1", old_module_id)
+        assert await conn.fetchval("SELECT count(*) FROM device_bindings") == 0
+
+        rebound = await management.create_binding(
+            logical_name='Kitchen Light',
+            module_identifier='LCM02',
+            channel='10-1',
+            actor='patrick',
+        )
+
+        assert rebound['logical_device_id'] == logical_id
+        stored = await conn.fetchrow(
+            "SELECT id, logical_name FROM logical_devices WHERE id=$1",
+            logical_id,
+        )
+        assert dict(stored) == {'id': logical_id, 'logical_name': 'Kitchen Light'}

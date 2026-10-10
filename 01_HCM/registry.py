@@ -106,6 +106,8 @@ class ModuleRegistry:
     def __init__(self):
         self.connections: dict[str, ModuleConnection] = {}
         self._connections_lock = asyncio.Lock()
+        self._session_locks: dict[str, asyncio.Lock] = {}
+        self._session_transition_hook = None
         self.server: asyncio.AbstractServer | None = None
 
     async def start(self):
@@ -149,6 +151,64 @@ class ModuleRegistry:
                 self.connections.pop(conn.connection_key, None)
                 return True
         return False
+
+    async def _session_lock(self, key: str) -> asyncio.Lock:
+        async with self._connections_lock:
+            lock = self._session_locks.get(key)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._session_locks[key] = lock
+            return lock
+
+    async def _transition_hook(self, event: str, key: str, conn: ModuleConnection) -> None:
+        hook = self._session_transition_hook
+        if hook is not None:
+            await hook(event, key, conn)
+
+    async def _activate_connection(self, conn: ModuleConnection, ident: dict[str, Any]) -> None:
+        if not conn.connection_key:
+            raise ValueError('connection has no identity key')
+        lock = await self._session_lock(conn.connection_key)
+        await self._transition_hook('activate_waiting', conn.connection_key, conn)
+        async with lock:
+            await self._transition_hook('activate_locked', conn.connection_key, conn)
+            await self._register_connection(conn.connection_key, conn)
+            async with db.acquire() as dbc:
+                await dbc.execute('''
+                    UPDATE modules
+                    SET online=true,
+                        control_session_online=true,
+                        last_seen=now(),
+                        software_version=$3,
+                        identity_interface=COALESCE($4, identity_interface)
+                    WHERE ($1::text IS NOT NULL AND device_id=$1)
+                       OR ($2::text IS NOT NULL AND module_uuid::text=$2)
+                ''',
+                    conn.device_id,
+                    conn.module_uuid,
+                    ident.get('software_version'),
+                    ident.get('identity_interface') or (ident.get('identity') or {}).get('interface'),
+                )
+                await self._store_capabilities(dbc, conn.device_id, conn.module_uuid, ident)
+
+    async def _mark_offline_if_current(self, conn: ModuleConnection) -> bool:
+        if not conn.connection_key:
+            return False
+        lock = await self._session_lock(conn.connection_key)
+        async with lock:
+            await self._transition_hook('offline_locked', conn.connection_key, conn)
+            should_mark_offline = await self._unregister_connection(conn)
+            if not should_mark_offline:
+                return False
+            async with db.acquire() as dbc:
+                await dbc.execute('''
+                    UPDATE modules
+                    SET online=false,
+                        control_session_online=false
+                    WHERE ($1::text IS NOT NULL AND device_id=$1)
+                       OR ($2::text IS NOT NULL AND module_uuid::text=$2)
+                ''', conn.device_id, conn.module_uuid)
+            return True
 
     async def _assign(self, ident: dict[str, Any]) -> dict[str, Any]:
         typ = str(ident.get('module_type','')).upper()
@@ -302,29 +362,11 @@ class ModuleRegistry:
             conn.connection_key = conn.device_id or conn.module_uuid
             assignment = await self._assign(ident)
             conn.hostname = assignment['hostname']
-            await self._register_connection(conn.connection_key, conn)
+            await self._activate_connection(conn, ident)
             if ident.get('hostname') != assignment['hostname'] or ident.get('assigned_ip') != assignment['ip_address']:
                 await conn.send('assignment', assignment)
             else:
                 await conn.send('config', await self._base_config(ident['module_type']))
-
-            async with db.acquire() as dbc:
-                await dbc.execute('''
-                    UPDATE modules
-                    SET online=true,
-                        control_session_online=true,
-                        last_seen=now(),
-                        software_version=$3,
-                        identity_interface=COALESCE($4, identity_interface)
-                    WHERE ($1::text IS NOT NULL AND device_id=$1)
-                       OR ($2::text IS NOT NULL AND module_uuid::text=$2)
-                ''',
-                    conn.device_id,
-                    conn.module_uuid,
-                    ident.get('software_version'),
-                    ident.get('identity_interface') or (ident.get('identity') or {}).get('interface'),
-                )
-                await self._store_capabilities(dbc, conn.device_id, conn.module_uuid, ident)
 
             while True:
                 msg = await protocol.read_frame(reader)
@@ -364,19 +406,9 @@ class ModuleRegistry:
         except Exception:
             log.exception('module connection error from %s', peer)
         finally:
-            should_mark_offline = False
             if conn.connection_key:
-                should_mark_offline = await self._unregister_connection(conn)
-            if should_mark_offline:
                 try:
-                    async with db.acquire() as dbc:
-                        await dbc.execute('''
-                            UPDATE modules
-                            SET online=false,
-                                control_session_online=false
-                            WHERE ($1::text IS NOT NULL AND device_id=$1)
-                               OR ($2::text IS NOT NULL AND module_uuid::text=$2)
-                        ''', conn.device_id, conn.module_uuid)
+                    await self._mark_offline_if_current(conn)
                 except Exception:
                     log.exception('failed marking module offline')
             writer.close()
