@@ -233,6 +233,12 @@ CREATE INDEX IF NOT EXISTS idx_module_capabilities_module ON module_capabilities
 CREATE INDEX IF NOT EXISTS idx_module_capabilities_capability ON module_capabilities(capability);
 CREATE INDEX IF NOT EXISTS idx_device_management_events_target ON device_management_events(target_type, target_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_device_management_events_actor ON device_management_events(actor, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_device_bindings_active_channel_unique
+    ON device_bindings(module_id, channel)
+    WHERE enabled = true AND channel IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_device_bindings_active_null_channel_unique
+    ON device_bindings(module_id, binding_type)
+    WHERE enabled = true AND channel IS NULL;
 CREATE INDEX IF NOT EXISTS idx_faults_active ON faults(active, severity);
 CREATE INDEX IF NOT EXISTS idx_faults_device_id ON faults(device_id) WHERE device_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_output_intents_active ON output_intents(logical_device_id, active, source);

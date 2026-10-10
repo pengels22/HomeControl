@@ -1,12 +1,27 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime
+from contextlib import asynccontextmanager
 from typing import Any
 
 from homecontrol_identity import InvalidDeviceId, maybe_normalize_device_id
 
 from . import db
+
+
+UNSET = object()
+
+
+@asynccontextmanager
+async def _transaction(conn):
+    tx_factory = getattr(conn, "transaction", None)
+    if tx_factory is None:
+        yield
+        return
+    async with tx_factory():
+        yield
 
 
 class NotFoundError(KeyError):
@@ -109,6 +124,112 @@ def _binding(row) -> dict[str, Any]:
         "enabled": bool(row["enabled"]),
         "metadata": _wire_value(row["metadata"] or {}),
     }
+
+
+def _capability_names(rows) -> set[str]:
+    return {str(row["capability"]) for row in rows}
+
+
+def _normalize_channel(channel: str | None) -> str | None:
+    if channel is None:
+        return None
+    clean = str(channel).strip()
+    return clean.upper() if clean else None
+
+
+def _module_supports_channel(module_type: str, channel: str | None, capabilities: set[str]) -> bool:
+    if module_type == "PNL":
+        return channel is None or "panel" in capabilities or "kiosk" in capabilities
+    if channel is None:
+        return False
+    if module_type == "RCM":
+        return bool(re.fullmatch(r"[ABCD][1-8]", channel)) and "relay-32" in capabilities
+    if module_type == "LCM":
+        if re.fullmatch(r"[AB][1-8]", channel):
+            return "relay-32" in capabilities or "lighting" in capabilities
+        if re.fullmatch(r"10-[1-8]", channel):
+            return "analog-out-8" in capabilities
+        if re.fullmatch(r"HV-[1-4]", channel):
+            return "high-voltage-dimmer" in capabilities or "lighting" in capabilities
+        return False
+    if module_type == "SIM":
+        if re.fullmatch(r"A[1-8]", channel):
+            return "hexa-aio" in capabilities
+        if re.fullmatch(r"DIO[1-4]", channel):
+            return "hexa-dio" in capabilities
+        if re.fullmatch(r"SW[1-3]", channel):
+            return "hexa-12v-switching" in capabilities
+        if re.fullmatch(r"CAN[0-2]", channel):
+            return "hexa-can" in capabilities or "rmc-can" in capabilities
+        return False
+    return False
+
+
+async def _module_for_binding(conn, identifier: str | int, channel: str | None) -> dict[str, Any]:
+    text, device_id = _module_selector(identifier)
+    row = await conn.fetchrow(
+        """
+        SELECT id, hostname, module_type, device_id
+        FROM modules
+        WHERE id::text=$1
+           OR hostname=$1
+           OR ($2::text IS NOT NULL AND device_id=$2)
+        """,
+        text,
+        device_id,
+    )
+    if not row:
+        raise NotFoundError(f"module {identifier}")
+    capability_rows = await conn.fetch(
+        "SELECT capability FROM module_capabilities WHERE module_id=$1",
+        row["id"],
+    )
+    capabilities = _capability_names(capability_rows)
+    normalized_channel = _normalize_channel(channel)
+    if not _module_supports_channel(row["module_type"], normalized_channel, capabilities):
+        caps = ", ".join(sorted(capabilities)) or "none"
+        raise ValidationError(
+            f"module {row['hostname']} does not declare support for channel {normalized_channel or '<none>'} "
+            f"({row['module_type']} capabilities: {caps})"
+        )
+    return {
+        "id": int(row["id"]),
+        "hostname": row["hostname"],
+        "module_type": row["module_type"],
+        "device_id": row["device_id"],
+        "channel": normalized_channel,
+        "capabilities": capabilities,
+    }
+
+
+async def _ensure_no_active_binding_conflict(
+    conn,
+    *,
+    module_id: int,
+    channel: str | None,
+    binding_type: str,
+    exclude_binding_id: int | None = None,
+) -> None:
+    row = await conn.fetchrow(
+        """
+        SELECT id
+        FROM device_bindings
+        WHERE module_id=$1
+          AND enabled=true
+          AND ($4::bigint IS NULL OR id<>$4)
+          AND (
+                ($2::text IS NOT NULL AND channel=$2)
+             OR ($2::text IS NULL AND channel IS NULL AND binding_type=$3)
+          )
+        LIMIT 1
+        """,
+        module_id,
+        channel,
+        binding_type,
+        exclude_binding_id,
+    )
+    if row:
+        raise ValidationError("active binding conflicts with an existing physical assignment")
 
 
 async def audit_event(
@@ -229,28 +350,29 @@ async def create_logical_device(
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     async with db.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            INSERT INTO logical_devices(logical_name, room_id, device_class, enabled, metadata)
-            VALUES($1,$2,$3,$4,$5::jsonb)
-            RETURNING *, NULL::text AS room
-            """,
-            logical_name,
-            room_id,
-            device_class,
-            enabled,
-            _json_dumps(metadata),
-        )
-        after = _logical_device(row)
-        await audit_event(
-            conn,
-            actor=actor,
-            action="logical_device.create",
-            target_type="logical_device",
-            target_id=str(row["id"]),
-            before_state=None,
-            after_state=after,
-        )
+        async with _transaction(conn):
+            row = await conn.fetchrow(
+                """
+                INSERT INTO logical_devices(logical_name, room_id, device_class, enabled, metadata)
+                VALUES($1,$2,$3,$4,$5::jsonb)
+                RETURNING *, NULL::text AS room
+                """,
+                logical_name,
+                room_id,
+                device_class,
+                enabled,
+                _json_dumps(metadata),
+            )
+            after = _logical_device(row)
+            await audit_event(
+                conn,
+                actor=actor,
+                action="logical_device.create",
+                target_type="logical_device",
+                target_id=str(row["id"]),
+                before_state=None,
+                after_state=after,
+            )
     return after
 
 
@@ -260,49 +382,52 @@ async def update_logical_device(
     actor: str,
     new_logical_name: str | None = None,
     device_class: str | None = None,
-    room_id: int | None | object = None,
+    room_id: int | None | object = UNSET,
     enabled: bool | None = None,
     maintenance_locked: bool | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     async with db.acquire() as conn:
-        before_row = await conn.fetchrow(
-            "SELECT *, NULL::text AS room FROM logical_devices WHERE logical_name=$1",
-            logical_name,
-        )
-        if not before_row:
-            raise NotFoundError(logical_name)
-        before = _logical_device(before_row)
-        row = await conn.fetchrow(
-            """
-            UPDATE logical_devices
-            SET logical_name=COALESCE($2, logical_name),
-                device_class=COALESCE($3, device_class),
-                room_id=COALESCE($4, room_id),
-                enabled=COALESCE($5, enabled),
-                maintenance_locked=COALESCE($6, maintenance_locked),
-                metadata=COALESCE($7::jsonb, metadata)
-            WHERE logical_name=$1
-            RETURNING *, NULL::text AS room
-            """,
-            logical_name,
-            new_logical_name,
-            device_class,
-            room_id,
-            enabled,
-            maintenance_locked,
-            _json_dumps(metadata) if metadata is not None else None,
-        )
-        after = _logical_device(row)
-        await audit_event(
-            conn,
-            actor=actor,
-            action="logical_device.update",
-            target_type="logical_device",
-            target_id=str(row["id"]),
-            before_state=before,
-            after_state=after,
-        )
+        async with _transaction(conn):
+            before_row = await conn.fetchrow(
+                "SELECT *, NULL::text AS room FROM logical_devices WHERE logical_name=$1 FOR UPDATE",
+                logical_name,
+            )
+            if not before_row:
+                raise NotFoundError(logical_name)
+            before = _logical_device(before_row)
+            room_was_supplied = room_id is not UNSET
+            row = await conn.fetchrow(
+                """
+                UPDATE logical_devices
+                SET logical_name=COALESCE($2, logical_name),
+                    device_class=COALESCE($3, device_class),
+                    room_id=CASE WHEN $4::boolean THEN $5::bigint ELSE room_id END,
+                    enabled=COALESCE($6, enabled),
+                    maintenance_locked=COALESCE($7, maintenance_locked),
+                    metadata=COALESCE($8::jsonb, metadata)
+                WHERE logical_name=$1
+                RETURNING *, NULL::text AS room
+                """,
+                logical_name,
+                new_logical_name,
+                device_class,
+                room_was_supplied,
+                None if room_id is UNSET else room_id,
+                enabled,
+                maintenance_locked,
+                _json_dumps(metadata) if metadata is not None else None,
+            )
+            after = _logical_device(row)
+            await audit_event(
+                conn,
+                actor=actor,
+                action="logical_device.update",
+                target_type="logical_device",
+                target_id=str(row["id"]),
+                before_state=before,
+                after_state=after,
+            )
     return after
 
 
@@ -349,48 +474,56 @@ async def create_binding(
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     async with db.acquire() as conn:
-        logical = await conn.fetchrow(
-            "SELECT id FROM logical_devices WHERE logical_name=$1",
-            logical_name,
-        )
-        if not logical:
-            raise NotFoundError(f"logical device {logical_name}")
-        module_id = await resolve_module_id(conn, module_identifier)
-        row = await conn.fetchrow(
-            """
-            INSERT INTO device_bindings(
-                logical_device_id, module_id, channel, binding_type, enabled, metadata
+        async with _transaction(conn):
+            logical = await conn.fetchrow(
+                "SELECT id FROM logical_devices WHERE logical_name=$1",
+                logical_name,
             )
-            VALUES($1,$2,$3,$4,$5,$6::jsonb)
-            RETURNING *
-            """,
-            logical["id"],
-            module_id,
-            channel,
-            binding_type,
-            enabled,
-            _json_dumps(metadata),
-        )
-        joined = await conn.fetchrow(
-            """
-            SELECT b.*, d.logical_name, m.hostname, m.device_id, m.module_type
-            FROM device_bindings b
-            JOIN logical_devices d ON d.id=b.logical_device_id
-            JOIN modules m ON m.id=b.module_id
-            WHERE b.id=$1
-            """,
-            row["id"],
-        )
-        after = _binding(joined)
-        await audit_event(
-            conn,
-            actor=actor,
-            action="binding.create",
-            target_type="device_binding",
-            target_id=str(row["id"]),
-            before_state=None,
-            after_state=after,
-        )
+            if not logical:
+                raise NotFoundError(f"logical device {logical_name}")
+            module = await _module_for_binding(conn, module_identifier, channel)
+            if enabled:
+                await _ensure_no_active_binding_conflict(
+                    conn,
+                    module_id=module["id"],
+                    channel=module["channel"],
+                    binding_type=binding_type,
+                )
+            row = await conn.fetchrow(
+                """
+                INSERT INTO device_bindings(
+                    logical_device_id, module_id, channel, binding_type, enabled, metadata
+                )
+                VALUES($1,$2,$3,$4,$5,$6::jsonb)
+                RETURNING *
+                """,
+                logical["id"],
+                module["id"],
+                module["channel"],
+                binding_type,
+                enabled,
+                _json_dumps(metadata),
+            )
+            joined = await conn.fetchrow(
+                """
+                SELECT b.*, d.logical_name, m.hostname, m.device_id, m.module_type
+                FROM device_bindings b
+                JOIN logical_devices d ON d.id=b.logical_device_id
+                JOIN modules m ON m.id=b.module_id
+                WHERE b.id=$1
+                """,
+                row["id"],
+            )
+            after = _binding(joined)
+            await audit_event(
+                conn,
+                actor=actor,
+                action="binding.create",
+                target_type="device_binding",
+                target_id=str(row["id"]),
+                before_state=None,
+                after_state=after,
+            )
     return after
 
 
@@ -404,52 +537,66 @@ async def update_binding(
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     async with db.acquire() as conn:
-        before_row = await conn.fetchrow(
-            """
-            SELECT b.*, d.logical_name, m.hostname, m.device_id, m.module_type
-            FROM device_bindings b
-            JOIN logical_devices d ON d.id=b.logical_device_id
-            JOIN modules m ON m.id=b.module_id
-            WHERE b.id=$1
-            """,
-            binding_id,
-        )
-        if not before_row:
-            raise NotFoundError(str(binding_id))
-        before = _binding(before_row)
-        await conn.execute(
-            """
-            UPDATE device_bindings
-            SET channel=COALESCE($2, channel),
-                binding_type=COALESCE($3, binding_type),
-                enabled=COALESCE($4, enabled),
-                metadata=COALESCE($5::jsonb, metadata)
-            WHERE id=$1
-            """,
-            binding_id,
-            channel,
-            binding_type,
-            enabled,
-            _json_dumps(metadata) if metadata is not None else None,
-        )
-        after_row = await conn.fetchrow(
-            """
-            SELECT b.*, d.logical_name, m.hostname, m.device_id, m.module_type
-            FROM device_bindings b
-            JOIN logical_devices d ON d.id=b.logical_device_id
-            JOIN modules m ON m.id=b.module_id
-            WHERE b.id=$1
-            """,
-            binding_id,
-        )
-        after = _binding(after_row)
-        await audit_event(
-            conn,
-            actor=actor,
-            action="binding.update",
-            target_type="device_binding",
-            target_id=str(binding_id),
-            before_state=before,
-            after_state=after,
-        )
+        async with _transaction(conn):
+            before_row = await conn.fetchrow(
+                """
+                SELECT b.*, d.logical_name, m.hostname, m.device_id, m.module_type
+                FROM device_bindings b
+                JOIN logical_devices d ON d.id=b.logical_device_id
+                JOIN modules m ON m.id=b.module_id
+                WHERE b.id=$1
+                FOR UPDATE
+                """,
+                binding_id,
+            )
+            if not before_row:
+                raise NotFoundError(str(binding_id))
+            before = _binding(before_row)
+            next_channel = _normalize_channel(channel) if channel is not None else before["channel"]
+            next_binding_type = binding_type or before["binding_type"]
+            next_enabled = enabled if enabled is not None else before["enabled"]
+            module = await _module_for_binding(conn, before["module_id"], next_channel)
+            if next_enabled:
+                await _ensure_no_active_binding_conflict(
+                    conn,
+                    module_id=module["id"],
+                    channel=module["channel"],
+                    binding_type=next_binding_type,
+                    exclude_binding_id=binding_id,
+                )
+            await conn.execute(
+                """
+                UPDATE device_bindings
+                SET channel=$2,
+                    binding_type=$3,
+                    enabled=$4,
+                    metadata=COALESCE($5::jsonb, metadata)
+                WHERE id=$1
+                """,
+                binding_id,
+                module["channel"],
+                next_binding_type,
+                next_enabled,
+                _json_dumps(metadata) if metadata is not None else None,
+            )
+            after_row = await conn.fetchrow(
+                """
+                SELECT b.*, d.logical_name, m.hostname, m.device_id, m.module_type
+                FROM device_bindings b
+                JOIN logical_devices d ON d.id=b.logical_device_id
+                JOIN modules m ON m.id=b.module_id
+                WHERE b.id=$1
+                """,
+                binding_id,
+            )
+            after = _binding(after_row)
+            await audit_event(
+                conn,
+                actor=actor,
+                action="binding.update",
+                target_type="device_binding",
+                target_id=str(binding_id),
+                before_state=before,
+                after_state=after,
+            )
     return after

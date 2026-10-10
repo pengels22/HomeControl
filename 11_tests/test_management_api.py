@@ -19,6 +19,18 @@ class FakeAcquire:
         return False
 
 
+class FakeTransaction:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def __aenter__(self):
+        self.conn.transaction_depth += 1
+
+    async def __aexit__(self, exc_type, exc, tb):
+        self.conn.transaction_depth -= 1
+        return False
+
+
 class FakeManagementConn:
     def __init__(self):
         self.logical_devices = {}
@@ -48,12 +60,17 @@ class FakeManagementConn:
         }
         self.bindings = {}
         self.audit_events = []
+        self.transaction_depth = 0
+        self.capabilities = {1: {'analog-out-8', 'lighting'}}
+
+    def transaction(self):
+        return FakeTransaction(self)
 
     async def fetch(self, query, *args):
         if 'FROM modules' in query:
             return list(self.modules.values())
         if 'FROM module_capabilities' in query:
-            return []
+            return [{'capability': cap} for cap in sorted(self.capabilities.get(args[0], set()))]
         if 'FROM logical_devices' in query:
             return list(self.logical_devices.values())
         if 'FROM device_bindings' in query:
@@ -86,17 +103,38 @@ class FakeManagementConn:
             current.update({
                 'logical_name': logical_name,
                 'device_class': args[2] or current['device_class'],
-                'room_id': args[3] if args[3] is not None else current['room_id'],
-                'enabled': args[4] if args[4] is not None else current['enabled'],
-                'maintenance_locked': args[5] if args[5] is not None else current['maintenance_locked'],
-                'metadata': json.loads(args[6]) if args[6] is not None else current['metadata'],
+                'room_id': args[4] if args[3] else current['room_id'],
+                'enabled': args[5] if args[5] is not None else current['enabled'],
+                'maintenance_locked': args[6] if args[6] is not None else current['maintenance_locked'],
+                'metadata': json.loads(args[7]) if args[7] is not None else current['metadata'],
             })
             self.logical_devices[logical_name] = current
             return current
+        if 'SELECT id, hostname, module_type, device_id' in query and 'FROM modules' in query:
+            text, device_id = args
+            for row in self.modules.values():
+                if str(row['id']) == text or row['hostname'] == text or row['device_id'] == device_id:
+                    return {
+                        'id': row['id'],
+                        'hostname': row['hostname'],
+                        'module_type': row['module_type'],
+                        'device_id': row['device_id'],
+                    }
+            return None
         if 'SELECT id' in query and 'FROM modules' in query:
             text, device_id = args
             for row in self.modules.values():
                 if str(row['id']) == text or row['hostname'] == text or row['device_id'] == device_id:
+                    return {'id': row['id']}
+            return None
+        if 'SELECT id' in query and 'FROM device_bindings' in query:
+            module_id, channel, binding_type, exclude_id = args
+            for row in self.bindings.values():
+                if row['module_id'] != module_id or not row['enabled'] or (exclude_id and row['id'] == exclude_id):
+                    continue
+                if channel is not None and row['channel'] == channel:
+                    return {'id': row['id']}
+                if channel is None and row['channel'] is None and row['binding_type'] == binding_type:
                     return {'id': row['id']}
             return None
         if 'INSERT INTO device_bindings' in query:
@@ -161,6 +199,7 @@ async def test_create_logical_device_records_audit_event(monkeypatch):
     assert result['device_class'] == 'light'
     assert len(conn.audit_events) == 1
     assert conn.audit_events[0][0:4] == ('patrick', 'logical_device.create', 'logical_device', '1')
+    assert conn.transaction_depth == 0
 
 
 @pytest.mark.asyncio
@@ -191,6 +230,102 @@ async def test_create_binding_uses_logical_name_and_module_identifier_without_ac
     assert result['module_device_id'] == '48b02d87db16'
     assert result['channel'] == '10-1'
     assert conn.audit_events[-1][1] == 'binding.create'
+
+
+@pytest.mark.asyncio
+async def test_binding_rejects_unsupported_channel_before_insert(monkeypatch):
+    conn = FakeManagementConn()
+    conn.logical_devices['Kitchen Light'] = {
+        'id': 1,
+        'logical_name': 'Kitchen Light',
+        'room_id': None,
+        'room': None,
+        'device_class': 'light',
+        'enabled': True,
+        'maintenance_locked': False,
+        'metadata': {},
+    }
+    monkeypatch.setattr(management.db, 'acquire', lambda: FakeAcquire(conn))
+
+    with pytest.raises(management.ValidationError):
+        await management.create_binding(
+            logical_name='Kitchen Light',
+            module_identifier='LCM01',
+            channel='D9',
+            binding_type='primary',
+            actor='patrick',
+        )
+
+    assert conn.bindings == {}
+    assert conn.audit_events == []
+
+
+@pytest.mark.asyncio
+async def test_binding_rejects_conflicting_active_assignment(monkeypatch):
+    conn = FakeManagementConn()
+    conn.logical_devices['Kitchen Light'] = {
+        'id': 1,
+        'logical_name': 'Kitchen Light',
+        'room_id': None,
+        'room': None,
+        'device_class': 'light',
+        'enabled': True,
+        'maintenance_locked': False,
+        'metadata': {},
+    }
+    conn.logical_devices['Hall Light'] = {
+        'id': 2,
+        'logical_name': 'Hall Light',
+        'room_id': None,
+        'room': None,
+        'device_class': 'light',
+        'enabled': True,
+        'maintenance_locked': False,
+        'metadata': {},
+    }
+    monkeypatch.setattr(management.db, 'acquire', lambda: FakeAcquire(conn))
+
+    await management.create_binding(
+        logical_name='Kitchen Light',
+        module_identifier='LCM01',
+        channel='10-1',
+        binding_type='primary',
+        actor='patrick',
+    )
+    with pytest.raises(management.ValidationError):
+        await management.create_binding(
+            logical_name='Hall Light',
+            module_identifier='LCM01',
+            channel='10-1',
+            binding_type='primary',
+            actor='patrick',
+        )
+
+    assert len(conn.bindings) == 1
+
+
+@pytest.mark.asyncio
+async def test_logical_device_room_update_can_explicitly_clear_room(monkeypatch):
+    conn = FakeManagementConn()
+    conn.logical_devices['Kitchen Light'] = {
+        'id': 1,
+        'logical_name': 'Kitchen Light',
+        'room_id': 7,
+        'room': None,
+        'device_class': 'light',
+        'enabled': True,
+        'maintenance_locked': False,
+        'metadata': {},
+    }
+    monkeypatch.setattr(management.db, 'acquire', lambda: FakeAcquire(conn))
+
+    result = await management.update_logical_device(
+        'Kitchen Light',
+        actor='patrick',
+        room_id=None,
+    )
+
+    assert result['room_id'] is None
 
 
 @pytest.mark.asyncio

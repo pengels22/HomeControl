@@ -153,7 +153,7 @@ async def logical_device_update(logical_name: str, body: LogicalDeviceUpdateIn, 
             actor=user['user'],
             new_logical_name=body.logical_name,
             device_class=body.device_class,
-            room_id=body.room_id,
+            room_id=body.room_id if 'room_id' in body.model_fields_set else management.UNSET,
             enabled=body.enabled,
             maintenance_locked=body.maintenance_locked,
             metadata=body.metadata,
@@ -201,6 +201,8 @@ async def device_binding_update(binding_id: int, body: DeviceBindingUpdateIn, us
         )
     except management.NotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
+    except management.ValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
     except asyncpg.UniqueViolationError as exc:
         raise HTTPException(409, 'device binding update conflicts with existing data') from exc
 
