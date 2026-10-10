@@ -1,5 +1,10 @@
 # HCM Unified Heartbeat v3
 
+## Live Jetson deployment clarification (2026-10-10)
+
+The independent host-based `hcm-heartbeat.service` (Python 3.6, TCP 6004) was confirmed active after a complete Jetson reboot alongside the Dockerized HCM application. The 2026-10-10 installation still uses the existing VLAN 20/Conflict addressing; **VLAN 60 migration is not complete**. Do not replace or restart Heartbeat V3 as part of HCM container updates. See [Jetson runbook](../09_documentation/JETSON_HCM_DEPLOYMENT_2026-10-10.md) for current service boundaries. Older passages below describe historic migrations and may not match the installed state.
+
+
 One **Python 3.6+ standard-library-only** daemon on each device. Works on the Jetson's Ubuntu 18.04/Python 3.6 and current Armbian. One service, TCP 6004, including local fault/status/watchdog APIs.
 
 ## Architecture
