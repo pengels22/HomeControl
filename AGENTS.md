@@ -1,5 +1,9 @@
 # AGENTS.md
 
+## Jetson deployment safeguards (2026-10-10)
+
+The live development HCM on Jetson Xavier NX runs inside Docker (Python 3.13), with PostgreSQL 16 on a separate private Docker network and USB-mounted data. Heartbeat V3 remains an independent host Python 3.6 service. Four enabled systemd units recovered after reboot. See [Jetson deployment runbook](09_documentation/JETSON_HCM_DEPLOYMENT_2026-10-10.md) before working on the live host. Do not apply the legacy docker-compose or native-venv HCM service to this host; never commit actual credentials, password files, database or bearer tokens. HCM oneshot startup is not continuous crash recovery. Physical GPIO and production TLS remain unverified.
+
 ## Project intent
 
 HomeControl is a local-first, modular house-control system. Preserve the pinned
