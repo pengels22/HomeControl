@@ -83,17 +83,19 @@ class HCMSafetyRelayController:
         await self.backend.write(relay, relay.active)
         return {'ok': True, 'relay': relay.as_dict()}
 
-    def cancel_pulse(self, name: str) -> bool:
+    async def cancel_pulse(self, name: str, deenergize: bool = True) -> bool:
         task = self._pulse_tasks.pop(name, None)
-        if task and not task.done():
+        cancelled = bool(task and not task.done())
+        if cancelled:
             task.cancel()
-            return True
-        return False
+        if deenergize and name in self.relays and self.relays[name].direction == 'output':
+            await self.set_output(name, False)
+        return cancelled
 
     async def pulse(self, name: str = 'door_request', duration_ms: int | None = None) -> dict[str, Any]:
         relay = self._validate_output(name)
         pulse_ms = self._validate_pulse_ms(duration_ms)
-        self.cancel_pulse(name)
+        await self.cancel_pulse(name, deenergize=False)
         await self.set_output(name, True)
         task = asyncio.ensure_future(self._complete_pulse(relay, pulse_ms / 1000.0))
         self._pulse_tasks[name] = task
@@ -109,7 +111,7 @@ class HCMSafetyRelayController:
 
     async def shutdown(self) -> None:
         for name in list(self._pulse_tasks):
-            self.cancel_pulse(name)
+            await self.cancel_pulse(name)
         for relay in self.relays.values():
             if relay.direction == 'output':
                 await self.set_output(relay.name, False)

@@ -136,6 +136,18 @@ async def test_rcm_direct_module_api_cannot_bypass_lockout():
 
 
 @pytest.mark.asyncio
+async def test_rcm_lockout_immediately_deenergizes_existing_outputs():
+    agent = rcm.RCMAgent({})
+    await agent.apply_command({'op': 'set_relay', 'channel': 'A1', 'value': True})
+
+    result = await agent.apply_command({'op': 'safety_state', 'conditions': {'maintenance_lockout': True}})
+    state = await agent.collect_state()
+
+    assert result['arbitration']
+    assert state['relays']['A1'] is False
+
+
+@pytest.mark.asyncio
 async def test_lcm_direct_dimmer_command_cannot_bypass_lockout():
     agent = lcm.LCMAgent({})
     await agent.apply_command({'op': 'safety_state', 'conditions': {'maintenance_lockout': True}})
@@ -144,6 +156,20 @@ async def test_lcm_direct_dimmer_command_cannot_bypass_lockout():
 
     assert result['percent'] == 0.0
     assert result['arbitration']['reason'] == 'maintenance_lockout'
+
+
+@pytest.mark.asyncio
+async def test_lcm_lockout_immediately_deenergizes_existing_outputs():
+    agent = lcm.LCMAgent({})
+    await agent.apply_command({'op': 'set_relay', 'channel': 'A1', 'value': True})
+    await agent.apply_command({'op': 'set_dimmer', 'channel': '10-1', 'percent': 70})
+
+    result = await agent.apply_command({'op': 'safety_state', 'conditions': {'maintenance_lockout': True}})
+    state = await agent.collect_state()
+
+    assert result['arbitration']
+    assert state['relays']['A1'] is False
+    assert state['lv_dimmers']['10-1']['percent'] == 0.0
 
 
 @pytest.mark.asyncio

@@ -29,6 +29,27 @@ class RCMAgent(common_agent.ModuleAgent):
             hvac_shutdown_channels=set(safety_cfg.get('hvac_shutdown_channels', [])),
         )
 
+    def _safety_requires_output_shutdown(self, conditions):
+        return any(bool((conditions or {}).get(name)) for name in (
+            'maintenance_lockout',
+            'fire_input_fault',
+            'communication_loss',
+            'arbiter_fault',
+        ))
+
+    def _deenergize_all_relays_for_safety(self):
+        decisions = []
+        for ch in list(self.relays.values):
+            decision = self.safety.decide(common_safety.OutputRequest(
+                self.identity.get('device_id'),
+                ch,
+                {'op': 'set_relay', 'channel': ch, 'value': False, 'source': 'safety_state'},
+                'safety_state',
+            ))
+            self.relays.set(ch, bool(decision.final_command.get('value', False)))
+            decisions.append(decision.as_dict())
+        return decisions
+
     async def collect_state(self):
         return {
             'relays': self.relays.snapshot(),
@@ -47,8 +68,10 @@ class RCMAgent(common_agent.ModuleAgent):
 
     async def apply_command(self, payload):
         if payload.get('op') == 'safety_state':
-            self.safety.update_conditions(payload.get('conditions', {}))
-            return {'ok': True, 'safety': self.safety.snapshot()}
+            conditions = payload.get('conditions', {})
+            self.safety.update_conditions(conditions)
+            decisions = self._deenergize_all_relays_for_safety() if self._safety_requires_output_shutdown(conditions) else []
+            return {'ok': True, 'safety': self.safety.snapshot(), 'arbitration': decisions}
         if payload.get('op') == 'set_relay':
             ch = payload['channel'].upper()
             decision = self.safety.decide(common_safety.OutputRequest(

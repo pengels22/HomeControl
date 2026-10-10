@@ -34,6 +34,22 @@ async def test_hcm_door_request_pulse_uses_configured_bounds_and_releases():
 
 
 @pytest.mark.asyncio
+async def test_hcm_door_request_overlapping_pulse_restarts_and_cancel_deenergizes():
+    controller = safety_relays.HCMSafetyRelayController()
+
+    first = await controller.pulse('door_request', duration_ms=250)
+    await asyncio.sleep(0.10)
+    second = await controller.pulse('door_request', duration_ms=500)
+    await asyncio.sleep(0.20)
+    cancelled = await controller.cancel_pulse('door_request')
+
+    assert first['policy'] == 'restart_existing_pulse'
+    assert second['policy'] == 'restart_existing_pulse'
+    assert controller.relays['door_request'].active is False
+    assert cancelled is True
+
+
+@pytest.mark.asyncio
 async def test_hcm_relay_input_cannot_be_written_as_output():
     controller = safety_relays.HCMSafetyRelayController()
 

@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 api = import_module('01_HCM.api')
+safety_relays_mod = import_module('01_HCM.safety_relays')
 
 
 @pytest.mark.asyncio
@@ -89,3 +90,33 @@ async def test_rmc_firmware_update_endpoint_routes_through_updater(monkeypatch):
     )
 
     assert result == {'ok': True, 'state': 'COMPLETE'}
+
+
+@pytest.mark.asyncio
+async def test_hcm_safety_relay_pulse_requires_admin(monkeypatch):
+    controller = safety_relays_mod.HCMSafetyRelayController()
+    monkeypatch.setattr(api, 'safety_relays', controller)
+
+    with pytest.raises(HTTPException) as exc:
+        await api.safety_hcm_relay_pulse(
+            api.SafetyRelayPulseIn(relay='door_request'),
+            {'user': 'viewer', 'role': 'READONLY'},
+        )
+
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_hcm_safety_relay_pulse_uses_global_default(monkeypatch):
+    controller = safety_relays_mod.HCMSafetyRelayController()
+    monkeypatch.setattr(api, 'safety_relays', controller)
+
+    result = await api.safety_hcm_relay_pulse(
+        api.SafetyRelayPulseIn(relay='door_request'),
+        {'user': 'patrick', 'role': 'ADMIN'},
+    )
+    await controller.shutdown()
+
+    assert result['ok'] is True
+    assert result['pulse_ms'] == 3000
+    assert result['relay']['lockout_exempt'] is True

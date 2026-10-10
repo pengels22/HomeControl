@@ -40,6 +40,37 @@ class LCMAgent(common_agent.ModuleAgent):
             hvac_shutdown_channels=set(safety_cfg.get('hvac_shutdown_channels', [])),
         )
 
+    def _safety_requires_output_shutdown(self, conditions):
+        return any(bool((conditions or {}).get(name)) for name in (
+            'maintenance_lockout',
+            'fire_input_fault',
+            'communication_loss',
+            'arbiter_fault',
+        ))
+
+    def _deenergize_all_outputs_for_safety(self):
+        decisions = []
+        for ch in list(self.relays.values):
+            decision = self.safety.decide(common_safety.OutputRequest(
+                self.identity.get('device_id'),
+                ch,
+                {'op': 'set_relay', 'channel': ch, 'value': False, 'source': 'safety_state'},
+                'safety_state',
+            ))
+            self.relays.set(ch, bool(decision.final_command.get('value', False)))
+            decisions.append(decision.as_dict())
+        for bank in (self.hv_dimmers, self.lv_dimmers):
+            for ch in list(bank.values):
+                decision = self.safety.decide(common_safety.OutputRequest(
+                    self.identity.get('device_id'),
+                    ch,
+                    {'op': 'set_dimmer', 'channel': ch, 'percent': 0, 'value': False, 'source': 'safety_state'},
+                    'safety_state',
+                ))
+                bank.set_percent(ch, float(decision.final_command.get('percent', 0.0)))
+                decisions.append(decision.as_dict())
+        return decisions
+
     async def collect_state(self):
         return {
             'relays': self.relays.snapshot(),
@@ -97,8 +128,10 @@ class LCMAgent(common_agent.ModuleAgent):
     async def apply_command(self, payload):
         op = payload.get('op')
         if op == 'safety_state':
-            self.safety.update_conditions(payload.get('conditions', {}))
-            return {'ok': True, 'safety': self.safety.snapshot()}
+            conditions = payload.get('conditions', {})
+            self.safety.update_conditions(conditions)
+            decisions = self._deenergize_all_outputs_for_safety() if self._safety_requires_output_shutdown(conditions) else []
+            return {'ok': True, 'safety': self.safety.snapshot(), 'arbitration': decisions}
         if op in ('set_channel', 'light') or ('channel' in payload and 'value' in payload):
             return self._set_channel(payload['channel'], payload)
         if op == 'set_relay':
