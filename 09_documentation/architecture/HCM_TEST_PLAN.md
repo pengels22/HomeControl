@@ -1,5 +1,10 @@
 # HCM Test Plan
 
+## Additional test result — 2026-10-10: HCM crash recovery
+
+Passed: a controlled HCM container kill was detected by three 30-second-spaced HTTP checks; an HCM-only systemd restart recovered the container and routing while PostgreSQL and Heartbeat V3 services remained active. Follow-up HCM health was HEALTHY. See [operator log](../JETSON_HCM_WATCHDOG_2026-10-10.md). Pending separate tests: restart-rate-limit suppression, intentionally stopped HCM suppression, repeated/hung-process failures, database/USB outages and physical safety paths.
+
+
 > **Status note (2026-10-10):** **2026-10-10 test update:** A full Jetson Xavier NX reboot verified automatic restart of HCM, PostgreSQL, return routing, and independent Heartbeat V3, mounted USB storage and functioning dashboard. This is runtime deployment validation, not completion of the wider test plan below. In particular, crash recovery, USB loss, backup restores, TLS, other client routing and physical safety I/O tests remain pending. See [Jetson runbook](../JETSON_HCM_DEPLOYMENT_2026-10-10.md).
 
 
