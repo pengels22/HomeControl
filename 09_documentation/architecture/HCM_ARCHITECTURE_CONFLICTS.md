@@ -1,5 +1,8 @@
 # HCM Architecture Conflicts
 
+> **Status note (2026-10-10):** This document is a historical **conflict inventory**, not a list of unresolved decisions. The actual Jetson development deployment was verified on 2026-10-10; VLAN 20 remains current, VLAN 40 production control and VLAN 60 heartbeat migrations remain pending. Consult the [Jetson deployment runbook](../JETSON_HCM_DEPLOYMENT_2026-10-10.md) before treating any legacy addresses or implementation conflicts below as live facts.
+
+
 This document lists contradictions between existing repository specifications,
 current implementation, and the newer architecture brief. Do not resolve these
 silently in code.
