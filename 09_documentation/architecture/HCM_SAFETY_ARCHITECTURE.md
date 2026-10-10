@@ -1,5 +1,7 @@
 # HCM Safety Architecture
 
+> **2026-10-10 status:** Successful Jetson software/dashboard reboot validation does not validate any hardwired safety input, relay, physical output, or safety certification. Heartbeat V3 remains independent. See [Jetson deployment runbook](../JETSON_HCM_DEPLOYMENT_2026-10-10.md).
+
 This document records safety requirements and current implementation status.
 It does not certify any life-safety function.
 
