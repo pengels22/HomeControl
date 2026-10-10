@@ -1,0 +1,8 @@
+[Unit]
+Description=HomeControl HCM Health Monitor
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hcm-watchdog
+TimeoutStartSec=150
