@@ -1,5 +1,12 @@
 # Jetson HCM verified deployment status — 2026-10-10
 
+## Current operational status after Ethernet cutover — 2026-10-10
+
+This addendum **supersedes the older Wi-Fi/routing claims below**. Jetson `eth0=192.168.20.27` via DHCP, metric 100; `wlan0=192.168.20.25` via DHCP, metric 300 saved (last observed active route metric 600 until reconnect). Conflict `192.168.20.26` USB Ethernet (metric 100) and `192.168.20.24` Wi-Fi (metric 300 configured). All interfaces remain on VLAN 20. On Jetson `hcm-routing.service` is now disabled, `hcm.service` no longer requires it, its `ExecStartPost` routing hook is disabled, and Mac-specific policy rule 1100 was removed. Wi-Fi-specific rule 1000/table 200 is retained. Do not resurrect rule 1100, the obsolete service dependency or the old static Jetson Ethernet address.
+
+After a Jetson reboot, operator-reported verification showed `hcm`, `hcm-postgres`, `hcm-heartbeat`, `hcm-watchdog.timer` active; `hcm-test` running with published `192.168.20.27:8080`; HTTP GET dashboard returned 200; route to Conflict .26 was `eth0` sourced from .27. Unified Heartbeat V3 peer was online/healthy in the Conflict registry. No further crash-kill test after routing cleanup or Wi-Fi link-failure test is claimed. Follow [Phase 4 Codex contract](PHASE4_CODEX_IMPLEMENTATION_2026-10-10.md) for next-stage work.
+
+
 ## Watchdog validation update (2026-10-10, 11:45 EDT)
 
 The watchdog was installed on Jetson with a timer every approximately 30 seconds. Following a deliberately killed HCM container, three consecutive failed direct-container HTTP checks triggered an HCM-only systemd restart, which succeeded and restored the Wi-Fi return route. The post-restart watchdog health check returned HEALTHY, the failure counter returned to zero, and PostgreSQL and Heartbeat V3 were active. See [watchdog runbook](JETSON_HCM_WATCHDOG_2026-10-10.md).
