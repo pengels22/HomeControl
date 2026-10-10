@@ -1,5 +1,10 @@
 # HCM Phase 3 Safety Arbitration
 
+## Runtime verification note — 2026-10-10
+
+Phase 3 logic is present in the deployed Jetson HCM application and the UI/API start and authenticate successfully against PostgreSQL. **This does not validate physical life-safety behavior.** GPIO safety input/output drivers remain disabled or simulated for this deployment; independent heartbeat is not a certified safety mechanism. Refer to [Jetson runbook](../JETSON_HCM_DEPLOYMENT_2026-10-10.md) and the safety hardware commissioning plan before physical I/O activation.
+
+
 Phase 3 adds a software safety-arbitration layer for simulated and logical
 output commands. It does not deploy hardware changes, alter GPIO drivers, or
 prove electrical safety.
