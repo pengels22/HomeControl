@@ -1,5 +1,10 @@
 # HomeControl Install Flow
 
+## Important: live Jetson deployment differs from this installer
+
+As of 2026-10-10 the Jetson Xavier NX HCM uses Python 3.13 in Docker, a separate PostgreSQL container with a USB data mount, and custom systemd services, **not** the native `/opt/HomeControl` virtual-environment installation described below. Do not execute the installer on the running Jetson to repair or upgrade this deployment. Follow [the verified Jetson runbook](../09_documentation/JETSON_HCM_DEPLOYMENT_2026-10-10.md) instead. The procedure below remains an alternative/legacy installation flow for other supported targets and has not been validated as the live Jetson deployment.
+
+
 ## HCM
 
 Run on the HCM:
