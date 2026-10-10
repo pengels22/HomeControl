@@ -41,9 +41,9 @@ async def test_rcm_agent_reports_pinout_address_on_relay_command():
 
     result = await agent.apply_command({'op': 'set_relay', 'channel': 'A1', 'value': True})
 
-    assert result == {
-        'ok': True,
-        'channel': 'A1',
-        'hardware_address': 'MCP0 A0',
-        'value': True,
-    }
+    assert result['ok'] is True
+    assert result['channel'] == 'A1'
+    assert result['hardware_address'] == 'MCP0 A0'
+    assert result['value'] is True
+    assert result['requested_value'] is True
+    assert result['arbitration']['effective_state']['energized'] is True

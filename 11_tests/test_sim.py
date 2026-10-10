@@ -124,8 +124,13 @@ async def test_sim_can_toggle_hexa_dio_and_12v_switch_outputs():
     switch_result = await agent.apply_command({'op': 'set_hexa_12v', 'channel': 'sw1', 'value': True})
     state = await agent.collect_state()
 
-    assert dio_result == {'ok': True, 'channel': 'dio3', 'value': True}
-    assert switch_result == {'ok': True, 'channel': 'sw1', 'value': True}
+    assert dio_result['ok'] is True
+    assert dio_result['channel'] == 'dio3'
+    assert dio_result['value'] is True
+    assert dio_result['arbitration']['effective_state']['energized'] is True
+    assert switch_result['ok'] is True
+    assert switch_result['channel'] == 'sw1'
+    assert switch_result['value'] is True
     assert state['hexa_board']['dio']['dio3']['value'] is True
     assert state['hexa_board']['switching_12v']['sw1']['value'] is True
 

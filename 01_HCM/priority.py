@@ -13,6 +13,8 @@ class OutputSource(str, Enum):
     LOCAL_OVERRIDE = "local_override"
     USER = "user"
     RULES = "rules"
+    SCHEDULE = "schedule"
+    SCENE = "scene"
 
 
 SOURCE_RANK: dict[OutputSource, int] = {
@@ -20,6 +22,8 @@ SOURCE_RANK: dict[OutputSource, int] = {
     OutputSource.LOCAL_OVERRIDE: 200,
     OutputSource.USER: 100,
     OutputSource.RULES: 100,
+    OutputSource.SCHEDULE: 100,
+    OutputSource.SCENE: 100,
 }
 
 

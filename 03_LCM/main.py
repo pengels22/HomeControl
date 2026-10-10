@@ -7,6 +7,7 @@ common_agent = import_module('07_servises.common.agent')
 common_cfg = import_module('07_servises.common.config')
 common_hw = import_module('07_servises.common.hardware')
 common_io = import_module('07_servises.common.io')
+common_safety = import_module('07_servises.common.safety_arbiter')
 
 class LCMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
@@ -33,6 +34,11 @@ class LCMAgent(common_agent.ModuleAgent):
             mux_address=int(self.i2c.get('mux_address', 0x70)),
             dac_address=int(self.i2c.get('dac_address', 0x60)),
         )
+        safety_cfg = config.get('safety', {})
+        self.safety = common_safety.SafetyArbiter(
+            emergency_lighting_channels=set(safety_cfg.get('emergency_lighting_channels', [])),
+            hvac_shutdown_channels=set(safety_cfg.get('hvac_shutdown_channels', [])),
+        )
 
     async def collect_state(self):
         return {
@@ -48,6 +54,7 @@ class LCMAgent(common_agent.ModuleAgent):
                 'dac_address': self.lv_dimmers.dac.address,
                 'selected_mux_channel': self.lv_dimmers.mux.selected_channel,
             },
+            'safety': self.safety.snapshot(),
         }
 
     def _percent(self, payload):
@@ -60,29 +67,38 @@ class LCMAgent(common_agent.ModuleAgent):
         logical = str(channel).upper()
         if logical in self.relay_map:
             physical = self.relay_map[logical]
-            self.relays.set(physical, bool(payload.get('value', self._percent(payload) > 0)))
-            return {'ok': True, 'kind': 'relay', 'channel': logical, 'physical': physical, 'value': self.relays.get(physical)}
+            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), physical, payload, payload.get('source', 'module_api')))
+            self.relays.set(physical, bool(decision.final_command.get('value', False)))
+            return {'ok': True, 'kind': 'relay', 'channel': logical, 'physical': physical, 'value': self.relays.get(physical), 'arbitration': decision.as_dict()}
         if logical in self.relays.values:
-            self.relays.set(logical, bool(payload.get('value', self._percent(payload) > 0)))
-            return {'ok': True, 'kind': 'relay', 'channel': logical, 'value': self.relays.get(logical)}
+            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), logical, payload, payload.get('source', 'module_api')))
+            self.relays.set(logical, bool(decision.final_command.get('value', False)))
+            return {'ok': True, 'kind': 'relay', 'channel': logical, 'value': self.relays.get(logical), 'arbitration': decision.as_dict()}
         if logical in self.hv_dimmer_map:
             physical = self.hv_dimmer_map[logical]
-            self.hv_dimmers.set_percent(physical, self._percent(payload))
-            return {'ok': True, 'kind': 'hv_dimmer', 'channel': logical, 'physical': physical, **self.hv_dimmers.snapshot()[physical]}
+            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), physical, payload, payload.get('source', 'module_api')))
+            self.hv_dimmers.set_percent(physical, float(decision.final_command.get('percent', 0.0)))
+            return {'ok': True, 'kind': 'hv_dimmer', 'channel': logical, 'physical': physical, **self.hv_dimmers.snapshot()[physical], 'arbitration': decision.as_dict()}
         if logical in self.hv_dimmers.values:
-            self.hv_dimmers.set_percent(logical, self._percent(payload))
-            return {'ok': True, 'kind': 'hv_dimmer', 'channel': logical, **self.hv_dimmers.snapshot()[logical]}
+            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), logical, payload, payload.get('source', 'module_api')))
+            self.hv_dimmers.set_percent(logical, float(decision.final_command.get('percent', 0.0)))
+            return {'ok': True, 'kind': 'hv_dimmer', 'channel': logical, **self.hv_dimmers.snapshot()[logical], 'arbitration': decision.as_dict()}
         if logical in self.lv_dimmer_map:
             physical = self.lv_dimmer_map[logical]
-            self.lv_dimmers.set_percent(physical, self._percent(payload))
-            return {'ok': True, 'kind': 'lv_dimmer', 'channel': logical, 'physical': physical, **self.lv_dimmers.snapshot()[physical]}
+            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), physical, payload, payload.get('source', 'module_api')))
+            self.lv_dimmers.set_percent(physical, float(decision.final_command.get('percent', 0.0)))
+            return {'ok': True, 'kind': 'lv_dimmer', 'channel': logical, 'physical': physical, **self.lv_dimmers.snapshot()[physical], 'arbitration': decision.as_dict()}
         if logical in self.lv_dimmers.values:
-            self.lv_dimmers.set_percent(logical, self._percent(payload))
-            return {'ok': True, 'kind': 'lv_dimmer', 'channel': logical, **self.lv_dimmers.snapshot()[logical]}
+            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), logical, payload, payload.get('source', 'module_api')))
+            self.lv_dimmers.set_percent(logical, float(decision.final_command.get('percent', 0.0)))
+            return {'ok': True, 'kind': 'lv_dimmer', 'channel': logical, **self.lv_dimmers.snapshot()[logical], 'arbitration': decision.as_dict()}
         raise KeyError(logical)
 
     async def apply_command(self, payload):
         op = payload.get('op')
+        if op == 'safety_state':
+            self.safety.update_conditions(payload.get('conditions', {}))
+            return {'ok': True, 'safety': self.safety.snapshot()}
         if op in ('set_channel', 'light') or ('channel' in payload and 'value' in payload):
             return self._set_channel(payload['channel'], payload)
         if op == 'set_relay':

@@ -89,10 +89,12 @@ Approved output priority:
 3. Local Override.
 4. HCM rules/user commands.
 
-Current code represents maintenance lock as a boolean on `logical_devices`.
-`command_logical()` blocks commands to a maintenance-locked logical device.
-`SafetyController` also filters maintenance-locked lights out of the fire light
-sweep.
+Current Phase 3 code represents maintenance lock as a boolean on
+`logical_devices` and routes requested commands through the shared safety
+arbiter in `07_servises/common/safety_arbiter.py`. The arbiter returns both the
+requested state and the effective commanded state. Maintenance-locked logical
+commands produce a de-energized effective command and are not recorded as active
+output intents, so clearing lockout does not replay stale energize requests.
 
 Maintenance lockout is explicitly part of the life-safety architecture and is
 the highest-priority output inhibit. When it is active:

@@ -8,6 +8,7 @@ common_can = import_module('07_servises.common.can')
 common_cfg = import_module('07_servises.common.config')
 common_io = import_module('07_servises.common.io')
 common_rmc_fw = import_module('07_servises.common.rmc_firmware')
+common_safety = import_module('07_servises.common.safety_arbiter')
 
 class SIMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
@@ -18,7 +19,12 @@ class SIMAgent(common_agent.ModuleAgent):
         self.rmc_sensor_stack = config.get('rmc_sensor_stack', common_can.RMC_SENSOR_DEFINITIONS)
         self.hexa_board = config.get('hexa_board', {})
         self.hexa_dio_state = self._initial_output_state('dio', 'channels')
+        self.hexa_dio_directions = {
+            name: str(item.get('direction', 'input')).lower()
+            for name, item in self._hexa_section('dio').get('channels', {}).items()
+        }
         self.hexa_switching_state = self._initial_output_state('switching_12v', 'outputs')
+        self.safety = common_safety.SafetyArbiter()
         self.hexa_usb_links = {}
         self.rmc_firmware_cfg = config.get('rmc_firmware_updates', {})
         self.firmware_staging_root = Path(self.rmc_firmware_cfg.get('staging_root', '/var/lib/hcm/firmware-staging'))
@@ -92,6 +98,7 @@ class SIMAgent(common_agent.ModuleAgent):
                 for name, item in switching.items()
             },
             'can': self.can_network.snapshot(),
+            'safety': self.safety.snapshot(),
             'all_bus_monitors_ok': all(item['status'] in ('OK', 'OFF') for item in {**bus, **loops}.values()),
         }
 
@@ -269,6 +276,9 @@ class SIMAgent(common_agent.ModuleAgent):
             return {'ok': False, 'session': session.to_dict(), 'error': session.error}
 
     async def apply_command(self, payload):
+        if payload.get('op') == 'safety_state':
+            self.safety.update_conditions(payload.get('conditions', {}))
+            return {'ok': True, 'safety': self.safety.snapshot()}
         if payload.get('op') == 'configure_can':
             return {'ok': True, 'can': await self.can_network.configure(apply=bool(payload.get('apply', False)))}
         if payload.get('op') == 'inject_rmc_state':  # development/test helper
@@ -283,14 +293,28 @@ class SIMAgent(common_agent.ModuleAgent):
             channel = str(payload['channel'])
             if channel not in self.hexa_dio_state:
                 return {'ok': False, 'error': 'unknown_hexa_dio_channel'}
+            direction = self.hexa_dio_directions.get(channel, 'input')
+            if direction != 'output':
+                return {'ok': False, 'error': 'channel_is_input', 'channel': channel, 'direction': direction}
+            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), channel, payload, payload.get('source', 'module_api')))
+            self.hexa_dio_state[channel] = bool(decision.final_command.get('value', False))
+            return {'ok': True, 'channel': channel, 'value': self.hexa_dio_state[channel], 'arbitration': decision.as_dict()}
+        if payload.get('op') == 'inject_hexa_di':
+            channel = str(payload['channel'])
+            if channel not in self.hexa_dio_state:
+                return {'ok': False, 'error': 'unknown_hexa_dio_channel'}
+            direction = self.hexa_dio_directions.get(channel, 'input')
+            if direction != 'input':
+                return {'ok': False, 'error': 'channel_is_output', 'channel': channel, 'direction': direction}
             self.hexa_dio_state[channel] = bool(payload.get('value', False))
-            return {'ok': True, 'channel': channel, 'value': self.hexa_dio_state[channel]}
+            return {'ok': True, 'channel': channel, 'value': self.hexa_dio_state[channel], 'direction': direction}
         if payload.get('op') == 'set_hexa_12v':
             channel = str(payload['channel'])
             if channel not in self.hexa_switching_state:
                 return {'ok': False, 'error': 'unknown_hexa_12v_channel'}
-            self.hexa_switching_state[channel] = bool(payload.get('value', False))
-            return {'ok': True, 'channel': channel, 'value': self.hexa_switching_state[channel]}
+            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), channel, payload, payload.get('source', 'module_api')))
+            self.hexa_switching_state[channel] = bool(decision.final_command.get('value', False))
+            return {'ok': True, 'channel': channel, 'value': self.hexa_switching_state[channel], 'arbitration': decision.as_dict()}
         if payload.get('op') == 'restart_hexa_12v':
             channel = str(payload['channel'])
             if channel not in self.hexa_switching_state:

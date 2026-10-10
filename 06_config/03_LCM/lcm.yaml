@@ -18,6 +18,9 @@ networks:
   heartbeat_conflict_address: 192.168.60.2
   heartbeat_port: 6004
   note: VLAN 60 is reserved for Unified Heartbeat V3 supervisory traffic only.
+safety:
+  emergency_lighting_channels: []
+  hvac_shutdown_channels: []
 io:
   mode: auto
 tls:

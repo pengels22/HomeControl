@@ -23,6 +23,10 @@ class DeviceCommand(BaseModel):
 class FireStateIn(BaseModel):
     active: bool
 
+class MaintenanceLockoutIn(BaseModel):
+    logical_name: str
+    active: bool
+
 class AuthChallengeIn(BaseModel):
     username: str
 

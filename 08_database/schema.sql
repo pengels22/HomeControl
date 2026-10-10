@@ -60,6 +60,28 @@ CREATE TABLE IF NOT EXISTS output_intents (
     UNIQUE(logical_device_id, source)
 );
 
+CREATE TABLE IF NOT EXISTS output_arbitration_events (
+    id BIGSERIAL PRIMARY KEY,
+    logical_device_id BIGINT REFERENCES logical_devices(id),
+    device_id TEXT CHECK (
+        device_id IS NULL OR (
+            device_id ~ '^[0-9a-f]{12}$'
+            AND device_id <> '000000000000'
+            AND device_id <> 'ffffffffffff'
+            AND device_id !~ '^[0-9a-f][13579bdf]'
+        )
+    ),
+    channel_id TEXT NOT NULL,
+    control_source TEXT NOT NULL,
+    requested_state JSONB NOT NULL,
+    effective_state JSONB NOT NULL,
+    feedback_state JSONB,
+    active_safety_conditions TEXT[] NOT NULL DEFAULT '{}',
+    fault_state TEXT,
+    inhibited BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS device_bindings (
     id BIGSERIAL PRIMARY KEY,
     logical_device_id BIGINT NOT NULL REFERENCES logical_devices(id) ON DELETE CASCADE,
@@ -188,6 +210,8 @@ CREATE INDEX IF NOT EXISTS idx_modules_device_id ON modules(device_id) WHERE dev
 CREATE INDEX IF NOT EXISTS idx_faults_active ON faults(active, severity);
 CREATE INDEX IF NOT EXISTS idx_faults_device_id ON faults(device_id) WHERE device_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_output_intents_active ON output_intents(logical_device_id, active, source);
+CREATE INDEX IF NOT EXISTS idx_output_arbitration_events_created ON output_arbitration_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_output_arbitration_events_device_channel ON output_arbitration_events(device_id, channel_id);
 CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token_hash) WHERE revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_auth_challenges_challenge ON auth_challenges(challenge) WHERE consumed_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_pairing_keys_hash ON pairing_keys(pairing_token_hash) WHERE used_at IS NULL;

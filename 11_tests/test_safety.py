@@ -52,8 +52,8 @@ async def test_fire_forces_hvac_off_and_commands_only_available_lights(monkeypat
 
     monkeypatch.setattr(safety_mod.notifications, 'send', send)
 
-    async def command_logical(logical_name, command, source='user'):
-        commands.append((logical_name, command, source))
+    async def command_logical(logical_name, command, source='user', safety_conditions=None):
+        commands.append((logical_name, command, source, safety_conditions))
         return {'ok': True}
 
     monkeypatch.setattr(safety_mod, 'command_logical', command_logical)
@@ -65,10 +65,10 @@ async def test_fire_forces_hvac_off_and_commands_only_available_lights(monkeypat
     assert hvac.force_off_count == 1
     assert sent[0].priority == 'critical'
     assert commands == [
-        ('Kitchen Light', {'op': 'light', 'percent': 100, 'value': True}, safety_mod.OutputSource.LIFE_SAFETY),
-        ('Hall Light', {'op': 'light', 'percent': 100, 'value': True}, safety_mod.OutputSource.LIFE_SAFETY),
+        ('Kitchen Light', {'op': 'light', 'percent': 100, 'value': True}, safety_mod.OutputSource.LIFE_SAFETY, {'fire_active'}),
+        ('Hall Light', {'op': 'light', 'percent': 100, 'value': True}, safety_mod.OutputSource.LIFE_SAFETY, {'fire_active'}),
     ]
-    assert 'maintenance_locked=false' in conn.fetches[0]
+    assert "metadata->>'emergency_lighting'" in conn.fetches[0]
     assert conn.executed[0][1:3] == ('fire', True)
 
 
@@ -85,7 +85,7 @@ async def test_repeated_fire_state_is_idempotent(monkeypatch):
 
     monkeypatch.setattr(safety_mod.notifications, 'send', send)
 
-    async def command_logical(logical_name, command, source='user'):
+    async def command_logical(logical_name, command, source='user', safety_conditions=None):
         commands.append((logical_name, command))
         return {'ok': True}
 
@@ -98,3 +98,41 @@ async def test_repeated_fire_state_is_idempotent(monkeypatch):
     assert hvac.force_off_count == 1
     assert len(conn.executed) == 1
     assert len(commands) == 2
+
+
+@pytest.mark.asyncio
+async def test_fire_detection_logs_but_does_not_command_lights_during_lockout(monkeypatch):
+    conn = FakeConn()
+    hvac = FakeHVAC()
+    commands = []
+    reports = []
+
+    monkeypatch.setattr(safety_mod.db, 'acquire', lambda: FakeAcquire(conn))
+
+    async def send(n):
+        return None
+
+    monkeypatch.setattr(safety_mod.notifications, 'send', send)
+
+    async def command_logical(logical_name, command, source='user', safety_conditions=None):
+        commands.append((logical_name, command))
+        return {'ok': True}
+
+    monkeypatch.setattr(safety_mod, 'command_logical', command_logical)
+
+    class Reporter:
+        async def status(self, name, value):
+            reports.append(('status', name, value))
+
+        async def fault(self, name, detail):
+            reports.append(('fault', name, detail))
+
+    controller = SafetyController(hvac, heartbeat=Reporter())
+    await controller.set_maintenance_lockout(True)
+    await controller.set_fire(True)
+
+    assert controller.fire_active is True
+    assert hvac.force_off_count == 1
+    assert conn.executed[0][1:3] == ('fire', True)
+    assert commands == []
+    assert ('fault', 'output_command_inhibited', 'fire emergency lighting inhibited by maintenance lockout') in reports

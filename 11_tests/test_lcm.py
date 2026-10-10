@@ -10,11 +10,13 @@ def test_lcm_numeric_channel_map():
     relay = agent._set_channel('1', {'value': True})
     assert relay['kind'] == 'relay'
     assert relay['physical'] == 'A1'
+    assert relay['arbitration']['effective_state']['energized'] is True
     assert agent.relays.get('A1') is True
 
     hv = agent._set_channel('13', {'value': 55})
     assert hv['kind'] == 'hv_dimmer'
     assert hv['physical'] == 'HV-1'
+    assert hv['arbitration']['effective_state']['percent'] == 55.0
     assert agent.hv_dimmers.snapshot()['HV-1']['percent'] == 55
 
     hv_direct = agent._set_channel('HV-1', {'value': 40})

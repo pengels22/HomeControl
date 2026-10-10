@@ -133,7 +133,9 @@ This status reflects repository review, not hardware validation.
 | Fire API/software path | Implemented/tested | Logs, HVAC off, critical notification, light sweep. |
 | Fire GPIO input | Planned/conflict | Pinout exists; polarity conflict unresolved. |
 | Maintenance lock block | Implemented/tested | Blocks logical-device commands. |
-| Maintenance lockout priority | Approved/partial | Highest-priority output inhibit; current command path blocks locked logical devices, but final-state arbitration tests are still required. |
+| Maintenance lockout priority | Implemented/tested | Shared arbiter exposes requested/effective state and inhibits energize commands across HCM, RCM, LCM, SIM, and simulator paths. |
+| Fire input abstraction | Implemented/tested | Simulated debounced input helper; real GPIO remains intentionally disabled. |
+| Phase 3 safety arbitration | Implemented/tested | See `HCM_PHASE3_SAFETY_ARBITRATION.md`; hardware validation remains outstanding. |
 | Safety event persistence | Partial | Events inserted; latching/recovery policy incomplete. |
 | Independent safety processor/path | Planned | Conflict Manager is heartbeat supervisor, not certified safety path. |
 

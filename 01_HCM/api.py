@@ -9,6 +9,7 @@ from .models import (
     FireStateIn,
     HvacModeIn,
     HvacSetpointIn,
+    MaintenanceLockoutIn,
     PairingKeyCreateIn,
     PairingKeyVerifyIn,
     PasswordLoginIn,
@@ -27,7 +28,7 @@ from .auth import (
     verify_login_challenge,
     verify_pairing_key,
 )
-from .devices import MaintenanceLockedError, command_logical
+from .devices import MaintenanceLockedError, command_logical, set_maintenance_lockout
 from .hvac import Mode
 from .settings import settings
 from .updater import updater
@@ -153,3 +154,12 @@ async def fire(body: FireStateIn, user=Depends(require_user)):
     if user['role'] != 'ADMIN': raise HTTPException(403)
     await safety.set_fire(body.active)
     return {'ok': True, 'fire_active': safety.fire_active}
+
+@router.post('/safety/maintenance-lockout')
+async def maintenance_lockout(body: MaintenanceLockoutIn, user=Depends(require_user)):
+    if user['role'] != 'ADMIN': raise HTTPException(403)
+    try:
+        result = await set_maintenance_lockout(body.logical_name, body.active)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    return {'ok': True, 'maintenance_locked': body.active, **result}

@@ -24,6 +24,7 @@ common_can = import_module("07_servises.common.can")
 common_cfg = import_module("07_servises.common.config")
 common_pairing = import_module("07_servises.common.pairing_glyph")
 common_rmc_fw = import_module("07_servises.common.rmc_firmware")
+common_safety = import_module("07_servises.common.safety_arbiter")
 hvac_mod = import_module("01_HCM.hvac")
 lcm_mod = import_module("03_LCM.main")
 rcm_mod = import_module("04_RCM.main")
@@ -63,6 +64,16 @@ class HomeControlSimulator:
         self.sim = sim_mod.SIMAgent(cfg("06_config/02_SIM/sim.yaml"))
         self.pnl = pnl_mod.PNLAgent(cfg("06_config/05_PNL/pnl.yaml"))
         self.rcm_locks = {f"{bank}{ch}": False for bank in "ABCD" for ch in range(1, 9)}
+        self.lcm.safety.emergency_lighting_channels.add("A1")
+        self.rcm.safety.hvac_shutdown_channels.update({"A1", "A2", "A3"})
+        self.safety_conditions = {
+            "maintenance_lockout": False,
+            "fire_active": False,
+            "fire_input_fault": False,
+            "communication_loss": False,
+        }
+        self.safety_events: list[dict[str, Any]] = []
+        self.heartbeat_safety_reports: list[dict[str, Any]] = []
         self.rcm_names = {f"{bank}{ch}": f"Relay {bank}{ch}" for bank in "ABCD" for ch in range(1, 9)}
         self.lcm_fades: dict[str, asyncio.Task] = {}
         self.lcm_names = self.default_lcm_names()
@@ -86,12 +97,12 @@ class HomeControlSimulator:
 
     async def hvac_output(self, name: str, value: bool) -> None:
         relay = {"FAN": "A1", "COOL": "A2", "HEAT": "A3"}[name]
-        await self.rcm.apply_command({"op": "set_relay", "channel": relay, "value": value})
+        await self.rcm.apply_command({"op": "set_relay", "channel": relay, "value": value, "source": "rules"})
         self.hvac_events.append({"ts": time.time(), "type": "output", "name": name, "value": value, "relay": relay})
 
     async def hvac_damper(self, room, open_: bool) -> None:
         relay = "A4"
-        await self.rcm.apply_command({"op": "set_relay", "channel": relay, "value": not open_})
+        await self.rcm.apply_command({"op": "set_relay", "channel": relay, "value": not open_, "source": "rules"})
         self.hvac_events.append({"ts": time.time(), "type": "damper", "room": room.room, "open": open_, "relay": relay})
 
     def hvac_state(self) -> dict[str, Any]:
@@ -117,6 +128,7 @@ class HomeControlSimulator:
             "uptime_s": round(time.time() - self.started_at, 1),
             "devices": self.devices(),
             "hcm": {"hvac": self.hvac_state(), "pairing": self.pairing_glyph()},
+            "safety": self.safety_state(),
             "rcm": rcm_state,
             "lcm": lcm_state,
             "sim": await self.sim.collect_state(),
@@ -164,7 +176,7 @@ class HomeControlSimulator:
         ch = channel.upper()
         if self.rcm_locks.get(ch):
             return {"ok": False, "locked": True, "channel": ch}
-        return await self.rcm.apply_command({"op": "set_relay", "channel": ch, "value": value})
+        return await self.rcm.apply_command({"op": "set_relay", "channel": ch, "value": value, "source": "user"})
 
     def set_rcm_name(self, channel: str, name: str) -> dict[str, Any]:
         ch = channel.upper()
@@ -196,7 +208,68 @@ class HomeControlSimulator:
                 self.lcm_fades.pop(channel, None)
 
     async def set_lcm_relay(self, channel: str, value: bool) -> dict[str, Any]:
-        return await self.lcm.apply_command({"op": "set_relay", "channel": channel.upper(), "value": value})
+        return await self.lcm.apply_command({"op": "set_relay", "channel": channel.upper(), "value": value, "source": "user"})
+
+    def safety_state(self) -> dict[str, Any]:
+        if self.safety_conditions["fire_active"] and self.safety_conditions["maintenance_lockout"]:
+            mode = "fire_active_with_maintenance_lockout"
+        elif self.safety_conditions["fire_active"]:
+            mode = "fire_active"
+        elif self.safety_conditions["maintenance_lockout"]:
+            mode = "maintenance_lockout"
+        elif self.safety_conditions["fire_input_fault"]:
+            mode = "input_fault_unknown"
+        elif self.safety_conditions["communication_loss"]:
+            mode = "communication_failure"
+        else:
+            mode = "normal"
+        return {
+            "mode": mode,
+            "conditions": dict(self.safety_conditions),
+            "events": self.safety_events[-20:],
+            "heartbeat_reports": self.heartbeat_safety_reports[-20:],
+        }
+
+    async def _publish_safety_conditions(self):
+        payload = {"op": "safety_state", "conditions": dict(self.safety_conditions)}
+        await self.rcm.apply_command(payload)
+        await self.lcm.apply_command(payload)
+        self.heartbeat_safety_reports.append({
+            "ts": time.time(),
+            "maintenance_lockout": self.safety_conditions["maintenance_lockout"],
+            "fire_alarm": self.safety_conditions["fire_active"],
+            "fire_input_fault": self.safety_conditions["fire_input_fault"],
+        })
+
+    async def set_maintenance_lockout(self, active: bool) -> dict[str, Any]:
+        self.safety_conditions["maintenance_lockout"] = bool(active)
+        self.safety_events.append({"ts": time.time(), "type": "maintenance_lockout", "active": bool(active)})
+        await self._publish_safety_conditions()
+        if active:
+            for channel in list(self.rcm.relays.values):
+                await self.rcm.apply_command({"op": "set_relay", "channel": channel, "value": False, "source": "maintenance"})
+            for channel in list(self.lcm.relays.values):
+                await self.lcm.apply_command({"op": "set_relay", "channel": channel, "value": False, "source": "maintenance"})
+            for channel in list(self.lcm.hv_dimmers.values) + list(self.lcm.lv_dimmers.values):
+                await self.lcm.apply_command({"op": "set_dimmer", "channel": channel, "percent": 0, "source": "maintenance"})
+        return {"ok": True, "safety": self.safety_state()}
+
+    async def set_fire_alarm(self, active: bool) -> dict[str, Any]:
+        self.safety_conditions["fire_active"] = bool(active)
+        self.safety_events.append({"ts": time.time(), "type": "fire", "active": bool(active)})
+        await self._publish_safety_conditions()
+        if active:
+            await self.hvac.force_off()
+            await self.lcm.apply_command({"op": "set_relay", "channel": "A1", "value": True, "source": "life_safety"})
+            for channel in ("A1", "A2", "A3"):
+                await self.rcm.apply_command({"op": "set_relay", "channel": channel, "value": False, "source": "life_safety"})
+        return {"ok": True, "safety": self.safety_state()}
+
+    async def set_fire_input_fault(self, active: bool) -> dict[str, Any]:
+        self.safety_conditions["fire_input_fault"] = bool(active)
+        self.safety_events.append({"ts": time.time(), "type": "fire_input_fault", "active": bool(active)})
+        await self._publish_safety_conditions()
+        return {"ok": True, "safety": self.safety_state()}
 
     def default_lcm_names(self) -> dict[str, str]:
         names = {f"A{i}": f"Relay A{i}" for i in range(1, 9)}
@@ -870,6 +943,21 @@ async def hvac_room(body: dict[str, Any]):
     )
     await sim.hvac.evaluate()
     return sim.hvac_state()
+
+
+@app.post("/api/safety/maintenance")
+async def safety_maintenance(body: dict[str, Any]):
+    return await sim.set_maintenance_lockout(bool(body.get("active", True)))
+
+
+@app.post("/api/safety/fire")
+async def safety_fire(body: dict[str, Any]):
+    return await sim.set_fire_alarm(bool(body.get("active", True)))
+
+
+@app.post("/api/safety/fire-input-fault")
+async def safety_fire_input_fault(body: dict[str, Any]):
+    return await sim.set_fire_input_fault(bool(body.get("active", True)))
 
 
 @app.post("/api/lcm/dimmer")

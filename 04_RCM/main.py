@@ -8,6 +8,7 @@ common_cfg = import_module('07_servises.common.config')
 common_hw = import_module('07_servises.common.hardware')
 common_pinmap = import_module('07_servises.common.pinmap')
 common_io = import_module('07_servises.common.io')
+common_safety = import_module('07_servises.common.safety_arbiter')
 
 class RCMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
@@ -22,6 +23,11 @@ class RCMAgent(common_agent.ModuleAgent):
         self.io_mode = common_io.io_mode(config)
         self.relays = common_hw.DigitalBank(names)
         self.fail_actions = config.get('fail_actions', {})
+        safety_cfg = config.get('safety', {})
+        self.safety = common_safety.SafetyArbiter(
+            emergency_lighting_channels=set(safety_cfg.get('emergency_lighting_channels', [])),
+            hvac_shutdown_channels=set(safety_cfg.get('hvac_shutdown_channels', [])),
+        )
 
     async def collect_state(self):
         return {
@@ -36,22 +42,43 @@ class RCMAgent(common_agent.ModuleAgent):
                 for channel, entry in self.pinout.items()
                 if channel in self.relays.values
             },
+            'safety': self.safety.snapshot(),
         }
 
     async def apply_command(self, payload):
+        if payload.get('op') == 'safety_state':
+            self.safety.update_conditions(payload.get('conditions', {}))
+            return {'ok': True, 'safety': self.safety.snapshot()}
         if payload.get('op') == 'set_relay':
             ch = payload['channel'].upper()
-            self.relays.set(ch, bool(payload['value']))
+            decision = self.safety.decide(common_safety.OutputRequest(
+                self.identity.get('device_id'),
+                ch,
+                payload,
+                payload.get('source', 'module_api'),
+            ))
+            self.relays.set(ch, bool(decision.final_command.get('value', False)))
             entry = self.pinout[ch]
             return {
                 'ok': True,
                 'channel': ch,
                 'hardware_address': entry.hardware_address,
                 'value': self.relays.get(ch),
+                'requested_value': bool(payload['value']),
+                'arbitration': decision.as_dict(),
             }
         if payload.get('op') == 'all_off':
-            for ch in list(self.relays.values): self.relays.set(ch, False)
-            return {'ok': True}
+            decisions = []
+            for ch in list(self.relays.values):
+                decision = self.safety.decide(common_safety.OutputRequest(
+                    self.identity.get('device_id'),
+                    ch,
+                    {'op': 'set_relay', 'channel': ch, 'value': False},
+                    payload.get('source', 'module_api'),
+                ))
+                self.relays.set(ch, bool(decision.final_command.get('value', False)))
+                decisions.append(decision.as_dict())
+            return {'ok': True, 'arbitration': decisions}
         return await super().apply_command(payload)
 
 async def main():
