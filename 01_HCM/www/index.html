@@ -65,6 +65,52 @@
           </table>
         </section>
       </div>
+
+      <section class="panel wide">
+        <div class="panel-head">
+          <h2>Devices</h2>
+          <button id="refresh-registry" class="secondary">Refresh</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Module</th><th>Identity</th><th>Address</th><th>Status</th><th>Capabilities</th></tr></thead>
+            <tbody id="module-list"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="grid">
+        <section class="panel">
+          <h2>Logical Devices</h2>
+          <div class="row">
+            <input id="logical-name" placeholder="Logical name">
+            <input id="device-class" placeholder="Class">
+            <button id="create-logical">Add</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Name</th><th>Class</th><th>Enabled</th><th>Lock</th></tr></thead>
+              <tbody id="logical-list"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Bindings</h2>
+          <div class="row">
+            <select id="binding-logical"></select>
+            <select id="binding-module"></select>
+            <input id="binding-channel" placeholder="Channel">
+            <button id="create-binding">Bind</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Logical</th><th>Module</th><th>Channel</th><th>Type</th></tr></thead>
+              <tbody id="binding-list"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
       <p id="app-error" class="error"></p>
     </section>
   </main>

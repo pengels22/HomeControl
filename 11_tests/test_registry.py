@@ -1,6 +1,7 @@
 import asyncio
 from pathlib import Path
 from importlib import import_module
+import json
 
 import pytest
 
@@ -25,6 +26,12 @@ class FakeRegistryConn:
         self.executed = []
 
     async def fetchrow(self, query, *args):
+        if 'SELECT id' in query and 'FROM modules' in query:
+            device_id, module_uuid = args
+            row = self._find(device_id, module_uuid)
+            if not row:
+                return None
+            return {'id': row['id']}
         if 'device_id=$1' in query and 'module_uuid::text=$2' in query:
             device_id, module_uuid = args
             row = None
@@ -54,34 +61,56 @@ class FakeRegistryConn:
     async def execute(self, query, *args):
         self.executed.append((query, args))
         if 'INSERT INTO modules' in query:
-            device_id, module_uuid, module_type, hostname, ip_address, software_version = args
+            device_id, module_uuid, identity_interface, module_type, hostname, ip_address, software_version = args
             key = module_uuid or device_id
             self.modules[key] = {
+                'id': len(self.modules) + 1,
                 'device_id': device_id,
+                'identity_interface': identity_interface,
                 'module_type': module_type,
                 'hostname': hostname,
                 'ip_address': ip_address,
                 'software_version': software_version,
                 'online': True,
+                'control_session_online': True,
             }
-        elif 'UPDATE modules SET online=true,last_seen=now(),last_state' in query:
+        elif 'last_state=$3::jsonb' in query and 'online=true' in query:
             device_id, module_uuid, state = args
             row = self._find(device_id, module_uuid)
             if row:
                 row['last_state'] = state
                 row['online'] = True
+                row['control_session_online'] = True
         elif 'SET online=true' in query:
             device_id, module_uuid = args[:2]
             row = self._find(device_id, module_uuid)
             if row:
                 row['online'] = True
+                row['control_session_online'] = True
                 if len(args) > 2:
                     row['software_version'] = args[2]
-        elif 'UPDATE modules SET online=false' in query:
+                    row['identity_interface'] = args[3] or row.get('identity_interface')
+        elif 'INSERT INTO module_capabilities' in query:
+            module_id, capability, details = args
+            for row in self.modules.values():
+                if row['id'] == module_id:
+                    row.setdefault('capabilities', {})[capability] = details
+                    break
+        elif 'DELETE FROM module_capabilities' in query:
+            module_id, capabilities = args
+            for row in self.modules.values():
+                if row['id'] == module_id:
+                    existing = row.setdefault('capabilities', {})
+                    for capability in list(existing):
+                        if capability not in capabilities:
+                            existing.pop(capability, None)
+                    break
+        elif 'online=false' in query and 'UPDATE modules' in query:
             device_id, module_uuid = args
             row = self._find(device_id, module_uuid)
             if row:
                 row['online'] = False
+                row['control_session_online'] = False
         else:
             raise AssertionError(f'unexpected execute: {query}')
 
@@ -125,6 +154,40 @@ async def test_assign_prefers_normalized_device_id(monkeypatch):
 
     assert assignment == {'hostname': 'RCM01', 'ip_address': '192.168.20.20', 'reboot_required': True}
     assert conn.modules['legacy-uuid']['device_id'] == '48b02d87db16'
+
+
+@pytest.mark.asyncio
+async def test_identify_capabilities_are_normalized_for_persistence(monkeypatch):
+    conn = FakeRegistryConn()
+    monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
+    monkeypatch.setattr(registry_mod.settings, 'commissioning_enabled', True)
+    reg = registry_mod.ModuleRegistry()
+
+    await reg._assign({
+        'module_type': 'SIM',
+        'device_id': '48:b0:2d:87:db:16',
+        'identity_interface': 'eth0',
+        'capabilities': [
+            'telemetry',
+            {'name': 'rmc-can', 'interfaces': ['can0']},
+            {'capability': 'hexa-dio', 'channels': 4},
+            'telemetry',
+        ],
+    })
+    async with registry_mod.db.acquire() as dbc:
+        await reg._store_capabilities(dbc, '48b02d87db16', None, {
+            'capabilities': [
+                'telemetry',
+                {'name': 'rmc-can', 'interfaces': ['can0']},
+                {'capability': 'hexa-dio', 'channels': 4},
+                'telemetry',
+            ],
+        })
+
+    capabilities = conn.modules['48b02d87db16']['capabilities']
+    assert set(capabilities) == {'telemetry', 'rmc-can', 'hexa-dio'}
+    assert json.loads(capabilities['rmc-can']) == {'interfaces': ['can0']}
+    assert conn.modules['48b02d87db16']['identity_interface'] == 'eth0'
 
 
 def write_hcm_config(root: Path, active_profile: str, production_subnet: str | None = None) -> None:

@@ -20,6 +20,35 @@ class DeviceCommand(BaseModel):
     logical_name: str
     command: dict[str, Any]
 
+class LogicalDeviceCreateIn(BaseModel):
+    logical_name: str = Field(min_length=1, max_length=120)
+    device_class: str = Field(min_length=1, max_length=80)
+    room_id: int | None = None
+    enabled: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+class LogicalDeviceUpdateIn(BaseModel):
+    logical_name: str | None = Field(default=None, min_length=1, max_length=120)
+    device_class: str | None = Field(default=None, min_length=1, max_length=80)
+    room_id: int | None = None
+    enabled: bool | None = None
+    maintenance_locked: bool | None = None
+    metadata: dict[str, Any] | None = None
+
+class DeviceBindingCreateIn(BaseModel):
+    logical_name: str = Field(min_length=1, max_length=120)
+    module_identifier: str = Field(min_length=1, max_length=120)
+    channel: str | None = Field(default=None, max_length=80)
+    binding_type: str = Field(default='primary', min_length=1, max_length=40)
+    enabled: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+class DeviceBindingUpdateIn(BaseModel):
+    channel: str | None = Field(default=None, max_length=80)
+    binding_type: str | None = Field(default=None, min_length=1, max_length=40)
+    enabled: bool | None = None
+    metadata: dict[str, Any] | None = None
+
 class FireStateIn(BaseModel):
     active: bool
 

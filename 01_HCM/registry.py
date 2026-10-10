@@ -154,9 +154,20 @@ class ModuleRegistry:
             seq = addresses.index(ip) + 1
             hostname = f'{typ}{seq:02d}'
             await conn.execute('''
-                INSERT INTO modules(device_id,module_uuid,module_type,hostname,ip_address,software_version,last_seen,online)
-                VALUES($1,$2,$3,$4,$5,$6,now(),true)
-            ''', device_id, module_uuid, typ, hostname, ip, ident.get('software_version'))
+                INSERT INTO modules(
+                    device_id,module_uuid,identity_interface,module_type,hostname,
+                    ip_address,software_version,last_seen,online,control_session_online
+                )
+                VALUES($1,$2,$3,$4,$5,$6,$7,now(),true,true)
+            ''',
+                device_id,
+                module_uuid,
+                ident.get('identity_interface') or (ident.get('identity') or {}).get('interface'),
+                typ,
+                hostname,
+                ip,
+                ident.get('software_version'),
+            )
             return {'hostname': hostname, 'ip_address': ip, 'reboot_required': True}
 
     def _device_id_from_ident(self, ident: dict[str, Any]) -> str | None:
@@ -178,6 +189,51 @@ class ModuleRegistry:
         import yaml
         data = yaml.safe_load(path.read_text()) or {}
         return {'version': int(data.get('config_version',1)), 'config': data}
+
+    def _capability_rows(self, ident: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+        rows: list[tuple[str, dict[str, Any]]] = []
+        seen: set[str] = set()
+        for item in ident.get('capabilities') or []:
+            if isinstance(item, str):
+                name = item.strip()
+                details: dict[str, Any] = {}
+            elif isinstance(item, dict):
+                raw_name = item.get('capability') or item.get('name') or item.get('type')
+                name = str(raw_name or '').strip()
+                details = {k: v for k, v in item.items() if k not in {'capability', 'name'}}
+            else:
+                continue
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            rows.append((name, details))
+        return rows
+
+    async def _store_capabilities(self, dbc, device_id: str | None, module_uuid: str | None, ident: dict[str, Any]) -> None:
+        capabilities = self._capability_rows(ident)
+        if not capabilities:
+            return
+        row = await dbc.fetchrow('''
+            SELECT id
+            FROM modules
+            WHERE ($1::text IS NOT NULL AND device_id=$1)
+               OR ($2::text IS NOT NULL AND module_uuid::text=$2)
+        ''', device_id, module_uuid)
+        if not row:
+            return
+        module_id = int(row['id'])
+        await dbc.execute(
+            'DELETE FROM module_capabilities WHERE module_id=$1 AND NOT (capability=ANY($2::text[]))',
+            module_id,
+            [name for name, _details in capabilities],
+        )
+        for name, details in capabilities:
+            await dbc.execute('''
+                INSERT INTO module_capabilities(module_id, capability, details, updated_at)
+                VALUES($1,$2,$3::jsonb,now())
+                ON CONFLICT(module_id, capability)
+                DO UPDATE SET details=EXCLUDED.details, updated_at=now()
+            ''', module_id, name, json.dumps(details))
 
     async def handle_client(self, reader, writer):
         conn = ModuleConnection(reader, writer)
@@ -203,10 +259,20 @@ class ModuleRegistry:
             async with db.acquire() as dbc:
                 await dbc.execute('''
                     UPDATE modules
-                    SET online=true,last_seen=now(),software_version=$3
+                    SET online=true,
+                        control_session_online=true,
+                        last_seen=now(),
+                        software_version=$3,
+                        identity_interface=COALESCE($4, identity_interface)
                     WHERE ($1::text IS NOT NULL AND device_id=$1)
                        OR ($2::text IS NOT NULL AND module_uuid::text=$2)
-                ''', conn.device_id, conn.module_uuid, ident.get('software_version'))
+                ''',
+                    conn.device_id,
+                    conn.module_uuid,
+                    ident.get('software_version'),
+                    ident.get('identity_interface') or (ident.get('identity') or {}).get('interface'),
+                )
+                await self._store_capabilities(dbc, conn.device_id, conn.module_uuid, ident)
 
             while True:
                 msg = await protocol.read_frame(reader)
@@ -216,7 +282,11 @@ class ModuleRegistry:
                     conn.last_heartbeat = time.time()
                     async with db.acquire() as dbc:
                         await dbc.execute('''
-                            UPDATE modules SET online=true,last_seen=now(),last_state=$3::jsonb
+                            UPDATE modules
+                            SET online=true,
+                                control_session_online=true,
+                                last_seen=now(),
+                                last_state=$3::jsonb
                             WHERE ($1::text IS NOT NULL AND device_id=$1)
                                OR ($2::text IS NOT NULL AND module_uuid::text=$2)
                         ''', conn.device_id, conn.module_uuid, json.dumps(payload))
@@ -224,7 +294,9 @@ class ModuleRegistry:
                 elif typ == 'state':
                     async with db.acquire() as dbc:
                         await dbc.execute('''
-                            UPDATE modules SET last_state=$3::jsonb,last_seen=now()
+                            UPDATE modules
+                            SET last_state=$3::jsonb,
+                                last_seen=now()
                             WHERE ($1::text IS NOT NULL AND device_id=$1)
                                OR ($2::text IS NOT NULL AND module_uuid::text=$2)
                         ''', conn.device_id, conn.module_uuid, json.dumps(payload))
@@ -245,7 +317,9 @@ class ModuleRegistry:
                 try:
                     async with db.acquire() as dbc:
                         await dbc.execute('''
-                            UPDATE modules SET online=false
+                            UPDATE modules
+                            SET online=false,
+                                control_session_online=false
                             WHERE ($1::text IS NOT NULL AND device_id=$1)
                                OR ($2::text IS NOT NULL AND module_uuid::text=$2)
                         ''', conn.device_id, conn.module_uuid)

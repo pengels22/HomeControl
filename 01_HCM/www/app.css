@@ -79,6 +79,7 @@ h2 {
   display: grid;
   grid-template-columns: 340px 1fr;
   gap: 16px;
+  margin-bottom: 16px;
 }
 
 .panel {
@@ -86,6 +87,22 @@ h2 {
   border: 1px solid #2b3035;
   border-radius: 8px;
   padding: 16px;
+}
+
+.wide {
+  margin-bottom: 16px;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.panel-head h2 {
+  margin-bottom: 0;
 }
 
 .narrow {
@@ -134,6 +151,27 @@ table {
   width: 100%;
   border-collapse: collapse;
   margin-top: 12px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.status-pill {
+  display: inline-flex;
+  min-width: 62px;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #27302d;
+  color: #8ee0be;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.status-pill.offline {
+  background: #30272b;
+  color: #ffb2c0;
 }
 
 th, td {

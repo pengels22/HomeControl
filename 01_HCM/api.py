@@ -1,14 +1,19 @@
 from __future__ import annotations
 import asyncio
 import base64
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
 from .models import (
     AuthChallengeIn,
     AuthVerifyIn,
     DeviceCommand,
+    DeviceBindingCreateIn,
+    DeviceBindingUpdateIn,
     FireStateIn,
     HvacModeIn,
     HvacSetpointIn,
+    LogicalDeviceCreateIn,
+    LogicalDeviceUpdateIn,
     MaintenanceLockoutIn,
     PairingKeyCreateIn,
     PairingKeyVerifyIn,
@@ -32,6 +37,7 @@ from .auth import (
 )
 from .devices import MaintenanceLockedError, command_logical, set_maintenance_lockout
 from .hvac import Mode
+from . import management
 from .settings import settings
 from .updater import updater
 
@@ -95,6 +101,108 @@ async def pairing_verify(body: PairingKeyVerifyIn):
 async def get_hvac(user=Depends(require_user)):
     s = hvac.state
     return {'mode': s.mode.value, 'setpoint_f': s.setpoint_f, 'average_f': hvac.average_temperature(), 'fan':s.fan,'heat':s.heat,'cool':s.cool}
+
+@router.get('/modules')
+async def modules(user=Depends(require_user)):
+    return {'modules': await management.list_modules()}
+
+@router.get('/modules/{identifier}')
+async def module_detail(identifier: str, user=Depends(require_user)):
+    try:
+        return await management.get_module(identifier)
+    except management.NotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except management.ValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+@router.get('/modules/{identifier}/capabilities')
+async def module_capabilities(identifier: str, user=Depends(require_user)):
+    try:
+        module = await management.get_module(identifier)
+    except management.NotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except management.ValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {'module': module['hostname'], 'capabilities': module['capabilities']}
+
+@router.get('/logical-devices')
+async def logical_devices(user=Depends(require_user)):
+    return {'logical_devices': await management.list_logical_devices()}
+
+@router.post('/logical-devices')
+async def logical_device_create(body: LogicalDeviceCreateIn, user=Depends(require_user)):
+    if user['role'] != 'ADMIN': raise HTTPException(403)
+    try:
+        return await management.create_logical_device(
+            logical_name=body.logical_name,
+            device_class=body.device_class,
+            room_id=body.room_id,
+            enabled=body.enabled,
+            metadata=body.metadata,
+            actor=user['user'],
+        )
+    except asyncpg.UniqueViolationError as exc:
+        raise HTTPException(409, 'logical device already exists') from exc
+
+@router.patch('/logical-devices/{logical_name}')
+async def logical_device_update(logical_name: str, body: LogicalDeviceUpdateIn, user=Depends(require_user)):
+    if user['role'] != 'ADMIN': raise HTTPException(403)
+    try:
+        return await management.update_logical_device(
+            logical_name,
+            actor=user['user'],
+            new_logical_name=body.logical_name,
+            device_class=body.device_class,
+            room_id=body.room_id,
+            enabled=body.enabled,
+            maintenance_locked=body.maintenance_locked,
+            metadata=body.metadata,
+        )
+    except management.NotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except asyncpg.UniqueViolationError as exc:
+        raise HTTPException(409, 'logical device update conflicts with existing data') from exc
+
+@router.get('/device-bindings')
+async def device_bindings(user=Depends(require_user)):
+    return {'device_bindings': await management.list_bindings()}
+
+@router.post('/device-bindings')
+async def device_binding_create(body: DeviceBindingCreateIn, user=Depends(require_user)):
+    if user['role'] != 'ADMIN': raise HTTPException(403)
+    try:
+        return await management.create_binding(
+            logical_name=body.logical_name,
+            module_identifier=body.module_identifier,
+            channel=body.channel,
+            binding_type=body.binding_type,
+            enabled=body.enabled,
+            metadata=body.metadata,
+            actor=user['user'],
+        )
+    except management.NotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except management.ValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except asyncpg.UniqueViolationError as exc:
+        raise HTTPException(409, 'device binding already exists') from exc
+
+@router.patch('/device-bindings/{binding_id}')
+async def device_binding_update(binding_id: int, body: DeviceBindingUpdateIn, user=Depends(require_user)):
+    if user['role'] != 'ADMIN': raise HTTPException(403)
+    try:
+        return await management.update_binding(
+            binding_id,
+            actor=user['user'],
+            channel=body.channel,
+            binding_type=body.binding_type,
+            enabled=body.enabled,
+            metadata=body.metadata,
+        )
+    except management.NotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except asyncpg.UniqueViolationError as exc:
+        raise HTTPException(409, 'device binding update conflicts with existing data') from exc
 
 @router.put('/hvac/mode')
 async def set_mode(body: HvacModeIn, user=Depends(require_user)):
