@@ -48,7 +48,7 @@ async def create_persistent_session(user: str, role: str, ttl_s: int | None = No
         await conn.execute(
             """
             INSERT INTO user_sessions(username,token_hash,role,expires_at)
-            VALUES($1,$2,$3,now() + ($4::text || ' seconds')::interval)
+            VALUES($1,$2,$3,now() + ($4::integer * interval '1 second'))
             """,
             user,
             _token_hash(token),
@@ -96,7 +96,7 @@ async def create_login_challenge(username: str) -> dict[str, Any]:
         await conn.execute(
             """
             INSERT INTO auth_challenges(username,challenge,expires_at)
-            VALUES($1,$2,now() + ($3::text || ' seconds')::interval)
+            VALUES($1,$2,now() + ($3::integer * interval '1 second'))
             """,
             username,
             challenge,
@@ -153,7 +153,7 @@ async def create_pairing_key(
             INSERT INTO pairing_keys(
                 label,target_type,pairing_token_hash,created_by,expires_at,metadata
             )
-            VALUES($1,$2,$3,$4,now() + ($5::text || ' minutes')::interval,$6::jsonb)
+            VALUES($1,$2,$3,$4,now() + ($5::integer * interval '1 minute'),$6::jsonb)
             RETURNING id, label, target_type, expires_at
             """,
             label,

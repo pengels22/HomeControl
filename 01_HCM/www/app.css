@@ -157,3 +157,7 @@ th {
     align-items: stretch;
   }
 }
+
+[hidden] {
+  display: none !important;
+}
