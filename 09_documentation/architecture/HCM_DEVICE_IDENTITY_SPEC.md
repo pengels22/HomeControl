@@ -1,5 +1,8 @@
 # HCM Device Identity Spec
 
+> **Status note (2026-10-10):** The normalized MAC-based device identity specification remains the approved design. Jetson HCM, PostgreSQL, and the independent host Heartbeat V3 were successfully restarted after a full reboot on 2026-10-10, but that does not validate new module commissioning on hardware. Refer to the [Jetson deployment runbook](../JETSON_HCM_DEPLOYMENT_2026-10-10.md).
+
+
 ## Approved Identifier
 
 The authoritative device identifier is the MAC address of a designated physical
