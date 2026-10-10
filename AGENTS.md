@@ -1,5 +1,10 @@
 # AGENTS.md
 
+## Active watchdog reference (2026-10-10)
+
+Jetson now has a successfully tested HCM-only watchdog. Maintain `10_scripts/hcm-watchdog.py`, `07_servises/systemd/hcm-watchdog.service` and `.timer`, and consult [watchdog deployment record](09_documentation/JETSON_HCM_WATCHDOG_2026-10-10.md) when changing the Docker service lifecycle. The installed watchdog must never restart PostgreSQL or host Heartbeat V3, and should suppress recovery when `hcm.service` is intentionally stopped. Do not claim phone notifications or 3/15-minute rate limiting have been validated.
+
+
 ## Jetson deployment safeguards (2026-10-10)
 
 The live development HCM on Jetson Xavier NX runs inside Docker (Python 3.13), with PostgreSQL 16 on a separate private Docker network and USB-mounted data. Heartbeat V3 remains an independent host Python 3.6 service. Four enabled systemd units recovered after reboot. See [Jetson deployment runbook](09_documentation/JETSON_HCM_DEPLOYMENT_2026-10-10.md) before working on the live host. Do not apply the legacy docker-compose or native-venv HCM service to this host; never commit actual credentials, password files, database or bearer tokens. HCM oneshot startup is not continuous crash recovery. Physical GPIO and production TLS remain unverified.
