@@ -1,5 +1,10 @@
 # HCM Phase 1/2 Deployment Readiness Review
 
+## Deployment outcome addendum — 2026-10-10
+
+The original gate below predates deployment. The Jetson host Python 3.6 Unified Heartbeat V3 daemon and the Docker Python 3.13 HCM application have since been run on actual Jetson hardware. An operator-observed full reboot recovered both services, PostgreSQL and routing and the web dashboard loaded. See [Jetson runbook](../JETSON_HCM_DEPLOYMENT_2026-10-10.md). This clears the specific *unverified Jetson runtime* concern stated below, but does **not** indicate production approval or completion of pending VLAN 60, life-safety GPIO, database backup, TLS or crash recovery work. The historic deployment/rollback procedure below remains a dated plan, not a command to redeploy the existing installation.
+
+
 This review covers the repository implementation only. Do not deploy or change
 live hardware from this document without explicit approval.
 
