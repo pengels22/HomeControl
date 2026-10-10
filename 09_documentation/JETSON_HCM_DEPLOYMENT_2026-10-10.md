@@ -1,5 +1,16 @@
 # Jetson Xavier NX HCM Deployment Runbook
 
+## Live network cutover addendum — 2026-10-10 (supersedes historic paths below)
+
+**Current verified Jetson:** `eth0=192.168.20.27/24` via Netplan/networkd DHCP, preferred metric 100; `wlan0=192.168.20.25/24` via NetworkManager `Lab 42` DHCP, metric 300 saved in profile (runtime 600 last checked prior to reconnect). Conflict Manager: USB Ethernet `192.168.20.26` metric 100, Wi-Fi `192.168.20.24` metric 300. Both devices remain on VLAN 20. The earlier Jetson static Ethernet `192.168.1.63` and Wi-Fi `192.168.20.27` descriptions below are **historical**.
+
+Jetson `hcm.service` now requires `docker.service` and `hcm-postgres.service`, **not** `hcm-routing.service`. `hcm-routing.service` was disabled, `hcm.service.d/routing.conf` was renamed `routing.conf.disabled`, and policy rule 1100 for the old Mac client `192.168.1.241` was removed. **Do not restore** the old `hcm-update-routing` ExecStartPost, single-client policy routing or Wi-Fi startup dependency. The Wi-Fi source-specific rule 1000 and table 200 remain present, and were not removed. Dashboard remains published at `192.168.20.27:8080`. Network/Docker/systemd and heartbeat checks succeeded, HTTP GET `/` returned 200. The operator reports a full Jetson reboot before final verification. Heartbeat V3 remains host independent, advertises Jetson `192.168.20.27` and uses Conflict `192.168.20.26:6004`. The prior watchdog controlled-crash test happened **before** this routing cleanup; do not claim a second crash-injection test occurred afterward.
+
+**Operational checks now:** `systemctl is-active hcm hcm-postgres hcm-heartbeat hcm-watchdog.timer`; `ip -4 route get 192.168.20.26` (expect eth0/source .27); `ip -4 rule show` (no 1100); `sudo docker ps --filter name=hcm-test`; `curl -i http://192.168.20.27:8080/`. Retired steps below mentioning hcm-routing, rule 1100 or restoring Wi-Fi routing apply **only to historic incident analysis**, not current recovery.
+
+Refer to [Phase 4 Codex contract](PHASE4_CODEX_IMPLEMENTATION_2026-10-10.md) before changing the running deployment. No VLAN 40/60 migration has occurred.
+
+
 ## Post-reboot HCM watchdog milestone — 2026-10-10
 
 The initial deployment snapshot below predated the watchdog. HCM application liveness monitoring and automatic HCM-only restart are **now installed and successfully tested** on this Jetson. Three successive failed HTTP checks after a controlled `docker kill hcm-test` led to `systemctl restart hcm.service`, routing restoration and a healthy follow-up check; PostgreSQL and Heartbeat V3 remained active. The watchdog code, systemd service/timer, installation steps and untested limitations are documented in [HCM watchdog runbook](JETSON_HCM_WATCHDOG_2026-10-10.md).
