@@ -1,5 +1,10 @@
 # Remaining Open Items
 
+## Updated HCM monitoring status (2026-10-10)
+
+The initial HCM application watchdog/crash-restart milestone is **complete and operator-tested**. A 30-second timer and three failed checks restarted HCM and restored routing after one controlled container kill, without stopping PostgreSQL or Heartbeat V3. See [watchdog record](JETSON_HCM_WATCHDOG_2026-10-10.md). Remaining: test the three-restart rate limit and maintenance suppression, harden watchdog failure modes, PostgreSQL/USB monitoring and backup, credentials/TLS, and production hardware safety. Notifications are intentionally deferred at operator request.
+
+
 Architecture is largely pinned.
 
 Items intentionally deferred:
