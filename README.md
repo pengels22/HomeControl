@@ -1,5 +1,10 @@
 # HomeControl
 
+## Live Jetson deployment note (2026-10-10)
+
+The Jetson Xavier NX development HCM is now deployed with a Python 3.13 Docker application, PostgreSQL 16 on a private Docker network and mounted USB storage, and an independent host-based Heartbeat V3. Four systemd services restarted successfully after a full Jetson reboot and the dashboard loaded afterward. Read [the Jetson deployment runbook](09_documentation/JETSON_HCM_DEPLOYMENT_2026-10-10.md) and [dated status](09_documentation/JETSON_2026-10-10_STATUS.md) before using any legacy install examples. The root docker-compose and native-venv systemd sample are **not** the live Jetson configuration. This development installation is not production hardened: continuous crash supervision, HTTPS, secure credentials, tested backups and physical I/O safety validation remain open.
+
+
 HomeControl is the source repository for the HCM (House Control Module) system and its distributed modules.
 
 ## Repository layout
