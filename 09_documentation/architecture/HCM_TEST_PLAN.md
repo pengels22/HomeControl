@@ -1,5 +1,8 @@
 # HCM Test Plan
 
+> **Status note (2026-10-10):** **2026-10-10 test update:** A full Jetson Xavier NX reboot verified automatic restart of HCM, PostgreSQL, return routing, and independent Heartbeat V3, mounted USB storage and functioning dashboard. This is runtime deployment validation, not completion of the wider test plan below. In particular, crash recovery, USB loss, backup restores, TLS, other client routing and physical safety I/O tests remain pending. See [Jetson runbook](../JETSON_HCM_DEPLOYMENT_2026-10-10.md).
+
+
 This test plan records required coverage before changing production behavior.
 
 ## Network Tests
