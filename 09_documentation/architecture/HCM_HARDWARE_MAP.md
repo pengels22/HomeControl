@@ -1,5 +1,8 @@
 # HCM Hardware Map
 
+> **Status note (2026-10-10):** The Jetson Xavier NX is now a working **software development HCM** (Docker/Python 3.13 and PostgreSQL, with native Python 3.6 Heartbeat V3). A full host reboot recovered the stack on 2026-10-10. See the [Jetson deployment runbook](../JETSON_HCM_DEPLOYMENT_2026-10-10.md). The hardware map and wiring below are **not validated by that deployment**; physical GPIO safety pathways remain simulated/unconnected.
+
+
 This file records hardware known from the repository and pasted architecture
 brief. It does not finalize unverified wiring, electrical protection, or GPIO
 polarity.
