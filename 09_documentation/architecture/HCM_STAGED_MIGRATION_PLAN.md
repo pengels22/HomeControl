@@ -1,5 +1,10 @@
 # HCM Staged Migration Plan
 
+## Migration status update — 2026-10-10
+
+The Jetson development HCM application and PostgreSQL were deployed on the **existing** VLAN 20 environment and survived a full reboot, with independent Heartbeat V3 on the existing network. This work did not migrate control modules to VLAN 40 or heartbeat to VLAN 60; stages below remain planning guidance unless specifically marked complete in source or [runbook](../JETSON_HCM_DEPLOYMENT_2026-10-10.md). Do not apply proposed network/migration commands to the live host without a maintenance plan.
+
+
 This plan records implementation impacts from the approved corrections. It does
 not authorize live network changes, database migrations, or safety GPIO changes.
 
