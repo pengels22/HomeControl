@@ -27,8 +27,7 @@ restore_file homecontrol_identity.py /usr/local/lib/hcm-heartbeat/homecontrol_id
 restore_file hcm-heartbeat /usr/local/bin/hcm-heartbeat 0755
 restore_file hcm-heartbeat.service /etc/systemd/system/hcm-heartbeat.service 0644
 restore_file registry.sqlite3 /var/lib/hcm-heartbeat/registry.sqlite3 0644
-restore_file registry.sqlite3-wal /var/lib/hcm-heartbeat/registry.sqlite3-wal 0644
-restore_file registry.sqlite3-shm /var/lib/hcm-heartbeat/registry.sqlite3-shm 0644
+rm -f /var/lib/hcm-heartbeat/registry.sqlite3-wal /var/lib/hcm-heartbeat/registry.sqlite3-shm
 
 systemctl daemon-reload
 systemctl restart hcm-heartbeat.service
