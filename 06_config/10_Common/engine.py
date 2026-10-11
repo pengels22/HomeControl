@@ -29,8 +29,11 @@ except ImportError:  # Allows direct loading from homecontrol_cli.py.
 PASS = "PASS"
 SKIPPED = "SKIPPED"
 NO_CHANGE = "NO CHANGE"
+PLANNED = "PLANNED"
+ROLLED_BACK = "ROLLED BACK"
 MANUAL = "MANUAL INTERVENTION REQUIRED"
 FAIL = "FAIL"
+SUCCESS_STATUSES = {PASS, NO_CHANGE, ROLLED_BACK}
 
 
 class DeploymentError(ValueError):
@@ -113,12 +116,12 @@ def plan_deployment(
         steps.extend(
             DeploymentStep(
                 step["name"],
-                SKIPPED if dry_run else MANUAL,
+                PLANNED if dry_run else MANUAL,
                 step["detail"],
             )
             for step in adapter_result.steps
         )
-        status = NO_CHANGE if dry_run else MANUAL
+        status = PLANNED if dry_run else MANUAL
         plans.append(
             DevicePlan(
                 target=entry.name,
@@ -139,7 +142,7 @@ def plan_deployment(
         "targets": [_plan_to_dict(plan) for plan in plans],
         "summary": {
             "total": len(plans),
-            "status": NO_CHANGE if dry_run else MANUAL,
+            "status": PLANNED if dry_run else MANUAL,
             "remote_execution": "disabled" if dry_run else "requires_explicit_transport",
         },
     }
@@ -204,7 +207,7 @@ def deploy(
                 )
                 continue
             result = adapters_mod.adapter_for(entry).apply(transport, artifact)
-            if result.status != PASS:
+            if result.status not in SUCCESS_STATUSES:
                 failed = True
             targets.append(
                 {
@@ -254,6 +257,44 @@ def verify(
     return {
         "created_at": datetime.now(UTC).isoformat(),
         "verification_scope": "read-only ssh connectivity",
+        "targets": results,
+        "summary": {"status": FAIL if any(item["status"] == FAIL for item in results) else PASS},
+    }
+
+
+def preflight(
+    *,
+    repo_root: Path,
+    target: str | None = None,
+    transport: transport_mod.SSHTransport | None = None,
+) -> dict[str, Any]:
+    manifests = manifest_mod.load_all_manifests(repo_root / "06_config")
+    selected = ordered_inventory(inventory_mod.select_inventory(target))
+    transport = transport or transport_mod.SSHTransport()
+    results = []
+    for entry in selected:
+        _verify_manifest_matches_inventory(entry, manifests[entry.device_type])
+        result = adapters_mod.adapter_for(entry).preflight(transport)
+        blockers = [step for step in result.steps if step["status"] == FAIL]
+        assumptions = [
+            "No files are transferred.",
+            "No services are restarted.",
+            "Compatibility is based on read-only command output.",
+        ]
+        results.append(
+            {
+                "target": entry.name,
+                "device_id": entry.device_id,
+                "package": entry.package,
+                "status": result.status,
+                "facts": result.steps,
+                "blockers": blockers,
+                "assumptions": assumptions,
+            }
+        )
+    return {
+        "created_at": datetime.now(UTC).isoformat(),
+        "preflight_scope": "read-only remote layout compatibility",
         "targets": results,
         "summary": {"status": FAIL if any(item["status"] == FAIL for item in results) else PASS},
     }

@@ -67,6 +67,7 @@ homecontrol inventory
 homecontrol deploy --dry-run
 homecontrol deploy --target jetson --release <full-sha> --dry-run
 homecontrol deploy --target jetson --release <full-sha> --yes
+homecontrol preflight --remote
 homecontrol verify
 homecontrol verify --remote
 homecontrol history
@@ -121,19 +122,25 @@ Actual live backup and rollback are adapter-specific:
 ## Live Migration Plan
 
 1. Run `homecontrol status` and `homecontrol deploy --dry-run` locally.
-2. Review the JSON deployment report and selected release SHA.
-3. Run read-only target verification commands on Jetson, Conflict, and LAB1.
-4. Provision required secrets out of band with owner-only permissions.
-5. Stage release artifacts without restarting live services.
-6. Verify staged manifests, configuration diffs, and backup availability.
-7. Request explicit deployment approval.
-8. Deploy one adapter at a time with rollback ready and live monitoring active.
+2. Run `homecontrol preflight --remote` to inspect live layouts without
+   transferring files or restarting services.
+3. Review the JSON deployment report and selected release SHA.
+4. Run read-only target verification commands on Jetson, Conflict, and LAB1.
+5. Provision required secrets out of band with owner-only permissions.
+6. Stage release artifacts without restarting live services.
+7. Verify staged manifests, configuration diffs, and backup availability.
+8. Request explicit deployment approval.
+9. Deploy one adapter at a time with rollback ready and live monitoring active.
 
 ## Known Limitations
 
 - The SSH deployment path is implemented but has only been exercised with mocked
   transports in automated tests during this commit. A live dry-run/verification
   report should be reviewed before first deployment.
+- Jetson container replacement now uses a Docker API helper to clone the
+  inspected container configuration and swap only the application image, but it
+  still must be validated against the actual live `hcm.service` and Docker
+  inspect output before first release.
 - Jetson database migrations remain out of scope and require a separately
   approved plan.
 - LAB1 deployment updates only the role helper after confirming the installed

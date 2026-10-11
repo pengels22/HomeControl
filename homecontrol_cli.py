@@ -37,6 +37,9 @@ def build_parser() -> argparse.ArgumentParser:
     status = subparsers.add_parser("status")
     status.add_argument("--remote", action="store_true", help="run read-only SSH status checks")
     subparsers.add_parser("inventory")
+    preflight = subparsers.add_parser("preflight")
+    preflight.add_argument("--target", choices=sorted(inventory_mod.inventory().keys()))
+    preflight.add_argument("--remote", action="store_true", required=True, help="run read-only remote compatibility checks")
     verify = subparsers.add_parser("verify")
     verify.add_argument("--target", choices=sorted(inventory_mod.inventory().keys()))
     verify.add_argument("--remote", action="store_true", help="run read-only SSH verification")
@@ -59,6 +62,11 @@ def _print_json(data) -> None:
     print(json.dumps(data, indent=2, sort_keys=True))
 
 
+def _exit_for_report(report) -> int:
+    status = report.get("summary", {}).get("status", report.get("status"))
+    return 1 if status in {"FAIL", "MANUAL INTERVENTION REQUIRED"} else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -78,7 +86,12 @@ def main(argv: list[str] | None = None) -> int:
             data["remote"] = engine.verify(repo_root=ROOT)
             data["remote_execution"] = "ssh_read_only"
         _print_json(data)
-        return 0
+        return _exit_for_report(data.get("remote", {"summary": {"status": "PASS"}}))
+
+    if args.command == "preflight":
+        report = engine.preflight(repo_root=ROOT, target=args.target)
+        _print_json(report)
+        return _exit_for_report(report)
 
     if args.command == "deploy":
         dry_run = args.dry_run or not args.yes
@@ -92,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
         path = engine.write_report(ROOT, report)
         report["report_path"] = str(path)
         _print_json(report)
-        return 0
+        return _exit_for_report(report)
 
     if args.command == "verify":
         if args.remote:
@@ -101,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
             report = engine.plan_deployment(repo_root=ROOT, target=args.target, dry_run=True)
             report["verification_scope"] = "manifest, inventory, release planning"
         _print_json(report)
-        return 0
+        return _exit_for_report(report)
 
     if args.command == "history":
         report_dir = ROOT / "runtime" / "deployments"
@@ -121,8 +134,9 @@ def main(argv: list[str] | None = None) -> int:
                 }
             )
             return 0
-        _print_json(engine.rollback(repo_root=ROOT, target=args.target))
-        return 0
+        report = engine.rollback(repo_root=ROOT, target=args.target)
+        _print_json(report)
+        return _exit_for_report(report)
 
     parser.error(f"unsupported command {args.command}")
     return 2

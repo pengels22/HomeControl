@@ -24,6 +24,16 @@ Dry-run mode never contacts live hosts. Live SSH execution requires
 `homecontrol deploy --yes` and still performs adapter-specific preflights before
 changing files or restarting services.
 
+Before a first live release, run:
+
+```bash
+homecontrol preflight --remote
+homecontrol deploy --dry-run --release <full-sha>
+```
+
+The preflight command is read-only. It reports confirmed remote facts,
+assumptions, and blockers; it does not transfer artifacts or restart services.
+
 Preferred managed deployments use `HC_RELEASE_SHA=<full-commit-sha>`. Legacy
 installers still accept `HC_BRANCH` for compatibility, but the unified path must
 not rely on a moving branch for production deployment.

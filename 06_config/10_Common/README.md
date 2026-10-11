@@ -25,3 +25,7 @@ Live SSH deployment is only triggered through the Mac CLI with `homecontrol
 deploy --yes`. Rollback also requires `--yes` plus any adapter-specific backup
 environment variables. Standard tests use mocked transports and do not connect to
 Jetson, Conflict, or LAB1.
+
+Run `homecontrol preflight --remote` before the first live deployment. It runs
+read-only SSH checks that identify confirmed facts, assumptions, and blockers
+without transferring release artifacts, writing files, or restarting services.

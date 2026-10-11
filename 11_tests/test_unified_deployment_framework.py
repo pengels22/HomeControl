@@ -104,8 +104,9 @@ def test_deployment_plan_is_dry_run_noop_and_writes_report(tmp_path, monkeypatch
     path = engine.write_report(ROOT, report)
 
     assert report["release"] == "b" * 40
-    assert report["summary"]["status"] == "NO CHANGE"
+    assert report["summary"]["status"] == "PLANNED"
     assert {item["target"] for item in report["targets"]} == {"jetson", "conflict", "lab1"}
+    assert all(step["status"] != "PASS" for item in report["targets"] for step in item["steps"] if step["name"] == "remote_identity")
     assert json.loads(path.read_text())["deployment_id"] == report["deployment_id"]
 
 
@@ -230,6 +231,7 @@ def test_adapter_dry_run_includes_preservation_checks():
     assert any(step["name"] == "online_sqlite_backup" for step in conflict_steps)
     assert any(step["name"] == "preflight_docker_layout" for step in jetson_steps)
     assert any(step["name"] == "preflight_lab1_safety" for step in lab_steps)
+    assert all(step["status"] == "PLANNED" for step in jetson_steps)
 
 
 def test_rollback_steps_are_adapter_specific():
@@ -269,3 +271,72 @@ def test_live_deploy_skips_target_already_at_release(tmp_path, monkeypatch):
 
     assert report["targets"][0]["status"] == "NO CHANGE"
     assert all("docker build" not in " ".join(cmd) for cmd in tx.runner.commands)
+
+
+def test_no_change_is_success_and_fleet_continues(tmp_path, monkeypatch):
+    fake_artifact = artifact.ReleaseArtifact(
+        release="2" * 40,
+        path=tmp_path / "homecontrol.tar.gz",
+        sha256="abc123",
+        metadata_path=tmp_path / "homecontrol.json",
+    )
+    fake_artifact.path.write_text("artifact")
+    fake_artifact.metadata_path.write_text("{}")
+    monkeypatch.setattr(engine.artifact_mod, "create_release_artifact", lambda repo_root, release, output_dir: fake_artifact)
+    tx = transport.SSHTransport(
+        runner=FakeRunner(stdout_by_contains={"cat /etc/hcm/homecontrol-release": "2" * 40 + "\n"})
+    )
+
+    report = engine.deploy(repo_root=ROOT, release="2" * 40, dry_run=False, transport=tx, run_tests=False)
+
+    assert report["summary"]["status"] == "PASS"
+    assert [item["status"] for item in report["targets"]][0] == "NO CHANGE"
+    assert {item["target"] for item in report["targets"]} == {"jetson", "lab1", "conflict"}
+
+
+def test_changed_failure_attempts_safe_rollback(tmp_path, monkeypatch):
+    fake_artifact = artifact.ReleaseArtifact(
+        release="3" * 40,
+        path=tmp_path / "homecontrol.tar.gz",
+        sha256="abc123",
+        metadata_path=tmp_path / "homecontrol.json",
+    )
+    fake_artifact.path.write_text("artifact")
+    fake_artifact.metadata_path.write_text("{}")
+    monkeypatch.setattr(engine.artifact_mod, "create_release_artifact", lambda repo_root, release, output_dir: fake_artifact)
+    tx = transport.SSHTransport(
+        runner=FakeRunner(fail_contains="tee /opt/homecontrol-lab/state/homecontrol-release")
+    )
+
+    report = engine.deploy(
+        repo_root=ROOT,
+        release="3" * 40,
+        target="lab1",
+        dry_run=False,
+        transport=tx,
+        run_tests=False,
+    )
+
+    assert report["targets"][0]["status"] == "ROLLED BACK"
+    assert any(step.get("rollback") for step in report["targets"][0]["steps"])
+
+
+def test_preflight_reports_facts_and_blockers():
+    tx = transport.SSHTransport(runner=FakeRunner(fail_contains="module.json"))
+
+    report = engine.preflight(repo_root=ROOT, target="lab1", transport=tx)
+
+    assert report["summary"]["status"] == "FAIL"
+    assert report["targets"][0]["blockers"]
+    assert report["targets"][0]["assumptions"]
+
+
+def test_cli_exit_code_helper_flags_failed_reports():
+    spec = importlib.util.spec_from_file_location("homecontrol_cli_for_exit_test", ROOT / "homecontrol_cli.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["homecontrol_cli_for_exit_test"] = module
+    spec.loader.exec_module(module)
+
+    assert module._exit_for_report({"summary": {"status": "FAIL"}}) == 1
+    assert module._exit_for_report({"summary": {"status": "PASS"}}) == 0
+    assert module._exit_for_report({"summary": {"status": "NO CHANGE"}}) == 0
