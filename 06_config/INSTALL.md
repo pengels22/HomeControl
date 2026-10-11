@@ -1,5 +1,32 @@
 # HomeControl Install Flow
 
+## Unified deployment foundation
+
+`06_config` is now organized around validated device packages. Each supported
+device folder has a `manifest.yaml` and the shared framework lives in
+`06_config/10_Common`.
+
+The Mac-side entry point is:
+
+```bash
+homecontrol status
+homecontrol inventory
+homecontrol deploy --dry-run
+homecontrol deploy --target jetson --dry-run
+homecontrol verify
+homecontrol history
+```
+
+The current implementation validates manifests, selects packages, pins one Git
+release SHA across a deployment plan, and writes local deployment reports. Remote
+execution is intentionally mocked until the Jetson Docker, Conflict heartbeat,
+and LAB1 simulation adapters complete live-readiness approval. Do not interpret
+the dry-run planner as permission to restart or reconfigure live hosts.
+
+Preferred managed deployments use `HC_RELEASE_SHA=<full-commit-sha>`. Legacy
+installers still accept `HC_BRANCH` for compatibility, but the unified path must
+not rely on a moving branch for production deployment.
+
 ## Important: live Jetson deployment differs from this installer
 
 As of 2026-10-10 the Jetson Xavier NX HCM uses Python 3.13 in Docker, a separate PostgreSQL container with a USB data mount, and custom systemd services, **not** the native `/opt/HomeControl` virtual-environment installation described below. Do not execute the installer on the running Jetson to repair or upgrade this deployment. Follow [the verified Jetson runbook](../09_documentation/JETSON_HCM_DEPLOYMENT_2026-10-10.md) instead. The procedure below remains an alternative/legacy installation flow for other supported targets and has not been validated as the live Jetson deployment.
@@ -34,6 +61,7 @@ Useful overrides:
 
 ```bash
 HC_REPO_URL=https://github.com/pengels22/HomeControl.git
+HC_RELEASE_SHA=<full-40-character-commit-sha>
 HC_BRANCH=main
 HC_INSTALL_ROOT=/opt/HomeControl
 HC_SKIP_START=1
@@ -169,9 +197,15 @@ installer:
 ```
 
 The helper copies `06_config/common` and the selected device config folder to
-the remote device, then runs that folder's `install.sh`. If a Linux module
-folder is copied by itself, its `install.sh` can still bootstrap by cloning or
-pulling the repo into `/opt/HomeControl` first.
+the remote device, and now also copies `06_config/10_Common` for manifest-aware
+planning. It then runs that folder's `install.sh`. If a Linux module folder is
+copied by itself, its `install.sh` can still bootstrap by cloning the repo into
+`/opt/HomeControl` first. Use `HC_RELEASE_SHA` for deterministic installs;
+`HC_BRANCH` remains a compatibility fallback only.
+
+The old `06_config/common` directory remains in place because existing copied
+install folders still reference it. It must not be removed until all supported
+devices use the unified framework directly.
 
 VLAN 20 is the current development/control network. VLAN 40 is the future
 production control network, but its subnet and module addresses are not approved

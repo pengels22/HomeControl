@@ -1,0 +1,42 @@
+schema_version: 1
+device_type: CONFLICT
+package: 07_CONFLICT
+hardware:
+  supported_platforms: [raspberry_pi]
+  supported_os: [debian]
+  architectures: [aarch64]
+runtime:
+  type: python
+  python: ">=3.11"
+deployment:
+  adapter: conflict_heartbeat
+  install: install.sh
+  update: update.sh
+  verify: verify.sh
+  rollback: rollback.sh
+  actions: [install, update, verify, rollback]
+services:
+  - hcm-heartbeat.service
+configuration_files:
+  - manifest.yaml
+persistent_data:
+  - /var/lib/homecontrol-heartbeat
+network_services:
+  - name: heartbeat
+    address: 192.168.60.2
+    port: 6004
+authentication:
+  required: true
+  methods: [heartbeat_hmac]
+safety:
+  preserve_device_identity: true
+  preserve_network_configuration: true
+  preserve_operational_state: true
+  require_hardware_approval: true
+rollback:
+  enabled: true
+  backup_required: true
+updates:
+  unattended: false
+  reboot_required: false
+notes: Conflict registry and HMAC secret are device-specific state and must not be overwritten.

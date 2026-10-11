@@ -1,0 +1,31 @@
+schema_version: 1
+device_type: RMC
+package: 06_RMC
+hardware:
+  supported_platforms: [arduino_compatible]
+  supported_os: [bare_metal]
+  architectures: [avr, arm]
+runtime:
+  type: firmware
+deployment:
+  adapter: firmware
+  actions: [firmware, verify]
+  firmware_source: RMC.ino
+configuration_files:
+  - RMC.ino
+  - global_config_RMC.py
+authentication:
+  required: true
+  methods: [commissioning_record]
+safety:
+  preserve_device_identity: true
+  preserve_network_configuration: true
+  preserve_operational_state: true
+  require_hardware_approval: true
+rollback:
+  enabled: true
+  backup_required: true
+updates:
+  unattended: false
+  reboot_required: false
+notes: Firmware package only; the unified deployer must not flash hardware automatically.

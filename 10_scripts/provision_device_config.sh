@@ -7,14 +7,14 @@ Usage:
   provision_device_config.sh <device-type> <user@host> [remote-dir]
 
 Device types:
-  HCM, SIM, LCM, RCM, PNL
+  HCM, SIM, LCM, RCM, PNL, CONFLICT, LAB
 
 Examples:
   10_scripts/provision_device_config.sh RCM orangepi@192.168.60.20
   10_scripts/provision_device_config.sh LCM root@192.168.60.30 /tmp/homecontrol-install
 
 Environment passed to remote installer:
-  HC_REPO_URL, HC_BRANCH, HC_INSTALL_ROOT, HC_SKIP_START
+  HC_REPO_URL, HC_RELEASE_SHA, HC_BRANCH, HC_INSTALL_ROOT, HC_SKIP_START
 USAGE
 }
 
@@ -34,6 +34,8 @@ case "$DEVICE_TYPE" in
   LCM) CONFIG_DIR="03_LCM" ;;
   RCM) CONFIG_DIR="04_RCM" ;;
   PNL) CONFIG_DIR="05_PNL" ;;
+  CONFLICT) CONFIG_DIR="07_CONFLICT" ;;
+  LAB) CONFIG_DIR="08_LAB" ;;
   *)
     echo "Unknown device type: ${DEVICE_TYPE}" >&2
     usage
@@ -43,10 +45,11 @@ esac
 
 ssh "$TARGET" "rm -rf '$REMOTE_DIR' && mkdir -p '$REMOTE_DIR/06_config'"
 scp -r "${REPO_ROOT}/06_config/common" "$TARGET:${REMOTE_DIR}/06_config/"
+scp -r "${REPO_ROOT}/06_config/10_Common" "$TARGET:${REMOTE_DIR}/06_config/"
 scp -r "${REPO_ROOT}/06_config/${CONFIG_DIR}" "$TARGET:${REMOTE_DIR}/06_config/"
 
 REMOTE_ENV=()
-for name in HC_REPO_URL HC_BRANCH HC_INSTALL_ROOT HC_SKIP_START; do
+for name in HC_REPO_URL HC_RELEASE_SHA HC_BRANCH HC_INSTALL_ROOT HC_SKIP_START; do
   if [[ -n "${!name:-}" ]]; then
     REMOTE_ENV+=("${name}=${!name}")
   fi

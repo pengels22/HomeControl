@@ -1,0 +1,40 @@
+schema_version: 1
+device_type: LAB
+package: 08_LAB
+hardware:
+  supported_platforms: [raspberry_pi_4]
+  supported_os: [debian]
+  architectures: [aarch64]
+runtime:
+  type: python
+  python: "3.13"
+deployment:
+  adapter: lab1_simulation
+  install: install.sh
+  update: update.sh
+  verify: verify.sh
+  rollback: rollback.sh
+  actions: [install, update, verify, rollback]
+services:
+  - homecontrol-lab.service
+  - hcm-heartbeat.service
+configuration_files:
+  - manifest.yaml
+persistent_data:
+  - /opt/homecontrol-lab/state
+authentication:
+  required: true
+  methods: [mtls_hcm, heartbeat_hmac]
+safety:
+  preserve_device_identity: true
+  preserve_network_configuration: true
+  preserve_operational_state: true
+  require_hardware_approval: true
+  simulation_only: true
+rollback:
+  enabled: true
+  backup_required: true
+updates:
+  unattended: false
+  reboot_required: false
+notes: Preserve hostname lab1, IP 192.168.20.36, simulation mode, disabled physical outputs, certificates, and role history.

@@ -1,0 +1,49 @@
+schema_version: 1
+device_type: HCM
+package: 01_HCM
+hardware:
+  supported_platforms: [jetson_xavier_nx]
+  supported_os: [ubuntu]
+  architectures: [aarch64]
+runtime:
+  type: docker
+  python: "3.13"
+deployment:
+  adapter: hcm_docker
+  install: install.sh
+  update: update.sh
+  verify: verify.sh
+  rollback: rollback.sh
+  actions: [install, update, verify, rollback]
+services:
+  - hcm.service
+  - hcm-watchdog.service
+  - hcm-watchdog.timer
+  - hcm-heartbeat.service
+configuration_files:
+  - hcm.yaml
+persistent_data:
+  - /var/lib/homecontrol
+  - /mnt/homecontrol-postgres
+network_services:
+  - name: dashboard
+    address: 192.168.20.27
+    port: 8080
+  - name: module-listener
+    address: 192.168.20.27
+    port: 6501
+authentication:
+  required: true
+  methods: [admin_bearer, mtls_modules, heartbeat_hmac]
+safety:
+  preserve_device_identity: true
+  preserve_network_configuration: true
+  preserve_operational_state: true
+  require_hardware_approval: true
+rollback:
+  enabled: true
+  backup_required: true
+updates:
+  unattended: false
+  reboot_required: false
+notes: Existing Jetson live deployment is Docker-based; legacy native install.sh is not approved for that host.
