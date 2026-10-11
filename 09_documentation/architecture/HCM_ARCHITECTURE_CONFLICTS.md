@@ -31,6 +31,11 @@ Decided target architecture:
 - Conflict Manager uses `192.168.60.2`.
 - Current development heartbeat baseline remains VLAN 20.
 
+Status update:
+
+- Heartbeat V3 now emits normalized device IDs, normalizes allowlists, and
+  persists authorized Conflict supervision records in SQLite.
+
 Risk:
 
 - Treating VLAN 60 as both general module control and heartbeat-only can break
@@ -174,7 +179,6 @@ Risk:
 
 - Current PostgreSQL schema, module registry, tests, and module agent still use
   `module_uuid` UUID semantics.
-- Current Heartbeat V3 code still emits colon-form MACs.
 - A destructive migration could orphan device bindings, faults, history, and
   assignments.
 

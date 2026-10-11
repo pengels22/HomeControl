@@ -18,7 +18,7 @@ One **Python 3.6+ standard-library-only** daemon on each device. Works on the Je
 - Conflict replies immediately with its own *full* health/status packet and echoes `reply_to` and `reply_boot_id` (not an empty ACK).
 - Device treats any invalid/missed response as failure after 15 seconds; 45-second startup grace.
 - Conflict keeps a registry, flags devices offline after 15 seconds, and returns its **own** health independently of peer health. This prevents failures cascading unnecessarily.
-- Registry currently lives in memory and resets after Conflict restarts. Persisted **local fault/module states** survive restart; watchdog pulses intentionally do not.
+- Registry, authorized devices, heartbeat history and communication-loss faults persist in SQLite across Conflict restarts. Persisted **local fault/module states** survive restart; watchdog pulses intentionally do not.
 - `GET /health` returns 200 or 503 for the **local device health**; `GET /status` always returns 200 including registry/peer details. Monitoring peers should inspect peer/registry state, not only the HTTP status.
 - No authentication, by design. MAC/hostname are claims, not identity proof. Restrict TCP 6004 with VLAN/firewall; don't forward to the internet. An allowlist is a filtering aid, not security authentication.
 
@@ -88,11 +88,14 @@ production control network, but its subnet is not approved yet.
 
 - `services`: monitored systemd unit names (only services genuinely installed on the system).
 - `watchdogs`: object `{ "sensors": 10 }` means device must receive a `hcm-heartbeat pulse sensors` at least every 10 s. Configure and restart daemon before registering the actual sender.
-- `allowed_device_ids`: device ID allowlist on Conflict. Target format is the normalized designated-interface MAC address, lowercase with colons removed. Empty list permits any sender, which is not recommended on shared networks.
+- `allowed_device_ids`: device ID allowlist on Conflict. Target format is the normalized designated-interface MAC address, lowercase with colons removed. Values seed durable authorized-device records. An empty list does **not** authorize arbitrary senders.
+- `authorized_devices`: optional structured Conflict registry seed records with `device_id`, `hostname`, `ip_address`, `source`, `active`, and `maintenance`.
+- `heartbeat_auth_mode`: `none` for current plaintext lab compatibility or `hmac-sha256` for shared-secret request authentication during staged validation.
+- `heartbeat_auth_secret_file`: local secret file for HMAC mode. Do not commit this file or its contents.
 - `conflict_device_id`: optional expected Conflict device ID for devices; fill it once physical interface ID is finalized.
 - `maintenance_lockout`: boolean status only; does not suppress critical faults or disable life-safety logic.
 - `identity_interface`: physical device interface read from `/sys/class/net/.../address`. It need not carry the heartbeat packets. Target device IDs are normalized to 12 lowercase hexadecimal characters without colons.
 
 ### Security / safety
 
-All telemetry is unauthenticated and plaintext. It is suitable for a trusted, protected management VLAN, **not** as a safety interlock. Standalone fire/AC hardware handling must not rely on the network heartbeat. The systemd service runs root to read system service states and expose a controlled Unix socket (`/run/hcm-heartbeat/control.sock`, root/sudo-group write access). Command arguments are not executed as shell commands.
+Plaintext lab mode is suitable only for a trusted, protected management VLAN and is **not** production authentication or a safety interlock. Optional `hmac-sha256` mode authenticates request bodies with a local shared secret file; production mTLS remains a staged hardening item. Standalone fire/AC hardware handling must not rely on the network heartbeat. The systemd service runs root to read system service states and expose a controlled Unix socket (`/run/hcm-heartbeat/control.sock`, root/sudo-group write access). Command arguments are not executed as shell commands.

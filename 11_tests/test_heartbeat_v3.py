@@ -1,4 +1,6 @@
 import importlib.util
+import hmac
+import hashlib
 import json
 import time
 from pathlib import Path
@@ -33,7 +35,7 @@ def cfg(tmp_path, role='conflict'):
         'request_timeout_seconds': 4,
         'conflict_address': '127.0.0.1',
         'conflict_hostname': 'conflict',
-        'allowed_device_ids': [],
+        'allowed_device_ids': ['48b02d87db16'],
         'maintenance_lockout': False,
     }
 
@@ -215,3 +217,102 @@ def test_offline_then_recovery_transition(tmp_path, monkeypatch):
     state.store.record_heartbeat('48b02d87db16', heartbeat(seq=2), '192.168.20.31', 15)
     assert state.snapshot()['status']['registry']['48b02d87db16']['online'] is True
     state.store.close()
+
+
+def test_conflict_rejects_empty_allowlist_unknown_device(tmp_path, monkeypatch):
+    patch_host(monkeypatch)
+    config = cfg(tmp_path)
+    config['allowed_device_ids'] = []
+    conflict = hcm.State(config)
+    server = hcm.HTTPServer(('127.0.0.1', 0), hcm.Handler)
+    server.state = conflict
+    port = server.server_address[1]
+    import threading
+    thread = threading.Thread(target=server.serve_forever)
+    thread.daemon = True
+    thread.start()
+    try:
+        from urllib.error import HTTPError
+        from urllib.request import Request, urlopen
+        req = Request(
+            'http://127.0.0.1:{}/heartbeat'.format(port),
+            data=json.dumps(heartbeat()).encode('utf-8'),
+            headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+        with pytest.raises(HTTPError) as exc:
+            urlopen(req, timeout=3)
+    finally:
+        server.shutdown()
+        server.server_close()
+        conflict.store.close()
+
+    assert exc.value.code == 403
+
+
+def test_communication_loss_fault_deduplicates_and_recovers(tmp_path, monkeypatch):
+    patch_host(monkeypatch)
+    state = hcm.State(cfg(tmp_path))
+    state.store.record_heartbeat('48b02d87db16', heartbeat(), '192.168.20.31', 15)
+    old = int(time.time()) - 30
+    state.store.conn.execute('UPDATE devices SET last_seen=? WHERE device_id=?', (old, '48b02d87db16'))
+    state.store.conn.commit()
+
+    assert state.store.mark_offline_overdue(15, 5) == ['48b02d87db16']
+    assert state.store.mark_offline_overdue(15, 5) == []
+
+    rows = state.store.conn.execute('SELECT code, active FROM communication_faults').fetchall()
+    assert [(row['code'], row['active']) for row in rows] == [('COMMUNICATION_LOSS', 1)]
+    registry = state.snapshot()['status']['registry']['48b02d87db16']
+    assert registry['active_fault']['code'] == 'COMMUNICATION_LOSS'
+
+    state.store.record_heartbeat('48b02d87db16', heartbeat(seq=2), '192.168.20.31', 15)
+    rows = state.store.conn.execute('SELECT code, active, resolved_at FROM communication_faults').fetchall()
+    assert [(row['code'], row['active'], row['resolved_at'] is not None) for row in rows] == [('COMMUNICATION_LOSS', 0, True)]
+    state.store.close()
+
+
+def test_replay_sequence_rejected(tmp_path, monkeypatch):
+    patch_host(monkeypatch)
+    state = hcm.State(cfg(tmp_path))
+    state.store.record_heartbeat('48b02d87db16', heartbeat(seq=7), '192.168.20.31', 15)
+
+    with pytest.raises(ValueError, match='sequence replay'):
+        state.store.record_heartbeat('48b02d87db16', heartbeat(seq=7), '192.168.20.31', 15)
+
+    state.store.close()
+
+
+def test_hmac_authenticated_heartbeat(tmp_path, monkeypatch):
+    patch_host(monkeypatch)
+    secret_path = tmp_path / 'heartbeat.secret'
+    secret_path.write_bytes(b'shared-development-test-secret')
+    config = cfg(tmp_path)
+    config['heartbeat_auth_mode'] = 'hmac-sha256'
+    config['heartbeat_auth_secret_file'] = str(secret_path)
+    conflict = hcm.State(config)
+    server = hcm.HTTPServer(('127.0.0.1', 0), hcm.Handler)
+    server.state = conflict
+    port = server.server_address[1]
+    import threading
+    thread = threading.Thread(target=server.serve_forever)
+    thread.daemon = True
+    thread.start()
+    try:
+        from urllib.request import Request, urlopen
+        msg = heartbeat()
+        body = json.dumps(msg, sort_keys=True, separators=(',', ':')).encode('utf-8')
+        signature = hmac.new(secret_path.read_bytes(), body, hashlib.sha256).hexdigest()
+        req = Request(
+            'http://127.0.0.1:{}/heartbeat'.format(port),
+            data=body,
+            headers={'Content-Type': 'application/json', 'X-HomeControl-Signature': signature},
+            method='POST',
+        )
+        reply = json.loads(urlopen(req, timeout=3).read().decode('utf-8'))
+    finally:
+        server.shutdown()
+        server.server_close()
+        conflict.store.close()
+
+    assert reply['reply_to'] == 1

@@ -13,8 +13,8 @@ Unified Heartbeat V3 is a Python 3.6+ standard-library-only daemon. It is
 intended to run as one service per participating processor, including the
 Conflict Manager and devices such as the Jetson/HCM.
 
-It is supervisory telemetry. It is not cryptographic authentication and must not
-be used as the sole authorization path for safety-critical actions.
+It is supervisory telemetry and must not be used as the sole authorization path
+for safety-critical actions.
 
 ## Transport
 
@@ -27,7 +27,9 @@ Implemented transport:
 - Both roles expose a local Unix control socket at
   `/run/hcm-heartbeat/control.sock`.
 
-The current implementation does not use TLS or message authentication.
+The current implementation supports plaintext lab mode and optional
+`hmac-sha256` request authentication using a local secret file. Production mTLS
+is not complete in this implementation and remains a staged deployment item.
 
 ## Roles
 
@@ -49,10 +51,13 @@ A conflict role:
 - Accepts `POST /heartbeat`.
 - Validates protocol, version, hostname, sequence, health, status, and MAC-like
   device ID shape.
-- Optionally filters by `allowed_device_ids`.
-- Records peer heartbeat details in an in-memory registry.
+- Requires a durable authorized-device record seeded from `allowed_device_ids`
+  or `authorized_devices`; an empty allowlist does not authorize arbitrary
+  devices.
+- Records peer heartbeat details in a persisted SQLite registry.
 - Returns its own full local snapshot plus `reply_to` and `reply_boot_id`.
-- Marks peers online/offline in registry based on heartbeat age.
+- Marks peers online/offline in registry based on heartbeat age and maintains a
+  durable `COMMUNICATION_LOSS` fault lifecycle.
 
 Peer faults are intentionally stored in registry status, not folded into the
 Conflict Manager's own health.
@@ -66,10 +71,8 @@ Implemented snapshot fields:
 - `hostname`: local hostname from `socket.gethostname()`.
 - `ip_address`: configured `advertise_ip`, outbound source IP for device role,
   or bind address for conflict role.
-- `device_id`: target architecture requires the normalized MAC address read
-  from configured `identity_interface`, lowercase with colons removed. Current
-  code still emits colon-form MACs and must be updated before normalized
-  allowlists are enforced.
+- `device_id`: normalized MAC address read from configured
+  `identity_interface`, lowercase with colons removed.
 - `identity_interface`: interface used for device ID.
 - `boot_id`: UUID generated on daemon start.
 - `sequence`: heartbeat sequence number.
@@ -109,7 +112,12 @@ Implemented states:
 - Health is `healthy` when there are no local faults, otherwise `fault`.
 - Status is `operational` when there are no local faults, otherwise `degraded`.
 - Registry entries include online booleans, heartbeat age, last sequence, peer
-  health, and peer status.
+  health, peer status, and active communication fault details.
+- Conflict creates one active `COMMUNICATION_LOSS` fault per authorized active
+  device after `peer_timeout_seconds`.
+- Repeated monitor cycles do not duplicate active communication-loss faults.
+- A valid heartbeat resolves the active communication-loss fault while retaining
+  history.
 
 The architecture brief calls for `healthy`, `degraded`, `faulted`, and
 `offline` distinctions. The current V3 code partially implements this concept
@@ -144,6 +152,10 @@ Persisted on the Conflict Manager to SQLite `registry_db`:
   and status.
 - Current communication reachability and offline transition time.
 - Heartbeat, registration, online, offline, and duplicate-ID events.
+- Durable authorized device records.
+- Active and resolved `COMMUNICATION_LOSS` records.
+- Supervisor restart, unauthorized heartbeat, replay rejection, reboot
+  detection, communication loss, and communication restoration events.
 
 Not persisted:
 
@@ -175,8 +187,14 @@ Important config keys:
 - `request_timeout_seconds`: default `4`.
 - `conflict_address`: default `192.168.20.26`.
 - `conflict_hostname`: default `conflict`.
-- `allowed_device_ids`: optional allowlist; target format is normalized 12-hex
-  MAC IDs after the V3 code is updated.
+- `allowed_device_ids`: optional allowlist in normalized 12-hex MAC format. On
+  Conflict these values seed durable authorized device records.
+- `authorized_devices`: optional structured authorization records with
+  `device_id`, `hostname`, `ip_address`, `source`, `active`, and `maintenance`.
+- `heartbeat_auth_mode`: `none` or `hmac-sha256`.
+- `heartbeat_auth_secret_file`: local file path for HMAC mode. Secret files must
+  not be committed to Git.
+- `max_timestamp_skew_seconds`: accepted heartbeat timestamp skew.
 - `conflict_device_id`: optional expected Conflict MAC; target format is
   normalized 12-hex.
 - `maintenance_lockout`: status flag only.
@@ -189,8 +207,7 @@ interface does not need to carry heartbeat traffic.
 `00_Heartbeat/config-jetson.json` and `config-conflict.json` should be treated
 as deployment examples for the current V3 development baseline on VLAN 20. Do
 not change them to bind to VLAN 60 until `eth0.60`, VLAN tagging, routing, and
-source IP selection are verified. Do not switch allowlists to normalized IDs
-until `hcm_heartbeat.py` emits normalized IDs.
+source IP selection are verified.
 
 ## VLAN 60 Migration
 
@@ -234,7 +251,10 @@ heartbeat services.
 
 ## Security Notes
 
-Current V3 heartbeat packets are unauthenticated and plaintext. MAC address,
-hostname, and IP address identify devices operationally but do not prove
-identity. Restrict TCP 6004 to approved hosts and networks; never expose it to
-the public Internet.
+Plaintext lab mode remains available for existing local deployments, but it is
+not production authentication. `hmac-sha256` mode authenticates request bodies
+with a shared local secret file for staged validation. Production should move to
+the approved PKI/mTLS design before publishing TCP 6004 beyond the protected lab
+network. MAC address, hostname, and IP address identify devices operationally
+but do not by themselves prove identity. Restrict TCP 6004 to approved hosts and
+networks; never expose it to the public Internet.

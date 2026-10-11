@@ -194,6 +194,26 @@ async def test_assign_uses_configured_development_control_network(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_base_config_includes_conflict_heartbeat_supervisor(monkeypatch, tmp_path):
+    monkeypatch.setattr(registry_mod.settings, 'config_root', tmp_path)
+    monkeypatch.setattr(registry_mod.settings, 'conflict_heartbeat_device_id', '3c:53:bb:f7:ad:b2')
+    monkeypatch.setattr(registry_mod.settings, 'conflict_heartbeat_host', '192.168.20.26')
+    reg = registry_mod.ModuleRegistry()
+
+    payload = await reg._base_config('SIM')
+
+    assert payload['heartbeat_supervisor'] == {
+        'enabled': True,
+        'device_id': '3c53bbf7adb2',
+        'host': '192.168.20.26',
+        'port': 6004,
+        'interval_seconds': 5,
+        'timeout_seconds': 15,
+        'protocol': 'hcm-heartbeat-v3',
+    }
+
+
+@pytest.mark.asyncio
 async def test_assign_prefers_normalized_device_id(monkeypatch):
     conn = FakeRegistryConn()
     monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))

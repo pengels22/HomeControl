@@ -4,7 +4,8 @@ if [ "$(id -u)" -ne 0 ]; then echo 'Run: sudo ./install.sh jetson|conflict' >&2;
 case "${1:-}" in
  jetson) CFG=config-jetson.json ;;
  conflict) CFG=config-conflict.json ;;
- *) echo 'Usage: sudo ./install.sh jetson|conflict' >&2; exit 1 ;;
+ lab1) CFG=config-lab1.json ;;
+ *) echo 'Usage: sudo ./install.sh jetson|conflict|lab1' >&2; exit 1 ;;
 esac
 cd "$(dirname "$0")"
 if [ ! -f ../homecontrol_identity.py ]; then

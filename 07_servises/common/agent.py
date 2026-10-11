@@ -306,6 +306,10 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
 
     async def apply_config(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.identity['config_version'] = int(payload.get('version', self.identity.get('config_version', 0)))
+        if 'heartbeat_supervisor' in payload:
+            # Persist only the authenticated endpoint metadata from HCM. Private keys or
+            # secret material are intentionally not provisioned through this channel.
+            self.identity['heartbeat_supervisor'] = payload['heartbeat_supervisor']
         self.save_identity()
         return {'ok': True, 'config_version': self.identity['config_version']}
 

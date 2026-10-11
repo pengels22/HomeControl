@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     module_cert_identity_required: bool = True
     allow_insecure_module_listener: bool = False
     commissioning_enabled: bool = hcm_globals.Commissioning_Enabled
+    conflict_heartbeat_enabled: bool = True
+    conflict_heartbeat_device_id: str = '3c53bbf7adb2'
+    conflict_heartbeat_host: str = '192.168.20.26'
+    conflict_heartbeat_port: int = 6004
+    conflict_heartbeat_interval_s: int = 5
+    conflict_heartbeat_timeout_s: int = 15
+    conflict_heartbeat_protocol: str = 'hcm-heartbeat-v3'
     lab1_device_id: str = '2ccf675d3414'
     lab1_hostname: str = 'lab1'
     lab1_ip_address: str = '192.168.20.36'

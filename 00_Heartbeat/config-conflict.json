@@ -7,7 +7,21 @@
   "peer_timeout_seconds": 15,
   "services": ["ssh"],
   "registry_db": "/var/lib/hcm-heartbeat/registry.sqlite3",
-  "allowed_device_ids": ["48b02d87db16"],
+  "allowed_device_ids": ["48b02d87db16", "2ccf675d3414"],
+  "authorized_devices": [
+    {
+      "device_id": "48b02d87db16",
+      "hostname": "jetson",
+      "ip_address": "192.168.20.27",
+      "source": "config"
+    },
+    {
+      "device_id": "2ccf675d3414",
+      "hostname": "lab1",
+      "ip_address": "192.168.20.36",
+      "source": "config"
+    }
+  ],
   "watchdogs": {},
   "root_disk_percent_fail": 95,
   "min_available_memory_percent": 5,

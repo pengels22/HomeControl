@@ -340,10 +340,21 @@ class ModuleRegistry:
             'RCM':'04_RCM','LCM':'03_LCM','SIM':'02_SIM','PNL':'05_PNL'
         }[module_type] / f'{module_type.lower()}.yaml'
         if not path.exists():
-            return {'version': 1}
-        import yaml
-        data = yaml.safe_load(path.read_text()) or {}
-        return {'version': int(data.get('config_version',1)), 'config': data}
+            result = {'version': 1}
+        else:
+            import yaml
+            data = yaml.safe_load(path.read_text()) or {}
+            result = {'version': int(data.get('config_version',1)), 'config': data}
+        result['heartbeat_supervisor'] = {
+            'enabled': bool(settings.conflict_heartbeat_enabled),
+            'device_id': maybe_normalize_device_id(settings.conflict_heartbeat_device_id),
+            'host': settings.conflict_heartbeat_host,
+            'port': int(settings.conflict_heartbeat_port),
+            'interval_seconds': int(settings.conflict_heartbeat_interval_s),
+            'timeout_seconds': int(settings.conflict_heartbeat_timeout_s),
+            'protocol': settings.conflict_heartbeat_protocol,
+        }
+        return result
 
     def _capability_rows(self, ident: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
         rows: list[tuple[str, dict[str, Any]]] = []

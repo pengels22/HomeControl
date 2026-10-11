@@ -7,6 +7,7 @@
   "registry_db": "/var/lib/hcm-heartbeat/registry.sqlite3",
   "conflict_address": "192.168.20.26",
   "conflict_hostname": "conflict",
+  "conflict_device_id": "3c53bbf7adb2",
   "interval_seconds": 5,
   "peer_timeout_seconds": 15,
   "startup_grace_seconds": 45,
