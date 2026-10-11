@@ -11,6 +11,7 @@ import pytest
 from importlib import import_module
 
 management = import_module('01_HCM.management')
+role_switching = import_module('01_HCM.role_switching')
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +36,7 @@ async def postgres_conn():
             '08_database/002_safety_arbitration.sql',
             '08_database/003_module_registry_foundation.sql',
             '08_database/004_phase4_registry_hardening.sql',
+            '08_database/005_module_role_switching.sql',
         ):
             await conn.execute((ROOT / rel).read_text())
         yield conn
@@ -81,16 +83,21 @@ async def test_phase4_migrations_are_repeat_safe():
     async with postgres_conn() as conn:
         await conn.execute((ROOT / '08_database/003_module_registry_foundation.sql').read_text())
         await conn.execute((ROOT / '08_database/004_phase4_registry_hardening.sql').read_text())
+        await conn.execute((ROOT / '08_database/005_module_role_switching.sql').read_text())
         tables = await conn.fetch(
             """
             SELECT tablename
             FROM pg_tables
             WHERE schemaname=current_schema()
-              AND tablename IN ('module_capabilities','device_management_events')
+              AND tablename IN ('module_capabilities','device_management_events','module_role_transitions')
             ORDER BY tablename
             """
         )
-        assert [row['tablename'] for row in tables] == ['device_management_events', 'module_capabilities']
+        assert [row['tablename'] for row in tables] == [
+            'device_management_events',
+            'module_capabilities',
+            'module_role_transitions',
+        ]
 
 
 @pytest.mark.asyncio
@@ -315,3 +322,94 @@ async def test_module_replacement_preserves_logical_device_identity(monkeypatch)
             logical_id,
         )
         assert dict(stored) == {'id': logical_id, 'logical_name': 'Kitchen Light'}
+
+
+@pytest.mark.asyncio
+async def test_lab1_role_transition_persists_audits_and_confirms_from_heartbeat(monkeypatch):
+    async with postgres_conn() as conn:
+        monkeypatch.setattr(role_switching.db, 'acquire', lambda: SingleConnectionAcquire(conn))
+        module_id = await conn.fetchval(
+            """
+            INSERT INTO modules(device_id, module_type, hostname, ip_address, online, control_session_online, last_state)
+            VALUES(
+                '2ccf675d3414','RCM','lab1','192.168.20.36',true,true,
+                '{"state":{"lab_role":"UNASSIGNED","simulation":true,"physical_outputs_enabled":false}}'::jsonb
+            )
+            RETURNING id
+            """
+        )
+
+        transition = await role_switching.create_transition(
+            device_id='2ccf675d3414',
+            requested_role='SIM',
+            actor='patrick',
+            control_session_key='2ccf675d3414',
+        )
+        await role_switching.mark_sent(transition['operation_id'])
+        accepted = await role_switching.mark_acknowledged(
+            transition['operation_id'],
+            {'ok': True, 'accepted': True},
+        )
+        confirmed = await role_switching.confirm_from_state('2ccf675d3414', {
+            'state': {
+                'lab_role': 'SIM',
+                'simulation': True,
+                'physical_outputs_enabled': False,
+            }
+        })
+
+        assert accepted['status'] == 'ACCEPTED'
+        assert confirmed['status'] == 'CONFIRMED'
+        assert confirmed['module_id'] == module_id
+        audit_count = await conn.fetchval(
+            "SELECT count(*) FROM device_management_events WHERE action LIKE 'module_role.%'"
+        )
+        assert audit_count == 4
+
+
+@pytest.mark.asyncio
+async def test_role_transition_rejects_unapproved_devices_and_active_bindings(monkeypatch):
+    async with postgres_conn() as conn:
+        monkeypatch.setattr(role_switching.db, 'acquire', lambda: SingleConnectionAcquire(conn))
+        await conn.execute(
+            """
+            INSERT INTO modules(device_id, module_type, hostname, ip_address, online, control_session_online, last_state)
+            VALUES(
+                '48b02d87db16','LCM','LCM01','192.168.20.30',true,true,
+                '{"state":{"lab_role":"UNASSIGNED","simulation":true,"physical_outputs_enabled":false}}'::jsonb
+            )
+            """
+        )
+        with pytest.raises(role_switching.RoleSwitchError, match='not approved'):
+            await role_switching.create_transition(
+                device_id='48b02d87db16',
+                requested_role='SIM',
+                actor='patrick',
+                control_session_key='48b02d87db16',
+            )
+
+        module_id = await conn.fetchval(
+            """
+            INSERT INTO modules(device_id, module_type, hostname, ip_address, online, control_session_online, last_state)
+            VALUES(
+                '2ccf675d3414','RCM','lab1','192.168.20.36',true,true,
+                '{"state":{"lab_role":"RCM","simulation":true,"physical_outputs_enabled":false}}'::jsonb
+            )
+            RETURNING id
+            """
+        )
+        logical_id = await conn.fetchval(
+            "INSERT INTO logical_devices(logical_name, device_class) VALUES('LAB1 Test','light') RETURNING id"
+        )
+        await conn.execute(
+            "INSERT INTO device_bindings(logical_device_id,module_id,channel,enabled) VALUES($1,$2,'A1',true)",
+            logical_id,
+            module_id,
+        )
+        with pytest.raises(role_switching.RoleSwitchError, match='active bindings'):
+            await role_switching.create_transition(
+                device_id='2ccf675d3414',
+                requested_role='SIM',
+                actor='patrick',
+                control_session_key='2ccf675d3414',
+            )

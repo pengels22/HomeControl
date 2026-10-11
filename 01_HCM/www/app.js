@@ -1,6 +1,6 @@
 const $ = (id) => document.getElementById(id);
 let token = localStorage.getItem("homecontrol_token") || "";
-let registryState = {modules: [], logical_devices: [], device_bindings: []};
+let registryState = {modules: [], logical_devices: [], device_bindings: [], role_modules: []};
 
 async function api(path, options = {}) {
   const headers = {"Content-Type": "application/json", ...(options.headers || {})};
@@ -52,15 +52,17 @@ function statusPill(module) {
 }
 
 async function refreshRegistry() {
-  const [modules, logical, bindings] = await Promise.all([
+  const [modules, logical, bindings, roles] = await Promise.all([
     api("/modules"),
     api("/logical-devices"),
     api("/device-bindings"),
+    api("/module-roles"),
   ]);
   registryState = {
     modules: modules.modules || [],
     logical_devices: logical.logical_devices || [],
     device_bindings: bindings.device_bindings || [],
+    role_modules: roles.modules || [],
   };
   renderRegistry();
 }
@@ -98,6 +100,48 @@ function renderRegistry() {
   $("binding-module").innerHTML = registryState.modules.map((module) =>
     `<option value="${esc(module.hostname)}">${esc(module.hostname)}</option>`
   ).join("");
+
+  $("role-list").innerHTML = registryState.role_modules.map((module) => {
+    const role = module.role_management || {};
+    const last = role.last_transition || {};
+    const safety = [
+      role.simulation === true ? "Sim" : "Sim?",
+      role.physical_outputs_enabled === true ? "Outputs enabled" : "Outputs inhibited",
+    ].join(" / ");
+    const selected = role.requested_role || role.current_role || "UNASSIGNED";
+    const selector = `<select data-role-device="${esc(module.device_id)}">
+      ${["UNASSIGNED", "RCM", "SIM", "LCM"].map((item) =>
+        `<option ${item === selected ? "selected" : ""}>${item}</option>`
+      ).join("")}
+    </select>`;
+    const button = `<button data-role-submit="${esc(module.device_id)}">Set</button>`;
+    return `<tr>
+      <td>${esc(module.hostname)}<br><span>${esc(module.device_id)}</span></td>
+      <td>${esc(module.module_type)}</td>
+      <td>${esc(role.current_role || "-")}</td>
+      <td>${esc(role.requested_role || "-")}</td>
+      <td>${esc(safety)}</td>
+      <td>${esc(last.status || "-")}<br><span>${esc(last.error || last.rejection_reason || "")}</span></td>
+      <td><div class="inline-action">${selector}${button}</div></td>
+    </tr>`;
+  }).join("");
+  document.querySelectorAll("[data-role-submit]").forEach((button) => {
+    button.onclick = async () => {
+      const deviceId = button.getAttribute("data-role-submit");
+      const select = document.querySelector(`[data-role-device="${CSS.escape(deviceId)}"]`);
+      const requestedRole = select.value;
+      if (!confirm(`Request ${deviceId} role change to ${requestedRole}?`)) return;
+      try {
+        await api(`/modules/${deviceId}/role`, {
+          method: "POST",
+          body: JSON.stringify({requested_role: requestedRole, confirm: true}),
+        });
+        await refreshRegistry();
+      } catch (error) {
+        $("app-error").textContent = error.message;
+      }
+    };
+  });
 }
 
 async function refreshAll() {
@@ -158,6 +202,10 @@ $("create-pairing").onclick = async () => {
 };
 
 $("refresh-registry").onclick = () => refreshRegistry().catch((error) => {
+  $("app-error").textContent = error.message;
+});
+
+$("refresh-roles").onclick = () => refreshRegistry().catch((error) => {
   $("app-error").textContent = error.message;
 });
 

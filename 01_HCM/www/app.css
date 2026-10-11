@@ -134,6 +134,13 @@ h2 {
   flex: 1;
 }
 
+.inline-action {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
 .error {
   color: #ffb2a8;
   margin-top: 12px;

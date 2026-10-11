@@ -15,6 +15,7 @@ from .models import (
     LogicalDeviceCreateIn,
     LogicalDeviceUpdateIn,
     MaintenanceLockoutIn,
+    ModuleRoleChangeIn,
     PairingKeyCreateIn,
     PairingKeyVerifyIn,
     PasswordLoginIn,
@@ -38,8 +39,10 @@ from .auth import (
 from .devices import MaintenanceLockedError, command_logical, set_maintenance_lockout
 from .hvac import Mode
 from . import management
+from . import role_switching
 from .settings import settings
 from .updater import updater
+from .registry import registry
 
 router = APIRouter(prefix='/api/v1')
 hvac = None
@@ -124,6 +127,52 @@ async def module_capabilities(identifier: str, user=Depends(require_user)):
     except management.ValidationError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {'module': module['hostname'], 'capabilities': module['capabilities']}
+
+@router.get('/module-roles')
+async def module_roles(user=Depends(require_user)):
+    return {'modules': await role_switching.list_role_managed_modules()}
+
+@router.get('/module-role-transitions/{operation_id}')
+async def module_role_transition(operation_id: str, user=Depends(require_user)):
+    try:
+        return await role_switching.get_transition(operation_id)
+    except role_switching.RoleSwitchNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+@router.post('/modules/{device_id}/role')
+async def module_role_change(device_id: str, body: ModuleRoleChangeIn, user=Depends(require_user)):
+    if user['role'] != 'ADMIN':
+        raise HTTPException(403)
+    if not body.confirm:
+        raise HTTPException(400, 'explicit confirmation is required')
+    try:
+        normalized_device_id = role_switching.normalize_device_id(device_id)
+        async with registry._connections_lock:
+            control_session = registry.connections.get(normalized_device_id)
+        if control_session is None or control_session.device_id != normalized_device_id:
+            raise HTTPException(409, 'module has no authenticated online control session')
+        transition = await role_switching.create_transition(
+            device_id=normalized_device_id,
+            requested_role=body.requested_role,
+            actor=user['user'],
+            control_session_key=control_session.connection_key or '',
+        )
+        await role_switching.mark_sent(transition['operation_id'])
+        try:
+            ack = await control_session.command(
+                {
+                    **transition['command_payload'],
+                    'operation_id': transition['operation_id'],
+                },
+                request_id=transition['operation_id'],
+                timeout=10.0,
+            )
+        except Exception as exc:
+            await role_switching.mark_failed(transition['operation_id'], str(exc))
+            raise HTTPException(504, 'module did not acknowledge role-change request') from exc
+        return await role_switching.mark_acknowledged(transition['operation_id'], ack)
+    except role_switching.RoleSwitchError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 @router.get('/logical-devices')
 async def logical_devices(user=Depends(require_user)):

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 from importlib import import_module
 from . import db
+from . import role_switching
 from .settings import settings
 from homecontrol_identity import InvalidDeviceId, maybe_normalize_device_id
 
@@ -95,8 +96,8 @@ class ModuleConnection:
     async def send(self, typ: str, payload: dict[str, Any], request_id: str | None = None):
         await protocol.write_frame(self.writer, {'type': typ, 'payload': payload, **({'request_id': request_id} if request_id else {})})
 
-    async def command(self, payload: dict[str, Any], timeout: float = 10.0) -> dict[str, Any]:
-        rid = str(uuid.uuid4())
+    async def command(self, payload: dict[str, Any], timeout: float = 10.0, request_id: str | None = None) -> dict[str, Any]:
+        rid = request_id or str(uuid.uuid4())
         fut = asyncio.get_running_loop().create_future()
         self.pending[rid] = fut
         await self.send('command', payload, rid)
@@ -493,6 +494,7 @@ class ModuleRegistry:
                             WHERE ($1::text IS NOT NULL AND device_id=$1)
                                OR ($2::text IS NOT NULL AND module_uuid::text=$2)
                         ''', conn.device_id, conn.module_uuid, json.dumps(payload))
+                    await role_switching.confirm_from_state(conn.device_id, payload)
                     await conn.send('heartbeat_ack', {'ts': time.time()})
                 elif typ == 'state':
                     async with db.acquire() as dbc:
@@ -503,6 +505,7 @@ class ModuleRegistry:
                             WHERE ($1::text IS NOT NULL AND device_id=$1)
                                OR ($2::text IS NOT NULL AND module_uuid::text=$2)
                         ''', conn.device_id, conn.module_uuid, json.dumps(payload))
+                    await role_switching.confirm_from_state(conn.device_id, payload)
                 elif typ == 'fault':
                     async with db.acquire() as dbc:
                         await dbc.execute('''INSERT INTO faults(device_id,module_uuid,code,severity,details) VALUES($1,$2,$3,$4,$5::jsonb)''', conn.device_id, conn.module_uuid, payload.get('code','unknown'), payload.get('severity','warning'), json.dumps(payload))

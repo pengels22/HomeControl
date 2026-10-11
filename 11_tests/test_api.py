@@ -8,6 +8,18 @@ api = import_module('01_HCM.api')
 safety_relays_mod = import_module('01_HCM.safety_relays')
 
 
+class FakeModuleSession:
+    device_id = '2ccf675d3414'
+    connection_key = '2ccf675d3414'
+
+    def __init__(self):
+        self.commands = []
+
+    async def command(self, payload, request_id=None, timeout=10.0):
+        self.commands.append((payload, request_id, timeout))
+        return {'ok': True, 'accepted': True}
+
+
 @pytest.mark.asyncio
 async def test_dev_session_hidden_when_dev_mode_disabled(monkeypatch):
     monkeypatch.setattr(api.settings, 'dev_mode', False)
@@ -120,3 +132,83 @@ async def test_hcm_safety_relay_pulse_uses_global_default(monkeypatch):
     assert result['ok'] is True
     assert result['pulse_ms'] == 3000
     assert result['relay']['lockout_exempt'] is True
+
+
+@pytest.mark.asyncio
+async def test_module_role_change_requires_admin():
+    with pytest.raises(HTTPException) as exc:
+        await api.module_role_change(
+            '2ccf675d3414',
+            api.ModuleRoleChangeIn(requested_role='SIM', confirm=True),
+            {'user': 'viewer', 'role': 'READONLY'},
+        )
+
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_module_role_change_requires_explicit_confirmation():
+    with pytest.raises(HTTPException) as exc:
+        await api.module_role_change(
+            '2ccf675d3414',
+            api.ModuleRoleChangeIn(requested_role='SIM', confirm=False),
+            {'user': 'patrick', 'role': 'ADMIN'},
+        )
+
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_module_role_change_sends_existing_control_session(monkeypatch):
+    session = FakeModuleSession()
+    monkeypatch.setattr(api.registry, 'connections', {'2ccf675d3414': session})
+    monkeypatch.setattr(api.registry, '_connections_lock', __import__('asyncio').Lock())
+
+    async def create_transition(**kwargs):
+        assert kwargs['actor'] == 'patrick'
+        assert kwargs['control_session_key'] == '2ccf675d3414'
+        return {
+            'operation_id': '11111111-2222-4333-8444-555555555555',
+            'command_payload': {
+                'op': 'set_module_role',
+                'device_id': '2ccf675d3414',
+                'requested_role': 'SIM',
+                'simulation_required': True,
+            },
+        }
+
+    async def mark_sent(operation_id):
+        assert operation_id == '11111111-2222-4333-8444-555555555555'
+
+    async def mark_acknowledged(operation_id, ack):
+        assert ack == {'ok': True, 'accepted': True}
+        return {'operation_id': operation_id, 'status': 'ACCEPTED'}
+
+    monkeypatch.setattr(api.role_switching, 'create_transition', create_transition)
+    monkeypatch.setattr(api.role_switching, 'mark_sent', mark_sent)
+    monkeypatch.setattr(api.role_switching, 'mark_acknowledged', mark_acknowledged)
+
+    result = await api.module_role_change(
+        '2ccf675d3414',
+        api.ModuleRoleChangeIn(requested_role='SIM', confirm=True),
+        {'user': 'patrick', 'role': 'ADMIN'},
+    )
+
+    assert result['status'] == 'ACCEPTED'
+    assert session.commands[0][0]['operation_id'] == '11111111-2222-4333-8444-555555555555'
+    assert session.commands[0][1] == '11111111-2222-4333-8444-555555555555'
+
+
+@pytest.mark.asyncio
+async def test_module_role_change_rejects_offline_module(monkeypatch):
+    monkeypatch.setattr(api.registry, 'connections', {})
+    monkeypatch.setattr(api.registry, '_connections_lock', __import__('asyncio').Lock())
+
+    with pytest.raises(HTTPException) as exc:
+        await api.module_role_change(
+            '2ccf675d3414',
+            api.ModuleRoleChangeIn(requested_role='SIM', confirm=True),
+            {'user': 'patrick', 'role': 'ADMIN'},
+        )
+
+    assert exc.value.status_code == 409

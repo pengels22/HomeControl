@@ -87,6 +87,11 @@ Role changes for LAB1 remain a future authorized and audited workflow. Do not
 delete or silently reassign logical-device bindings as part of simulator role
 switching.
 
+The authorized role-switching prototype is documented separately in
+`09_documentation/HCM_MODULE_ROLE_SWITCHING_2026-10-10.md`. It keeps the mTLS
+certificate-to-device-ID binding intact and continues to preserve LAB1 hostname,
+IP address, VLAN and physical-output inhibition.
+
 ## Jetson Staging Plan
 
 These are proposed steps only. Do not run them without approval.

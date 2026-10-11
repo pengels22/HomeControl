@@ -49,6 +49,10 @@ class DeviceBindingUpdateIn(BaseModel):
     enabled: bool | None = None
     metadata: dict[str, Any] | None = None
 
+class ModuleRoleChangeIn(BaseModel):
+    requested_role: Literal['UNASSIGNED','RCM','SIM','LCM']
+    confirm: bool = False
+
 class FireStateIn(BaseModel):
     active: bool
 
