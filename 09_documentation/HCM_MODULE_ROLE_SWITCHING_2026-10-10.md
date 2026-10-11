@@ -103,10 +103,14 @@ LAB1 remains permanently preserved:
 - Physical outputs remain inhibited in every operational role.
 
 The repository-provided helper `10_scripts/lab1_role_agent.py` is safe for
-manual deployment. It validates device ID, operation ID, role and
-`simulation_required`, atomically updates `/opt/homecontrol-lab/state/module.json`,
-keeps `physical_outputs_enabled=false`, and does not touch hostname, network,
-VLAN, GPIO, relays, dimmers, CAN, I2C, SPI or other physical interfaces.
+manual deployment. It validates device ID, frame `request_id`, payload
+`operation_id`, role and `simulation_required`, atomically updates the existing
+`role` field in `/opt/homecontrol-lab/state/module.json`, preserves `device_id`,
+`hostname`, `simulation`, `physical_outputs_enabled` and `commissioned`, keeps
+the state file owned as before with `0644` permissions, and does not touch
+hostname, network, VLAN, GPIO, relays, dimmers, CAN, I2C, SPI or other physical
+interfaces. `lab_agent.py` continues to report `state["role"]` as the HCM
+heartbeat field `lab_role`.
 
 ## Manual LAB1 Installation Outline
 
@@ -116,8 +120,11 @@ Do not run this until LAB1 maintenance is approved.
 sudo install -m 0755 10_scripts/lab1_role_agent.py /opt/homecontrol-lab/lab1_role_agent.py
 sudo chown root:root /opt/homecontrol-lab/lab1_role_agent.py
 sudo systemctl stop homecontrol-lab.service
-# integrate lab1_role_agent.apply_role_command into the existing lab_agent.py
-# command handler, preserving current mTLS certificate configuration
+# Apply the minimal integration shown in:
+# 10_scripts/lab1_agent_set_module_role.patch
+# It replaces only the set_module_role case inside the current
+# simulation_commands_disabled command handling. All other commands stay rejected.
+python3 -m py_compile /opt/homecontrol-lab/lab1_role_agent.py /opt/homecontrol-lab/lab_agent.py
 sudo systemctl start homecontrol-lab.service
 sudo systemctl status homecontrol-lab.service --no-pager
 ```
