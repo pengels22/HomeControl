@@ -18,10 +18,11 @@ homecontrol history
 ```
 
 The current implementation validates manifests, selects packages, pins one Git
-release SHA across a deployment plan, and writes local deployment reports. Remote
-execution is intentionally mocked until the Jetson Docker, Conflict heartbeat,
-and LAB1 simulation adapters complete live-readiness approval. Do not interpret
-the dry-run planner as permission to restart or reconfigure live hosts.
+release SHA across a deployment plan, writes local deployment reports, and has
+SSH-capable adapters for Jetson Docker, Conflict heartbeat, and LAB1 simulation.
+Dry-run mode never contacts live hosts. Live SSH execution requires
+`homecontrol deploy --yes` and still performs adapter-specific preflights before
+changing files or restarting services.
 
 Preferred managed deployments use `HC_RELEASE_SHA=<full-commit-sha>`. Legacy
 installers still accept `HC_BRANCH` for compatibility, but the unified path must

@@ -25,7 +25,27 @@ def load_module(name: str):
 manifest = load_module("manifest")
 inventory = load_module("inventory")
 release = load_module("release")
+transport = load_module("transport")
+artifact = load_module("artifact")
+adapters = load_module("adapters")
 engine = load_module("engine")
+
+
+class FakeRunner:
+    def __init__(self, *, fail_contains: str | None = None, stdout_by_contains: dict[str, str] | None = None):
+        self.commands = []
+        self.fail_contains = fail_contains
+        self.stdout_by_contains = stdout_by_contains or {}
+
+    def __call__(self, command, *, input=None, timeout=None):
+        self.commands.append(command)
+        joined = " ".join(command)
+        if self.fail_contains and self.fail_contains in joined:
+            return transport.CommandResult(command, 255, "", "host key verification failed")
+        for needle, stdout in self.stdout_by_contains.items():
+            if needle in joined:
+                return transport.CommandResult(command, 0, stdout, "")
+        return transport.CommandResult(command, 0, "ok\n", "")
 
 
 def test_all_device_manifests_validate_and_rmc_is_firmware_only():
@@ -121,7 +141,7 @@ def test_homecontrol_cli_status_inventory_and_dry_run(tmp_path):
         env=env,
     )
     assert status.returncode == 0, status.stderr
-    assert json.loads(status.stdout)["remote_execution"] == "mocked"
+    assert json.loads(status.stdout)["remote_execution"] == "not_contacted"
 
     deploy = subprocess.run(
         [sys.executable, "-m", "homecontrol_cli", "deploy", "--dry-run", "--release", "d" * 40],
@@ -135,3 +155,117 @@ def test_homecontrol_cli_status_inventory_and_dry_run(tmp_path):
     data = json.loads(deploy.stdout)
     assert data["dry_run"] is True
     assert Path(data["report_path"]).exists()
+
+
+def test_ssh_transport_uses_existing_aliases_and_strict_host_keys(tmp_path):
+    runner = FakeRunner()
+    tx = transport.SSHTransport(runner=runner)
+    tx.execute("jetson", "hostname")
+    local = tmp_path / "artifact.tar.gz"
+    local.write_text("artifact")
+    tx.transfer_file("lab1", local, "/tmp/artifact.tar.gz")
+
+    assert runner.commands[0][:7] == [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "PasswordAuthentication=no",
+        "-o",
+        "StrictHostKeyChecking=yes",
+    ]
+    assert "jetson" in runner.commands[0]
+    assert runner.commands[1][0] == "scp"
+    assert "lab1:/tmp/artifact.tar.gz" in runner.commands[1]
+
+
+def test_ssh_transport_rejects_host_key_failures():
+    tx = transport.SSHTransport(runner=FakeRunner(fail_contains="conflict"))
+    with pytest.raises(transport.TransportError, match="host key verification failed"):
+        tx.execute("conflict", "hostname")
+
+
+def test_live_deploy_uses_single_artifact_and_stops_after_failed_transfer(tmp_path, monkeypatch):
+    monkeypatch.setenv("HC_DEPLOY_REPORT_DIR", str(tmp_path))
+
+    fake_artifact = artifact.ReleaseArtifact(
+        release="e" * 40,
+        path=tmp_path / "homecontrol.tar.gz",
+        sha256="abc123",
+        metadata_path=tmp_path / "homecontrol.json",
+    )
+    fake_artifact.path.write_text("artifact")
+    fake_artifact.metadata_path.write_text("{}")
+    monkeypatch.setattr(artifact, "create_release_artifact", lambda repo_root, release, output_dir: fake_artifact)
+    monkeypatch.setattr(engine.artifact_mod, "create_release_artifact", lambda repo_root, release, output_dir: fake_artifact)
+
+    tx = transport.SSHTransport(runner=FakeRunner(fail_contains="scp"))
+    report = engine.deploy(
+        repo_root=ROOT,
+        release="e" * 40,
+        dry_run=False,
+        transport=tx,
+        run_tests=False,
+    )
+
+    assert report["summary"]["status"] == "FAIL"
+    assert report["targets"][0]["target"] == "jetson"
+    assert report["targets"][0]["status"] == "FAIL"
+    assert report["targets"][1]["status"] == "SKIPPED"
+    assert report["targets"][2]["status"] == "SKIPPED"
+
+
+def test_adapter_dry_run_includes_preservation_checks():
+    fake_artifact = artifact.ReleaseArtifact(
+        release="f" * 40,
+        path=Path("/tmp/homecontrol.tar.gz"),
+        sha256="dry",
+        metadata_path=Path("/tmp/homecontrol.json"),
+    )
+    by_name = inventory.inventory()
+    conflict_steps = adapters.adapter_for(by_name["conflict"]).dry_run(fake_artifact).steps
+    jetson_steps = adapters.adapter_for(by_name["jetson"]).dry_run(fake_artifact).steps
+    lab_steps = adapters.adapter_for(by_name["lab1"]).dry_run(fake_artifact).steps
+
+    assert any(step["name"] == "online_sqlite_backup" for step in conflict_steps)
+    assert any(step["name"] == "preflight_docker_layout" for step in jetson_steps)
+    assert any(step["name"] == "preflight_lab1_safety" for step in lab_steps)
+
+
+def test_rollback_steps_are_adapter_specific():
+    by_name = inventory.inventory()
+
+    jetson = adapters.adapter_for(by_name["jetson"]).rollback_steps()
+    conflict = adapters.adapter_for(by_name["conflict"]).rollback_steps()
+    lab1 = adapters.adapter_for(by_name["lab1"]).rollback_steps()
+
+    assert any(step.name == "restore_previous_container" for step in jetson)
+    assert any(step.name == "rollback_heartbeat" for step in conflict)
+    assert any(step.name == "restore_role_helper" for step in lab1)
+
+
+def test_live_deploy_skips_target_already_at_release(tmp_path, monkeypatch):
+    fake_artifact = artifact.ReleaseArtifact(
+        release="1" * 40,
+        path=tmp_path / "homecontrol.tar.gz",
+        sha256="abc123",
+        metadata_path=tmp_path / "homecontrol.json",
+    )
+    fake_artifact.path.write_text("artifact")
+    fake_artifact.metadata_path.write_text("{}")
+    monkeypatch.setattr(engine.artifact_mod, "create_release_artifact", lambda repo_root, release, output_dir: fake_artifact)
+    tx = transport.SSHTransport(
+        runner=FakeRunner(stdout_by_contains={"cat /etc/hcm/homecontrol-release": "1" * 40 + "\n"})
+    )
+
+    report = engine.deploy(
+        repo_root=ROOT,
+        release="1" * 40,
+        target="jetson",
+        dry_run=False,
+        transport=tx,
+        run_tests=False,
+    )
+
+    assert report["targets"][0]["status"] == "NO CHANGE"
+    assert all("docker build" not in " ".join(cmd) for cmd in tx.runner.commands)

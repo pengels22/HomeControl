@@ -46,10 +46,16 @@ and Linux packages without the expected script entry points are rejected.
 ## Shared Deployment Engine
 
 `06_config/10_Common/engine.py` resolves one immutable Git SHA, validates all
-selected manifests against inventory, produces idempotent dry-run plans, and
-writes persistent JSON reports. Remote execution is deliberately marked as
-mocked. Live adapters for Jetson Docker, Conflict, and LAB1 must be approved and
-tested before the planner is allowed to restart services or copy files.
+selected manifests against inventory, produces idempotent dry-run plans, writes
+persistent JSON reports, and can execute approved deployments through
+`06_config/10_Common/transport.py`. SSH uses the operator's configured aliases,
+requires host-key verification, and does not store passwords, private keys, or
+secrets.
+
+Live adapters are implemented for Jetson Docker, Conflict Heartbeat V3, and LAB1
+simulation. They run remote preflights before changing files or services, stage a
+single release artifact, and record per-step outcomes. Standard automated tests
+mock the SSH transport and do not contact live hosts.
 
 ## Mac CLI
 
@@ -59,8 +65,10 @@ The `homecontrol` console script is provided by `homecontrol_cli.py`:
 homecontrol status
 homecontrol inventory
 homecontrol deploy --dry-run
-homecontrol deploy --target jetson --release <full-sha>
+homecontrol deploy --target jetson --release <full-sha> --dry-run
+homecontrol deploy --target jetson --release <full-sha> --yes
 homecontrol verify
+homecontrol verify --remote
 homecontrol history
 homecontrol rollback --target lab1
 ```
@@ -96,12 +104,14 @@ operational state, persistent databases, certificates, and secrets.
 ## Backup and Rollback
 
 The framework requires rollback and backup declarations in every manifest.
-Actual live backup and rollback remain adapter-specific:
+Actual live backup and rollback are adapter-specific:
 
 - Conflict must use SQLite online backup and must not overwrite its registry or
-  heartbeat authentication secret.
+  heartbeat authentication secret. Rollback requires an explicit backup path.
 - Jetson rollback must preserve Docker networks, PostgreSQL USB storage,
-  environment files, certificates, watchdogs, and rollback containers.
+  environment files, certificates, watchdogs, and rollback containers. The
+  adapter preserves the previous HCM container as `hcm-rollback-before-deploy`
+  before replacing `hcm-test`.
 - LAB1 rollback must preserve hostname, IP, device identity, simulation-only
   state, physical-output-disabled state, certificates, HMAC secret, and role
   history.
@@ -121,11 +131,15 @@ Actual live backup and rollback remain adapter-specific:
 
 ## Known Limitations
 
-- Remote SSH execution is not enabled by this commit.
-- Jetson Docker, Conflict, and LAB1 live adapters are represented as manifests
-  and plans, not as approved live deployment procedures.
+- The SSH deployment path is implemented but has only been exercised with mocked
+  transports in automated tests during this commit. A live dry-run/verification
+  report should be reviewed before first deployment.
+- Jetson database migrations remain out of scope and require a separately
+  approved plan.
+- LAB1 deployment updates only the role helper after confirming the installed
+  simulation layout; it does not replace the full persistent agent.
 - Secure bootstrap for untrusted newly discovered devices is not implemented.
 - HCM database fields for deployment status are not migrated in this foundation
   pass.
-- Automatic rollback is not implemented for live hosts because database and
-  service rollback safety must be adapter-specific.
+- Rollback is application-level and adapter-specific; unsafe database rollback
+  still stops for manual intervention.

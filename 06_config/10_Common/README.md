@@ -6,8 +6,12 @@ integration.
 
 Current safety posture:
 
-- Deployment plans are source-tree only and use mocked remote execution.
+- Dry-run deployment plans do not contact live hosts.
+- Approved deployments use SSH aliases from the operator's Mac configuration and
+  require verified host keys.
 - A full 40-character Git SHA is required when an operator supplies a release.
+- The release is packaged once on the Mac and transferred as an immutable
+  artifact.
 - Device manifests are validated before any target package is selected.
 - Live secrets, certificates, databases, networking, watchdogs, and service state
   are device-specific state and are never stored here.
@@ -16,3 +20,8 @@ Current safety posture:
 
 The shell entry points are lightweight wrappers. They are intentionally safe for
 local validation and must not be treated as live deployment approval.
+
+Live SSH deployment is only triggered through the Mac CLI with `homecontrol
+deploy --yes`. Rollback also requires `--yes` plus any adapter-specific backup
+environment variables. Standard tests use mocked transports and do not connect to
+Jetson, Conflict, or LAB1.
