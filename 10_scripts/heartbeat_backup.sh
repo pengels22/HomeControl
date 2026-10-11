@@ -73,7 +73,9 @@ Rollback outline:
    WAL/SHM files from another point in time.
 4. Run systemctl daemon-reload.
 5. Restart hcm-heartbeat.service.
-6. Run heartbeat_deployment_preflight.sh and non-destructive verification.
+6. Run heartbeat_deployment_preflight.sh baseline <target>, then strict <target>
+   after the restored configuration has been reviewed, and run non-destructive
+   verification.
 EOF
 
 echo "$dest"

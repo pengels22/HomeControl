@@ -124,6 +124,101 @@ network.
   `/opt/homecontrol-lab`, hostname, networking, certificates, commissioning
   state, or simulation role.
 
+## Preflight Modes
+
+`10_scripts/heartbeat_deployment_preflight.sh` is read-only and has two modes:
+
+- `baseline`: inventory mode. It accepts and reports the currently installed
+  configuration, including legacy unauthenticated configs. This mode is useful
+  before cutover and does **not** approve the host for deployment.
+- `strict`: deployment-readiness mode. It requires `hmac-sha256`, a present
+  `heartbeat_auth_secret_file` with no group/world permissions, and matching
+  deployment-critical fields between the installed config and the repository
+  target template.
+
+Run baseline before any installation attempt. Run strict only after the same
+HMAC secret and matching config have been staged on the target host.
+
+## Backup And Restore Safety
+
+`10_scripts/heartbeat_backup.sh` uses SQLite's online backup API to copy
+`registry.sqlite3` into a consistent standalone database while the heartbeat
+service may still be writing. It intentionally does not independently copy
+`registry.sqlite3-wal` or `registry.sqlite3-shm`, because those files are only
+valid for the exact database state they accompany.
+
+`10_scripts/heartbeat_rollback.sh` restores the backed-up database and removes
+any existing WAL/SHM files before restarting the heartbeat service. This avoids
+combining a restored database with stale live WAL content.
+
+## Secure HMAC Secret Distribution
+
+The staged HMAC secret must be generated and installed outside Git and outside
+command-line arguments. Do not paste the secret into shell history, process
+arguments, repository files, or documentation.
+
+Recommended manual procedure for each target during an approved maintenance
+window:
+
+```bash
+sudo install -d -m 0700 /etc/hcm-heartbeat
+umask 077
+sudo sh -c 'cat > /etc/hcm-heartbeat/heartbeat-auth.secret'
+# paste or feed the secret through stdin from the operator's secure store, then EOF
+sudo chown root:root /etc/hcm-heartbeat/heartbeat-auth.secret
+sudo chmod 0600 /etc/hcm-heartbeat/heartbeat-auth.secret
+```
+
+Use the same secret bytes on Conflict, Jetson, and LAB1 for this staged HMAC
+deployment. Verify with:
+
+```bash
+sudo stat -c '%U %G %a %n' /etc/hcm-heartbeat/heartbeat-auth.secret
+sudo 10_scripts/heartbeat_deployment_preflight.sh strict conflict
+```
+
+On macOS during lab preparation, use equivalent `stat` syntax. Do not commit the
+secret file or copy it into `/tmp`, chat transcripts, ticket systems, or command
+arguments.
+
+## Secure Cutover Sequence
+
+The dangerous cutover edge is enabling required HMAC on Conflict before Jetson
+has the same secret and matching client config. That would cause Conflict to
+reject Jetson's existing plaintext heartbeat and create a Jetson-specific
+`COMMUNICATION_LOSS` fault after the configured timeout.
+
+Use this sequence to preserve monitoring:
+
+1. On Conflict and Jetson, run baseline preflight and backup without changing
+   services:
+   `sudo 10_scripts/heartbeat_deployment_preflight.sh baseline conflict` and
+   `sudo 10_scripts/heartbeat_backup.sh conflict` on Conflict, then the
+   equivalent `baseline jetson` and `heartbeat_backup.sh jetson` on Jetson.
+2. Provision the same HMAC secret file to both hosts with mode `0600`.
+3. Stage the new configs on both hosts but do not restart either service yet.
+4. Run strict preflight on both hosts against the staged installed configs.
+5. Restart Jetson first only if Conflict still accepts legacy plaintext during
+   the staging window. Otherwise schedule a paired restart window where Conflict
+   and Jetson are restarted back-to-back and the timeout window is monitored.
+6. Restart Conflict with the authenticated config.
+7. Immediately verify Conflict `/status` and SQLite registry rows using
+   `10_scripts/heartbeat_verify_readonly.sh http://127.0.0.1:6004`.
+8. Confirm Jetson's registry entry remains device-specific and returns online
+   before adding LAB1.
+9. Install or restart LAB1 heartbeat only after Jetson is confirmed online under
+   HMAC.
+
+If either Conflict or Jetson fails after the restart:
+
+- Do not modify networking, Docker, PostgreSQL, watchdog, or LAB1.
+- Restore the failed host from the heartbeat backup using
+  `10_scripts/heartbeat_rollback.sh <backup-dir>`.
+- If Conflict was rolled back to plaintext, roll Jetson back to its matching
+  prior heartbeat config before waiting for long-term health.
+- Use baseline preflight after rollback to document the restored state, then
+  repeat strict preflight before attempting the authenticated cutover again.
+
 ## Timeout Behavior
 
 - Default interval: 5 seconds.
@@ -145,11 +240,14 @@ Stage A: Conflict foundation
    `/var/lib/hcm-heartbeat/registry.sqlite3`.
 2. Provision `/etc/hcm-heartbeat/heartbeat-auth.secret` outside Git with mode
    `0600` before installing the fail-closed HMAC configuration.
-3. Run `10_scripts/heartbeat_deployment_preflight.sh conflict` on Conflict.
-4. Install the updated Heartbeat V3 package on Conflict with the existing VLAN
+3. Run `10_scripts/heartbeat_deployment_preflight.sh baseline conflict` on
+   Conflict to record the currently installed state.
+4. Stage the authenticated config and run
+   `10_scripts/heartbeat_deployment_preflight.sh strict conflict`.
+5. Install the updated Heartbeat V3 package on Conflict with the existing VLAN
    20 bind address.
-5. Confirm `authorized_devices`, `communication_faults`, and event persistence.
-6. Confirm Jetson remains individually tracked.
+6. Confirm `authorized_devices`, `communication_faults`, and event persistence.
+7. Confirm Jetson remains individually tracked.
 
 Rollback: stop `hcm-heartbeat.service`, restore backed-up files and config, move
 the new SQLite DB aside if needed, and restart the service.
