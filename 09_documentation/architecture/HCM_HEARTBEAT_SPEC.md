@@ -28,8 +28,9 @@ Implemented transport:
   `/run/hcm-heartbeat/control.sock`.
 
 The current implementation supports plaintext lab mode and optional
-`hmac-sha256` request authentication using a local secret file. Production mTLS
-is not complete in this implementation and remains a staged deployment item.
+`hmac-sha256` request and response authentication using a local secret file.
+Production mTLS is not complete in this implementation and remains a staged
+deployment item.
 
 ## Roles
 
@@ -191,7 +192,8 @@ Important config keys:
   Conflict these values seed durable authorized device records.
 - `authorized_devices`: optional structured authorization records with
   `device_id`, `hostname`, `ip_address`, `source`, `active`, and `maintenance`.
-- `heartbeat_auth_mode`: `none` or `hmac-sha256`.
+- `heartbeat_auth_mode`: `none` or `hmac-sha256`. HMAC mode signs heartbeat
+  requests and Conflict responses.
 - `heartbeat_auth_secret_file`: local file path for HMAC mode. Secret files must
   not be committed to Git.
 - `max_timestamp_skew_seconds`: accepted heartbeat timestamp skew.
@@ -252,9 +254,10 @@ heartbeat services.
 ## Security Notes
 
 Plaintext lab mode remains available for existing local deployments, but it is
-not production authentication. `hmac-sha256` mode authenticates request bodies
-with a shared local secret file for staged validation. Production should move to
-the approved PKI/mTLS design before publishing TCP 6004 beyond the protected lab
+not production authentication. `hmac-sha256` mode authenticates request and
+response bodies with a shared local secret file for staged validation and fails
+closed if that secret is missing when configured. Production should move to the
+approved PKI/mTLS design before publishing TCP 6004 beyond the protected lab
 network. MAC address, hostname, and IP address identify devices operationally
 but do not by themselves prove identity. Restrict TCP 6004 to approved hosts and
 networks; never expose it to the public Internet.

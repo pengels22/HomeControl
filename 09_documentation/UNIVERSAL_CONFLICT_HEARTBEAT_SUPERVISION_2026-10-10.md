@@ -59,6 +59,8 @@ Conflict heartbeat supervision now includes:
 - Independent Conflict monitor loop; timeout evaluation no longer depends on a
   dashboard request or another incoming heartbeat.
 - Optional `hmac-sha256` request authentication using a local secret file.
+- Signed Conflict responses in HMAC mode; device clients reject unsigned or
+  tampered responses when authentication is configured.
 
 HCM module provisioning now includes a `heartbeat_supervisor` block in config
 responses:
@@ -77,7 +79,9 @@ responses:
 
 The module agent persists this endpoint metadata in its identity file. It does
 not receive private keys, passwords, or shared secrets through the HCM control
-channel.
+channel. This is commissioning metadata only; installing or updating the local
+`hcm-heartbeat.service` and its `/etc/hcm-heartbeat/config.json` remains a
+separate deployment step.
 
 ## Current LAB Configuration
 
@@ -95,16 +99,30 @@ device identity, commissioning state, simulation lockout, or physical outputs.
 ## Security Boundary
 
 This commit does not claim a completed production mTLS rollout. The implemented
-`hmac-sha256` mode provides cryptographic request authentication for staged lab
-validation using local secret files, but TLS certificate issuance, certificate
-role constraints, and production listener publication still require a separate
-approved deployment step.
+`hmac-sha256` mode provides cryptographic request and response authentication
+for staged lab validation using local secret files, but TLS certificate
+issuance, certificate role constraints, and production listener publication
+still require a separate approved deployment step.
 
-Production must not silently downgrade to unauthenticated heartbeats. For a
-secure rollout, configure `heartbeat_auth_mode=hmac-sha256` or the future mTLS
-mode on both device and Conflict, store secrets or certificates outside Git, and
-validate Conflict identity before publishing TCP 6004 beyond the protected lab
+Production must not silently downgrade to unauthenticated heartbeats. The staged
+templates set `heartbeat_auth_mode=hmac-sha256` and require
+`/etc/hcm-heartbeat/heartbeat-auth.secret`, provisioned outside Git with
+restricted permissions. Missing or empty secrets fail closed at service startup.
+Validate Conflict identity before publishing TCP 6004 beyond the protected lab
 network.
+
+## Deployment Compatibility
+
+- Jetson currently runs Heartbeat V3 as an independent host service on Python
+  3.6. `00_Heartbeat/hcm_heartbeat.py` remains standard-library Python 3.6
+  compatible; do not introduce Python 3.7+ syntax in this daemon.
+- Conflict stores supervision state in SQLite at
+  `/var/lib/hcm-heartbeat/registry.sqlite3`. Preflight and backup scripts check
+  this database without applying destructive migrations.
+- The LAB1 installer mode only installs the heartbeat daemon files and
+  `hcm-heartbeat.service`; it does not touch `homecontrol-lab.service`,
+  `/opt/homecontrol-lab`, hostname, networking, certificates, commissioning
+  state, or simulation role.
 
 ## Timeout Behavior
 
@@ -125,10 +143,13 @@ Stage A: Conflict foundation
    `/usr/local/lib/hcm-heartbeat/hcm_heartbeat.py`,
    `/usr/local/lib/hcm-heartbeat/homecontrol_identity.py`, and
    `/var/lib/hcm-heartbeat/registry.sqlite3`.
-2. Install the updated Heartbeat V3 package on Conflict with the existing VLAN
+2. Provision `/etc/hcm-heartbeat/heartbeat-auth.secret` outside Git with mode
+   `0600` before installing the fail-closed HMAC configuration.
+3. Run `10_scripts/heartbeat_deployment_preflight.sh conflict` on Conflict.
+4. Install the updated Heartbeat V3 package on Conflict with the existing VLAN
    20 bind address.
-3. Confirm `authorized_devices`, `communication_faults`, and event persistence.
-4. Confirm Jetson remains individually tracked.
+5. Confirm `authorized_devices`, `communication_faults`, and event persistence.
+6. Confirm Jetson remains individually tracked.
 
 Rollback: stop `hcm-heartbeat.service`, restore backed-up files and config, move
 the new SQLite DB aside if needed, and restart the service.
@@ -136,8 +157,9 @@ the new SQLite DB aside if needed, and restart the service.
 Stage B: Jetson compatibility
 
 1. Keep the host `hcm-heartbeat.service` independent from Docker HCM.
-2. Add expected Conflict device ID in config.
-3. Validate direct Jetson-to-Conflict heartbeat and recovery behavior.
+2. Provision the same HMAC secret file outside Git.
+3. Add expected Conflict device ID in config.
+4. Validate direct Jetson-to-Conflict heartbeat and recovery behavior.
 
 Rollback: restore previous Jetson heartbeat config and script only. Do not
 restart HCM or PostgreSQL for heartbeat rollback.
@@ -154,9 +176,11 @@ is inert unless the module heartbeat service consumes it.
 Stage D: LAB1 direct heartbeat
 
 1. Copy the repository heartbeat package to LAB1.
-2. Install with `sudo ./install.sh lab1` during an approved maintenance window.
-3. Do not change hostname, IP, VLAN, physical outputs, or simulation role.
-4. Confirm LAB1 and Jetson appear as separate Conflict registry devices.
+2. Provision the same HMAC secret file outside Git.
+3. Run `HC_DRY_RUN=1 sudo ./install.sh lab1` to confirm the LAB1 installer path.
+4. Install with `sudo ./install.sh lab1` during an approved maintenance window.
+5. Do not change hostname, IP, VLAN, physical outputs, or simulation role.
+6. Confirm LAB1 and Jetson appear as separate Conflict registry devices.
 
 Rollback: stop LAB1 `hcm-heartbeat.service`, restore previous files if any, and
 leave `homecontrol-lab.service` untouched.
@@ -166,5 +190,9 @@ leave `homecontrol-lab.service` untouched.
 - Production mTLS for Heartbeat V3 is not complete in this commit.
 - HCM does not yet synchronize Conflict event cursors into the dashboard.
 - Conflict administrative decommissioning APIs are not exposed yet.
+- HCM commissioning provisions the verified Conflict endpoint metadata, but
+  automatic installation/reconfiguration of the host heartbeat daemon is not
+  implemented. Each processor still needs an approved heartbeat service
+  deployment step.
 - LAB1 installation and end-to-end loss/recovery validation require live LAB1 and
   Conflict access and explicit deployment approval.

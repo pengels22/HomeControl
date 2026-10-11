@@ -1,4 +1,5 @@
 from importlib import import_module
+import json
 
 import pytest
 
@@ -28,3 +29,27 @@ async def test_module_web_status_includes_identity_and_hcm_connection_flag():
     assert status['hcm_connected'] is True
     assert status['config']['web']['enabled'] is True
     assert status['config']['tls']['key_file'] == '<redacted>'
+
+
+@pytest.mark.asyncio
+async def test_module_agent_persists_heartbeat_supervisor_config(tmp_path):
+    identity_path = tmp_path / 'identity.json'
+    agent = agent_mod.ModuleAgent('SIM', {'identity_path': str(identity_path)})
+    payload = {
+        'version': 4,
+        'heartbeat_supervisor': {
+            'enabled': True,
+            'device_id': '3c53bbf7adb2',
+            'host': '192.168.20.26',
+            'port': 6004,
+            'interval_seconds': 5,
+            'timeout_seconds': 15,
+            'protocol': 'hcm-heartbeat-v3',
+        },
+    }
+
+    result = await agent.apply_config(payload)
+
+    saved = json.loads(identity_path.read_text())
+    assert result == {'ok': True, 'config_version': 4}
+    assert saved['heartbeat_supervisor'] == payload['heartbeat_supervisor']

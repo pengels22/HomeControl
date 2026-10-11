@@ -78,6 +78,29 @@ def heartbeat_signature(secret, body):
 def constant_time_equal(left, right):
     return hmac.compare_digest(str(left or ''), str(right or ''))
 
+def validate_auth_config(cfg):
+    mode = cfg.get('heartbeat_auth_mode', 'none')
+    if mode == 'none':
+        return
+    if mode != 'hmac-sha256':
+        raise ValueError('unsupported heartbeat_auth_mode')
+    path = cfg.get('heartbeat_auth_secret_file')
+    if not path:
+        raise ValueError('heartbeat_auth_secret_file is required for hmac-sha256')
+    load_secret(path)
+
+def sign_if_configured(cfg, body):
+    if cfg.get('heartbeat_auth_mode', 'none') != 'hmac-sha256':
+        return None
+    return heartbeat_signature(load_secret(cfg.get('heartbeat_auth_secret_file')), body)
+
+def validate_signature(cfg, supplied, body):
+    expected = sign_if_configured(cfg, body)
+    if expected is None:
+        return
+    if not constant_time_equal(supplied, expected):
+        raise ValueError('invalid heartbeat signature')
+
 class ConflictStore(object):
     def __init__(self, path):
         self.path = path
@@ -493,6 +516,7 @@ class State(object):
         cfg.setdefault('max_timestamp_skew_seconds', 300)
         cfg.setdefault('heartbeat_auth_mode', 'none')
         cfg.setdefault('heartbeat_auth_secret_file', None)
+        validate_auth_config(cfg)
         self.cfg = cfg
         self.lock = threading.RLock()
         self.started = time.monotonic()
@@ -644,6 +668,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Cache-Control', 'no-store')
+        signature = sign_if_configured(self.server.state.cfg, body)
+        if signature:
+            self.send_header('X-HomeControl-Signature', signature)
         self.end_headers()
         self.wfile.write(body)
     def do_GET(self):
@@ -676,10 +703,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(403, {'error': 'unregistered device'})
             auth_mode = self.server.state.cfg.get('heartbeat_auth_mode', 'none')
             if auth_mode == 'hmac-sha256':
-                secret = load_secret(self.server.state.cfg.get('heartbeat_auth_secret_file'))
-                supplied = self.headers.get('X-HomeControl-Signature')
-                if not constant_time_equal(supplied, heartbeat_signature(secret, json.dumps(data, sort_keys=True, separators=(',', ':')).encode('utf-8'))):
-                    raise ValueError('invalid heartbeat signature')
+                validate_signature(
+                    self.server.state.cfg,
+                    self.headers.get('X-HomeControl-Signature'),
+                    json.dumps(data, sort_keys=True, separators=(',', ':')).encode('utf-8'),
+                )
             elif auth_mode != 'none':
                 raise ValueError('unsupported heartbeat_auth_mode')
             with self.server.state.lock:
@@ -738,6 +766,7 @@ def client_loop(state):
                 raw = response.read(MAX_BODY + 1)
                 if len(raw) > MAX_BODY:
                     raise ValueError('response too long')
+                validate_signature(cfg, response.headers.get('X-HomeControl-Signature'), raw)
                 reply = json.loads(raw.decode('utf-8'))
             expected_mac = state.conflict_device_id
             if reply.get('protocol') != 'hcm-heartbeat' or reply.get('version') != VERSION or reply.get('reply_to') != seq or reply.get('reply_boot_id') != state.boot_id:

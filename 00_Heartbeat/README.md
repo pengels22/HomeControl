@@ -90,7 +90,7 @@ production control network, but its subnet is not approved yet.
 - `watchdogs`: object `{ "sensors": 10 }` means device must receive a `hcm-heartbeat pulse sensors` at least every 10 s. Configure and restart daemon before registering the actual sender.
 - `allowed_device_ids`: device ID allowlist on Conflict. Target format is the normalized designated-interface MAC address, lowercase with colons removed. Values seed durable authorized-device records. An empty list does **not** authorize arbitrary senders.
 - `authorized_devices`: optional structured Conflict registry seed records with `device_id`, `hostname`, `ip_address`, `source`, `active`, and `maintenance`.
-- `heartbeat_auth_mode`: `none` for current plaintext lab compatibility or `hmac-sha256` for shared-secret request authentication during staged validation.
+- `heartbeat_auth_mode`: `none` for current plaintext lab compatibility or `hmac-sha256` for shared-secret request and response authentication during staged validation.
 - `heartbeat_auth_secret_file`: local secret file for HMAC mode. Do not commit this file or its contents.
 - `conflict_device_id`: optional expected Conflict device ID for devices; fill it once physical interface ID is finalized.
 - `maintenance_lockout`: boolean status only; does not suppress critical faults or disable life-safety logic.
@@ -98,4 +98,4 @@ production control network, but its subnet is not approved yet.
 
 ### Security / safety
 
-Plaintext lab mode is suitable only for a trusted, protected management VLAN and is **not** production authentication or a safety interlock. Optional `hmac-sha256` mode authenticates request bodies with a local shared secret file; production mTLS remains a staged hardening item. Standalone fire/AC hardware handling must not rely on the network heartbeat. The systemd service runs root to read system service states and expose a controlled Unix socket (`/run/hcm-heartbeat/control.sock`, root/sudo-group write access). Command arguments are not executed as shell commands.
+Plaintext lab mode is suitable only for a trusted, protected management VLAN and is **not** production authentication or a safety interlock. Optional `hmac-sha256` mode authenticates request and response bodies with a local shared secret file and fails closed if that secret is missing when configured; production mTLS remains a staged hardening item. Standalone fire/AC hardware handling must not rely on the network heartbeat. The systemd service runs root to read system service states and expose a controlled Unix socket (`/run/hcm-heartbeat/control.sock`, root/sudo-group write access). Command arguments are not executed as shell commands.

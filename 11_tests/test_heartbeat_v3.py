@@ -63,6 +63,16 @@ def heartbeat(device_id='48b02d87db16', hostname='RCM01', ip='192.168.20.31', se
     }
 
 
+def write_secret(tmp_path):
+    secret_path = tmp_path / 'heartbeat.secret'
+    secret_path.write_bytes(b'shared-development-test-secret')
+    return secret_path
+
+
+def sign_body(secret_path, body):
+    return hmac.new(secret_path.read_bytes(), body, hashlib.sha256).hexdigest()
+
+
 def test_conflict_registry_persists_but_restarts_offline(tmp_path, monkeypatch):
     patch_host(monkeypatch)
     state = hcm.State(cfg(tmp_path))
@@ -285,8 +295,7 @@ def test_replay_sequence_rejected(tmp_path, monkeypatch):
 
 def test_hmac_authenticated_heartbeat(tmp_path, monkeypatch):
     patch_host(monkeypatch)
-    secret_path = tmp_path / 'heartbeat.secret'
-    secret_path.write_bytes(b'shared-development-test-secret')
+    secret_path = write_secret(tmp_path)
     config = cfg(tmp_path)
     config['heartbeat_auth_mode'] = 'hmac-sha256'
     config['heartbeat_auth_secret_file'] = str(secret_path)
@@ -302,17 +311,140 @@ def test_hmac_authenticated_heartbeat(tmp_path, monkeypatch):
         from urllib.request import Request, urlopen
         msg = heartbeat()
         body = json.dumps(msg, sort_keys=True, separators=(',', ':')).encode('utf-8')
-        signature = hmac.new(secret_path.read_bytes(), body, hashlib.sha256).hexdigest()
+        signature = sign_body(secret_path, body)
         req = Request(
             'http://127.0.0.1:{}/heartbeat'.format(port),
             data=body,
             headers={'Content-Type': 'application/json', 'X-HomeControl-Signature': signature},
             method='POST',
         )
-        reply = json.loads(urlopen(req, timeout=3).read().decode('utf-8'))
+        with urlopen(req, timeout=3) as response:
+            raw = response.read()
+            response_signature = response.headers.get('X-HomeControl-Signature')
+        reply = json.loads(raw.decode('utf-8'))
     finally:
         server.shutdown()
         server.server_close()
         conflict.store.close()
 
     assert reply['reply_to'] == 1
+    assert response_signature == sign_body(secret_path, raw)
+
+
+def test_hmac_rejects_bad_request_signature(tmp_path, monkeypatch):
+    patch_host(monkeypatch)
+    secret_path = write_secret(tmp_path)
+    config = cfg(tmp_path)
+    config['heartbeat_auth_mode'] = 'hmac-sha256'
+    config['heartbeat_auth_secret_file'] = str(secret_path)
+    conflict = hcm.State(config)
+    server = hcm.HTTPServer(('127.0.0.1', 0), hcm.Handler)
+    server.state = conflict
+    port = server.server_address[1]
+    import threading
+    thread = threading.Thread(target=server.serve_forever)
+    thread.daemon = True
+    thread.start()
+    try:
+        from urllib.error import HTTPError
+        from urllib.request import Request, urlopen
+        body = json.dumps(heartbeat(), sort_keys=True, separators=(',', ':')).encode('utf-8')
+        req = Request(
+            'http://127.0.0.1:{}/heartbeat'.format(port),
+            data=body,
+            headers={'Content-Type': 'application/json', 'X-HomeControl-Signature': 'bad'},
+            method='POST',
+        )
+        with pytest.raises(HTTPError) as exc:
+            urlopen(req, timeout=3)
+    finally:
+        server.shutdown()
+        server.server_close()
+        conflict.store.close()
+
+    assert exc.value.code == 400
+
+
+def test_hmac_config_fails_closed_without_secret(tmp_path, monkeypatch):
+    patch_host(monkeypatch)
+    config = cfg(tmp_path)
+    config['heartbeat_auth_mode'] = 'hmac-sha256'
+    config['heartbeat_auth_secret_file'] = str(tmp_path / 'missing.secret')
+
+    with pytest.raises(IOError):
+        hcm.State(config)
+
+
+def test_authenticated_multi_device_monitoring_and_jetson_continues_during_lab1_loss(tmp_path, monkeypatch):
+    patch_host(monkeypatch)
+    secret_path = write_secret(tmp_path)
+    config = cfg(tmp_path)
+    config['heartbeat_auth_mode'] = 'hmac-sha256'
+    config['heartbeat_auth_secret_file'] = str(secret_path)
+    config['allowed_device_ids'] = ['48b02d87db16', '2ccf675d3414']
+    config['authorized_devices'] = [
+        {'device_id': '48b02d87db16', 'hostname': 'jetson', 'ip_address': '192.168.20.27'},
+        {'device_id': '2ccf675d3414', 'hostname': 'lab1', 'ip_address': '192.168.20.36'},
+    ]
+    state = hcm.State(config)
+    jetson = heartbeat(device_id='48b02d87db16', hostname='jetson', ip='192.168.20.27', seq=1, boot='jetson-boot')
+    lab1 = heartbeat(device_id='2ccf675d3414', hostname='lab1', ip='192.168.20.36', seq=1, boot='lab1-boot')
+    state.store.record_heartbeat('48b02d87db16', jetson, '192.168.20.27', 15)
+    state.store.record_heartbeat('2ccf675d3414', lab1, '192.168.20.36', 15)
+    old = int(time.time()) - 30
+    state.store.conn.execute('UPDATE devices SET last_seen=? WHERE device_id=?', (old, '2ccf675d3414'))
+    state.store.conn.commit()
+
+    changed = state.store.mark_offline_overdue(15, 5)
+    state.store.record_heartbeat(
+        '48b02d87db16',
+        heartbeat(device_id='48b02d87db16', hostname='jetson', ip='192.168.20.27', seq=2, boot='jetson-boot'),
+        '192.168.20.27',
+        15,
+    )
+    registry = state.snapshot()['status']['registry']
+    state.store.close()
+
+    assert changed == ['2ccf675d3414']
+    assert registry['48b02d87db16']['online'] is True
+    assert registry['48b02d87db16']['active_fault'] is None
+    assert registry['2ccf675d3414']['online'] is False
+    assert registry['2ccf675d3414']['active_fault']['code'] == 'COMMUNICATION_LOSS'
+
+
+def test_active_communication_fault_persists_across_conflict_restart(tmp_path, monkeypatch):
+    patch_host(monkeypatch)
+    state = hcm.State(cfg(tmp_path))
+    state.store.record_heartbeat('48b02d87db16', heartbeat(), '192.168.20.31', 15)
+    state.store.conn.execute('UPDATE devices SET last_seen=? WHERE device_id=?', (int(time.time()) - 30, '48b02d87db16'))
+    state.store.conn.commit()
+    state.store.mark_offline_overdue(15, 5)
+    state.store.close()
+
+    restarted = hcm.State(cfg(tmp_path))
+    registry = restarted.snapshot()['status']['registry']
+    rows = restarted.store.conn.execute('SELECT code, active FROM communication_faults WHERE device_id=?', ('48b02d87db16',)).fetchall()
+    restarted.store.close()
+
+    assert registry['48b02d87db16']['active_fault']['code'] == 'COMMUNICATION_LOSS'
+    assert [(row['code'], row['active']) for row in rows] == [('COMMUNICATION_LOSS', 1)]
+
+
+def test_lab1_installer_mode_is_supported_and_preserves_lab_agent_boundary():
+    install_script = (ROOT / '00_Heartbeat/install.sh').read_text()
+    lab1_config = json.loads((ROOT / '00_Heartbeat/config-lab1.json').read_text())
+
+    assert 'lab1) TARGET=lab1; CFG=config-lab1.json ;;' in install_script
+    assert 'homecontrol-lab.service' in install_script
+    assert 'systemctl restart homecontrol-lab.service' not in install_script
+    assert 'hostnamectl' not in install_script
+    assert 'nmcli' not in install_script
+    assert lab1_config['heartbeat_auth_mode'] == 'hmac-sha256'
+    assert lab1_config['heartbeat_auth_secret_file'] == '/etc/hcm-heartbeat/heartbeat-auth.secret'
+
+
+def test_heartbeat_templates_are_fail_closed_for_staged_lab_authentication():
+    for name in ('config-conflict.json', 'config-jetson.json', 'config-lab1.json'):
+        data = json.loads((ROOT / '00_Heartbeat' / name).read_text())
+        assert data['heartbeat_auth_mode'] == 'hmac-sha256'
+        assert data['heartbeat_auth_secret_file'] == '/etc/hcm-heartbeat/heartbeat-auth.secret'

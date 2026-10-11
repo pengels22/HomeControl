@@ -7,6 +7,8 @@
   "peer_timeout_seconds": 15,
   "services": ["ssh"],
   "registry_db": "/var/lib/hcm-heartbeat/registry.sqlite3",
+  "heartbeat_auth_mode": "hmac-sha256",
+  "heartbeat_auth_secret_file": "/etc/hcm-heartbeat/heartbeat-auth.secret",
   "allowed_device_ids": ["48b02d87db16", "2ccf675d3414"],
   "authorized_devices": [
     {

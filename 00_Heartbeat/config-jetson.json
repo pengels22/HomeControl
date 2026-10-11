@@ -5,6 +5,8 @@
   "port": 6004,
   "identity_interface": "eth0",
   "registry_db": "/var/lib/hcm-heartbeat/registry.sqlite3",
+  "heartbeat_auth_mode": "hmac-sha256",
+  "heartbeat_auth_secret_file": "/etc/hcm-heartbeat/heartbeat-auth.secret",
   "conflict_address": "192.168.20.26",
   "conflict_hostname": "conflict",
   "conflict_device_id": "3c53bbf7adb2",
