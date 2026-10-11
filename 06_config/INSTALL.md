@@ -33,6 +33,10 @@ homecontrol deploy --dry-run --release <full-sha>
 
 The preflight command is read-only. It reports confirmed remote facts,
 assumptions, and blockers; it does not transfer artifacts or restart services.
+It must adapt to the existing live hosts: Jetson's Docker container environment
+is discovered from `docker inspect`, Conflict's protected heartbeat config is
+validated with `sudo -n`, and LAB1's installed simulation layout is checked
+without changing role state or physical-output settings.
 
 Preferred managed deployments use `HC_RELEASE_SHA=<full-commit-sha>`. Legacy
 installers still accept `HC_BRANCH` for compatibility, but the unified path must

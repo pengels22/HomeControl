@@ -29,3 +29,6 @@ Jetson, Conflict, or LAB1.
 Run `homecontrol preflight --remote` before the first live deployment. It runs
 read-only SSH checks that identify confirmed facts, assumptions, and blockers
 without transferring release artifacts, writing files, or restarting services.
+The Jetson preflight discovers the actual running Docker container layout and no
+longer assumes `/etc/hcm/hcm.env` exists. Conflict preflight uses `sudo -n` for
+root-protected heartbeat metadata and reports only safe summaries.

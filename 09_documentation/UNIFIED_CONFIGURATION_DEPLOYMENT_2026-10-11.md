@@ -137,10 +137,17 @@ Actual live backup and rollback are adapter-specific:
 - The SSH deployment path is implemented but has only been exercised with mocked
   transports in automated tests during this commit. A live dry-run/verification
   report should be reviewed before first deployment.
-- Jetson container replacement now uses a Docker API helper to clone the
-  inspected container configuration and swap only the application image, but it
-  still must be validated against the actual live `hcm.service` and Docker
-  inspect output before first release.
+- Jetson preflight and replacement now discover the actual Docker layout instead
+  of assuming `/etc/hcm/hcm.env` exists. The Docker API helper clones the
+  inspected container configuration and swaps only the application image, while
+  preserving environment entries, mounts, ports, restart policy, and network
+  attachments.
+- Conflict preflight uses noninteractive `sudo -n` for protected heartbeat
+  metadata and reports only safe summaries such as auth mode, secret file
+  presence/mode, registry integrity, service status, and TCP 6004 availability.
+- LAB1 preflight validates the real `/opt/homecontrol-lab` layout, permanent
+  identity, simulation-only state, disabled physical outputs, and required
+  services without changing role state.
 - Jetson database migrations remain out of scope and require a separately
   approved plan.
 - LAB1 deployment updates only the role helper after confirming the installed

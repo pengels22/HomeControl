@@ -248,15 +248,18 @@ def verify(
     transport = transport or transport_mod.SSHTransport()
     results = []
     for entry in selected:
-        try:
-            result = transport.execute(entry.ssh_alias, "hostname && uname -a", timeout=20)
-        except Exception as exc:
-            results.append({"target": entry.name, "status": FAIL, "detail": str(exc)})
-        else:
-            results.append({"target": entry.name, "status": PASS, "detail": result.stdout.strip()})
+        result = adapters_mod.adapter_for(entry).preflight(transport)
+        results.append(
+            {
+                "target": entry.name,
+                "status": result.status,
+                "detail": "device-specific health and layout verification",
+                "steps": result.steps,
+            }
+        )
     return {
         "created_at": datetime.now(UTC).isoformat(),
-        "verification_scope": "read-only ssh connectivity",
+        "verification_scope": "read-only device health and layout",
         "targets": results,
         "summary": {"status": FAIL if any(item["status"] == FAIL for item in results) else PASS},
     }

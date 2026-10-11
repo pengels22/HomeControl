@@ -48,6 +48,15 @@ class FakeRunner:
         return transport.CommandResult(command, 0, "ok\n", "")
 
 
+def load_script_module(name: str, relative: str):
+    path = ROOT / relative
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_all_device_manifests_validate_and_rmc_is_firmware_only():
     manifests = manifest.load_all_manifests(ROOT / "06_config")
 
@@ -186,6 +195,33 @@ def test_ssh_transport_rejects_host_key_failures():
         tx.execute("conflict", "hostname")
 
 
+def test_ssh_transport_filters_noninteractive_warnings_but_preserves_real_failure():
+    class WarningRunner:
+        def __call__(self, command, *, input=None, timeout=None):
+            return transport.CommandResult(command, 7, "useful stdout\n", "tput: No value for $TERM and no -T specified\nactual failure\n")
+
+    tx = transport.SSHTransport(runner=WarningRunner())
+    with pytest.raises(transport.TransportError) as exc:
+        tx.execute("conflict", "false", step_name="heartbeat_auth_config")
+    text = str(exc.value)
+    assert "target=conflict" in text
+    assert "step=heartbeat_auth_config" in text
+    assert "exit=7" in text
+    assert "actual failure" in text
+    assert "tput" not in text
+
+
+def test_ssh_transport_ignores_post_quantum_warning_on_success():
+    class WarningRunner:
+        def __call__(self, command, *, input=None, timeout=None):
+            return transport.CommandResult(command, 0, "ok\n", "Warning: post-quantum algorithm unavailable\n")
+
+    tx = transport.SSHTransport(runner=WarningRunner())
+    result = tx.execute("jetson", "true")
+    assert result.stdout == "ok"
+    assert "post-quantum" not in result.stderr.lower()
+
+
 def test_live_deploy_uses_single_artifact_and_stops_after_failed_transfer(tmp_path, monkeypatch):
     monkeypatch.setenv("HC_DEPLOY_REPORT_DIR", str(tmp_path))
 
@@ -234,6 +270,32 @@ def test_adapter_dry_run_includes_preservation_checks():
     assert all(step["status"] == "PLANNED" for step in jetson_steps)
 
 
+def test_jetson_preflight_does_not_require_env_file_or_pipe_docker_json_to_heredoc():
+    command = adapters.adapter_for(inventory.inventory()["jetson"])._docker_preflight_command()
+    assert "/etc/hcm/hcm.env" not in command
+    assert "docker inspect hcm-test | python3 - <<'PY'" not in command
+    assert "subprocess.run(['docker','inspect',name]" in command
+    assert "/srv/hcm-data/postgres" in command
+    assert "/run/secrets/postgres_password" in command
+
+
+def test_conflict_preflight_uses_sudo_noninteractive_and_safe_metadata():
+    steps = adapters.adapter_for(inventory.inventory()["conflict"]).preflight_steps()
+    commands = "\n".join(step.command for step in steps)
+    assert "sudo -n" in commands
+    assert "heartbeat_auth_secret_file" in commands
+    assert "print('auth_mode=hmac-sha256 secret_present=true" in commands
+    assert "cat /etc/hcm-heartbeat/config.json" not in commands
+
+
+def test_lab1_layout_preflight_uses_python_hostname_and_file_checks():
+    steps = adapters.adapter_for(inventory.inventory()["lab1"]).preflight_steps()
+    layout = next(step.command for step in steps if step.name == "lab1_agent_layout")
+    assert "socket.gethostname().split('.')[0] == 'lab1'" in layout
+    assert "/opt/homecontrol-lab/lab_agent.py" in layout
+    assert "/opt/homecontrol-lab/state/module.json" in layout
+
+
 def test_rollback_steps_are_adapter_specific():
     by_name = inventory.inventory()
 
@@ -242,8 +304,9 @@ def test_rollback_steps_are_adapter_specific():
     lab1 = adapters.adapter_for(by_name["lab1"]).rollback_steps()
 
     assert any(step.name == "restore_previous_container" for step in jetson)
-    assert any(step.name == "rollback_heartbeat" for step in conflict)
+    assert any(step.name == "rollback_heartbeat_app" for step in conflict)
     assert any(step.name == "restore_role_helper" for step in lab1)
+    assert all("registry.sqlite3" not in step.command for step in conflict)
 
 
 def test_live_deploy_skips_target_already_at_release(tmp_path, monkeypatch):
@@ -270,7 +333,9 @@ def test_live_deploy_skips_target_already_at_release(tmp_path, monkeypatch):
     )
 
     assert report["targets"][0]["status"] == "NO CHANGE"
-    assert all("docker build" not in " ".join(cmd) for cmd in tx.runner.commands)
+    joined_commands = [" ".join(cmd) for cmd in tx.runner.commands]
+    assert any("api/v1/health" in command for command in joined_commands)
+    assert all("docker build" not in command for command in joined_commands)
 
 
 def test_no_change_is_success_and_fleet_continues(tmp_path, monkeypatch):
@@ -329,6 +394,52 @@ def test_preflight_reports_facts_and_blockers():
     assert report["summary"]["status"] == "FAIL"
     assert report["targets"][0]["blockers"]
     assert report["targets"][0]["assumptions"]
+
+
+def test_hcm_docker_clone_preserves_mounts_networks_environment_and_command(monkeypatch):
+    module = load_script_module("hcm_docker_deploy_test", "10_scripts/hcm_docker_deploy.py")
+    captured = {}
+
+    def fake_docker(method, path, body=None, ok=(200, 201, 204, 304)):
+        captured["method"] = method
+        captured["path"] = path
+        captured["body"] = body
+        return {}
+
+    monkeypatch.setattr(module, "docker", fake_docker)
+    source = {
+        "Config": {
+            "Hostname": "abc",
+            "Env": ["HCM_DATABASE_URL=postgres://redacted"],
+            "Cmd": ["python", "-m", "uvicorn", "01_HCM.main:app"],
+            "Entrypoint": None,
+            "Labels": {"homecontrol": "hcm"},
+            "ExposedPorts": {"8080/tcp": {}, "6501/tcp": {}},
+            "WorkingDir": "/opt/HomeControl",
+            "Tty": False,
+            "OpenStdin": False,
+        },
+        "HostConfig": {
+            "Binds": ["/etc/hcm/postgres-password:/run/secrets/postgres_password:ro"],
+            "RestartPolicy": {"Name": "no"},
+            "CapAdd": ["NET_ADMIN"],
+        },
+        "NetworkSettings": {
+            "Networks": {
+                "hcm-control": {"Aliases": ["hcm-test"], "MacAddress": "02:42:ac:13:00:02"},
+                "hcm-internal": {"Aliases": ["hcm-test"]},
+            }
+        },
+    }
+
+    module.create_clone(source, image="homecontrol-hcm:new", name="hcm-test")
+
+    body = captured["body"]
+    assert body["Image"] == "homecontrol-hcm:new"
+    assert body["Env"] == ["HCM_DATABASE_URL=postgres://redacted"]
+    assert body["Cmd"] == ["python", "-m", "uvicorn", "01_HCM.main:app"]
+    assert body["HostConfig"]["Binds"] == ["/etc/hcm/postgres-password:/run/secrets/postgres_password:ro"]
+    assert set(body["NetworkingConfig"]["EndpointsConfig"]) == {"hcm-control", "hcm-internal"}
 
 
 def test_cli_exit_code_helper_flags_failed_reports():
