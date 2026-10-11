@@ -1,6 +1,11 @@
+import asyncio
 import json
 import stat
+import subprocess
+import sys
+import textwrap
 from importlib import import_module
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 import pytest
@@ -145,3 +150,183 @@ def test_handle_command_file_accepts_existing_command_frame(tmp_path):
 
     assert response["accepted"] is True
     assert lab1.load_state(state_path)["role"] == "RCM"
+
+
+def _write_original_lab1_agent(path: Path) -> None:
+    path.write_text(textwrap.dedent(
+        '''
+        import asyncio
+        import json
+        from pathlib import Path
+
+
+        async def send_frame(writer, frame_type, payload, request_id=None):
+            writer.sent.append((frame_type, payload, request_id))
+
+
+        async def session(context, stop):
+            writer = context.writer
+            while not stop.is_set():
+                response = await context.next_response()
+                kind = response["type"]
+                if kind == "command":
+                    await send_frame(
+                        writer,
+                        "command_ack",
+                        {
+                            "ok": False,
+                            "error": "simulation_commands_disabled",
+                        },
+                        response.get("request_id"),
+                    )
+                    print("HCM command rejected: simulation-only", flush=True)
+                    continue
+                stop.set()
+        '''
+    ).lstrip())
+
+
+def _load_patched_lab_agent(path: Path, module_dir: Path):
+    sys.path.insert(0, str(module_dir))
+    spec = spec_from_file_location("patched_lab_agent", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class _Writer:
+    def __init__(self):
+        self.sent = []
+
+
+class _Context:
+    def __init__(self, responses, state_path):
+        self.writer = _Writer()
+        self.responses = list(responses)
+        self.state_path = state_path
+        self.state = None
+
+    async def next_response(self):
+        if self.responses:
+            return self.responses.pop(0)
+        return {"type": "idle"}
+
+
+def test_lab1_agent_patch_applies_and_accepts_set_module_role(tmp_path):
+    target_dir = tmp_path / "opt" / "homecontrol-lab"
+    target_dir.mkdir(parents=True)
+    agent_path = target_dir / "lab_agent.py"
+    state_path = target_dir / "state" / "module.json"
+    state_path.parent.mkdir()
+    state_path.write_text(json.dumps(real_lab1_state()) + "\n")
+    (target_dir / "lab1_role_agent.py").write_text(Path(lab1.__file__).read_text())
+    _write_original_lab1_agent(agent_path)
+
+    result = subprocess.run(
+        ["patch", "-p1", "-i", str(Path("10_scripts/lab1_agent_set_module_role.patch").resolve())],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    module = _load_patched_lab_agent(agent_path, target_dir)
+    context = _Context(
+        [
+            {
+                "type": "command",
+                "request_id": OPERATION_ID,
+                "payload": role_payload("SIM", OPERATION_ID),
+            },
+        ],
+        state_path,
+    )
+    stop = asyncio.Event()
+
+    async def stop_after_command():
+        await module.session(context, stop)
+
+    async def set_stop():
+        while context.responses:
+            await asyncio.sleep(0)
+        stop.set()
+
+    async def run_session():
+        await asyncio.gather(stop_after_command(), set_stop())
+
+    asyncio.run(run_session())
+
+    assert context.writer.sent == [
+        (
+            "command_ack",
+            {
+                "ok": True,
+                "accepted": True,
+                "operation_id": OPERATION_ID,
+                "lab_role": "SIM",
+                "simulation": True,
+                "physical_outputs_enabled": False,
+            },
+            OPERATION_ID,
+        )
+    ]
+    assert lab1.load_state(state_path)["role"] == "SIM"
+    assert context.state["role"] == "SIM"
+
+
+def test_patched_lab1_agent_rejects_non_role_commands(tmp_path):
+    target_dir = tmp_path / "opt" / "homecontrol-lab"
+    target_dir.mkdir(parents=True)
+    agent_path = target_dir / "lab_agent.py"
+    state_path = target_dir / "state" / "module.json"
+    state_path.parent.mkdir()
+    state_path.write_text(json.dumps(real_lab1_state()) + "\n")
+    (target_dir / "lab1_role_agent.py").write_text(Path(lab1.__file__).read_text())
+    _write_original_lab1_agent(agent_path)
+
+    result = subprocess.run(
+        ["patch", "-p1", "-i", str(Path("10_scripts/lab1_agent_set_module_role.patch").resolve())],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    module = _load_patched_lab_agent(agent_path, target_dir)
+    request_id = "22222222-3333-4444-8555-666666666666"
+    context = _Context(
+        [
+            {
+                "type": "command",
+                "request_id": request_id,
+                "payload": {"op": "set_relay", "channel": "A1", "value": True},
+            },
+        ],
+        state_path,
+    )
+    stop = asyncio.Event()
+
+    async def set_stop():
+        while context.responses:
+            await asyncio.sleep(0)
+        stop.set()
+
+    async def run_session():
+        await asyncio.gather(module.session(context, stop), set_stop())
+
+    asyncio.run(run_session())
+
+    assert context.writer.sent == [
+        (
+            "command_ack",
+            {
+                "ok": False,
+                "error": "simulation_commands_disabled",
+            },
+            request_id,
+        )
+    ]
+    assert lab1.load_state(state_path)["role"] == "UNASSIGNED"

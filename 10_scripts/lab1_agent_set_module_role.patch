@@ -1,33 +1,45 @@
 --- a/opt/homecontrol-lab/lab_agent.py
 +++ b/opt/homecontrol-lab/lab_agent.py
-@@
-+from pathlib import Path
-+from lab1_role_agent import RoleCommandError, apply_role_command, load_state, save_state_atomic
-@@
--        return {
--            "ok": False,
--            "accepted": False,
--            "error": "simulation_commands_disabled",
--        }
-+        if payload.get("op") == "set_module_role":
-+            try:
-+                state_path = Path("/opt/homecontrol-lab/state/module.json")
-+                state = load_state(state_path)
-+                response = apply_role_command(
-+                    state,
-+                    payload,
-+                    request_id=message.get("request_id"),
-+                )
-+                save_state_atomic(state_path, state)
-+                return response
-+            except RoleCommandError as exc:
-+                return {
-+                    "ok": False,
-+                    "accepted": False,
-+                    "error": str(exc),
-+                }
-+        return {
-+            "ok": False,
-+            "accepted": False,
-+            "error": "simulation_commands_disabled",
-+        }
+@@ -13,6 +13,33 @@ async def session(context, stop):
+         response = await context.next_response()
+         kind = response["type"]
+         if kind == "command":
++            payload = response["payload"]
++            request_id = response["request_id"]
++            if payload.get("op") == "set_module_role":
++                from lab1_role_agent import RoleCommandError, apply_role_command, load_state, save_state_atomic
++
++                try:
++                    state_path = getattr(context, "state_path", Path("/opt/homecontrol-lab/state/module.json"))
++                    state = load_state(state_path)
++                    ack = apply_role_command(state, payload, request_id=request_id)
++                    save_state_atomic(state_path, state)
++                    if hasattr(context, "state"):
++                        context.state = state
++                    await send_frame(writer, "command_ack", ack, request_id)
++                    print(f"HCM role command accepted: {state['role']}", flush=True)
++                except RoleCommandError as exc:
++                    await send_frame(
++                        writer,
++                        "command_ack",
++                        {
++                            "ok": False,
++                            "accepted": False,
++                            "error": str(exc),
++                        },
++                        request_id,
++                    )
++                    print(f"HCM role command rejected: {exc}", flush=True)
++                continue
+             await send_frame(
+                 writer,
+                 "command_ack",
+@@ -20,7 +47,7 @@ async def session(context, stop):
+                     "ok": False,
+                     "error": "simulation_commands_disabled",
+                 },
+-                response.get("request_id"),
++                request_id,
+             )
+             print("HCM command rejected: simulation-only", flush=True)
+             continue
