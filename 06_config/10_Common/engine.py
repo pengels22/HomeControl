@@ -212,7 +212,7 @@ def deploy(
                 )
                 continue
             adapter = adapters_mod.adapter_for(entry)
-            gate = _predeployment_safety_gate(entry, adapter, transport)
+            gate = _predeployment_safety_gate(entry, adapter, transport, artifact, deployment_id)
             if gate.status != PASS:
                 failed = True
                 targets.append(
@@ -267,6 +267,8 @@ def _predeployment_safety_gate(
     entry: inventory_mod.DeviceInventoryEntry,
     adapter: adapters_mod.BaseAdapter,
     transport: transport_mod.SSHTransport,
+    artifact: artifact_mod.ReleaseArtifact,
+    deployment_id: str,
 ) -> adapters_mod.AdapterResult:
     executed: list[dict[str, Any]] = []
     preflight = adapter.preflight(transport)
@@ -283,6 +285,13 @@ def _predeployment_safety_gate(
             "gate": True,
         }
     )
+    for step in adapter.safety_gate_steps(artifact, deployment_id):
+        try:
+            result = transport.execute(entry.ssh_alias, step.command, timeout=step.timeout, step_name=step.name, read_only=True)
+        except Exception as exc:
+            executed.append({"name": step.name, "status": FAIL, "detail": str(exc), "gate": True})
+            return adapters_mod.AdapterResult(target=entry.name, status=FAIL, steps=executed)
+        executed.append({"name": step.name, "status": PASS, "detail": result.stdout.strip() or step.command, "gate": True})
     return adapters_mod.AdapterResult(target=entry.name, status=PASS if rollback_available else FAIL, steps=executed)
 
 

@@ -119,8 +119,9 @@ Actual live backup and rollback are adapter-specific:
   heartbeat authentication secret. Rollback requires an explicit backup path.
 - Jetson rollback must preserve Docker networks, PostgreSQL USB storage,
   environment files, certificates, watchdogs, and rollback containers. The
-  adapter preserves the previous HCM container as `hcm-rollback-before-deploy`
-  before replacing `hcm-test`.
+  adapter preserves the previous HCM container under a deployment-specific
+  `hcm-rollback-<deployment-id>` name before replacing `hcm-test`; existing
+  rollback containers are never overwritten or deleted automatically.
 - LAB1 rollback must preserve hostname, IP, device identity, simulation-only
   state, physical-output-disabled state, certificates, HMAC secret, and role
   history.
@@ -172,7 +173,9 @@ Fleet-wide live deployment remains a separate explicit operation:
   environment entries, mounts, ports, restart policy, and network attachments.
   It fails closed before stopping `hcm-test` if the current container lacks the
   required HCM Docker networks or API port binding, or if it appears to contain
-  PostgreSQL data storage.
+  PostgreSQL data storage. Rollback containers use deployment-specific names,
+  preserve the previous container identity, and are refused if the target
+  rollback name already exists.
 - Conflict preflight uses noninteractive `sudo -n` for protected heartbeat
   metadata and reports only safe summaries such as auth mode, secret file
   presence/mode, registry integrity, service status, and TCP 6004 availability.

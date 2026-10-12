@@ -79,6 +79,11 @@ def remove_container(name):
     docker("DELETE", f"/containers/{quote(name, safe='')}?force=true", ok=(204, 404))
 
 
+def container_id(info):
+    # type: (Dict[str, Any]) -> str
+    return str(info.get("Id") or "")[:12]
+
+
 def create_clone(source, image, name):
     # type: (Dict[str, Any], str, str) -> None
     validate_clone_source(source)
@@ -175,25 +180,54 @@ def healthcheck(name, url, timeout):
     raise DockerDeployError(f"health check failed for {url}: {last}")
 
 
-def deploy(image, name, rollback_name, health_url, timeout):
-    # type: (str, str, str, Optional[str], int) -> None
+def restore_previous(active_name, rollback_name, health_url, timeout):
+    # type: (str, str, Optional[str], int) -> None
+    errors = []
+    if container_exists(active_name):
+        try:
+            stop_container(active_name)
+        except DockerDeployError as exc:
+            errors.append("stop failed replacement: {}".format(exc))
+        try:
+            remove_container(active_name)
+        except DockerDeployError as exc:
+            errors.append("remove failed replacement: {}".format(exc))
+    if errors:
+        raise DockerDeployError("; ".join(errors))
+    rename_container(rollback_name, active_name)
+    start_container(active_name)
+    healthcheck(active_name, health_url, timeout)
+
+
+def deploy(image, name, rollback_name, health_url, timeout, deployment_id=None):
+    # type: (str, str, str, Optional[str], int, Optional[str]) -> None
     source = inspect_container(name)
     if container_exists(rollback_name):
-        rollback = inspect_container(rollback_name)
-        if rollback.get("Config", {}).get("Image") != source.get("Config", {}).get("Image"):
-            raise DockerDeployError(f"rollback container {rollback_name} exists and does not match current {name}; refusing to overwrite")
-        remove_container(rollback_name)
+        raise DockerDeployError(f"rollback container {rollback_name} already exists; refusing to overwrite recovery point")
     validate_clone_source(source)
+    print(
+        "previous_container name={} id={} image={} rollback_name={} deployment_id={}".format(
+            name,
+            container_id(source),
+            (source.get("Config") or {}).get("Image"),
+            rollback_name,
+            deployment_id or "unspecified",
+        ),
+        flush=True,
+    )
     stop_container(name)
     rename_container(name, rollback_name)
+    rollback = inspect_container(rollback_name)
+    if container_id(rollback) != container_id(source):
+        raise DockerDeployError("rollback container identity mismatch after rename")
+    print("rollback_container name={} id={} verified=true".format(rollback_name, container_id(rollback)), flush=True)
     try:
         create_clone(source, image=image, name=name)
         start_container(name)
         healthcheck(name, health_url, timeout)
+        print("replacement_container name={} image={} health=ok".format(name, image), flush=True)
     except Exception:
-        remove_container(name)
-        rename_container(rollback_name, name)
-        start_container(name)
+        restore_previous(name, rollback_name, health_url, timeout)
         raise
 
 
@@ -215,7 +249,8 @@ def main(argv=None):
     parser.add_argument("action", choices=("deploy", "rollback"))
     parser.add_argument("--image")
     parser.add_argument("--name", default="hcm-test")
-    parser.add_argument("--rollback-name", default="hcm-rollback-before-deploy")
+    parser.add_argument("--rollback-name", required=True)
+    parser.add_argument("--deployment-id")
     parser.add_argument("--health-url", default=None)
     parser.add_argument("--timeout", type=int, default=60)
     args = parser.parse_args(argv)
@@ -223,7 +258,7 @@ def main(argv=None):
         if not args.image:
             parser.error("--image is required for deploy")
         try:
-            deploy(args.image, name=args.name, rollback_name=args.rollback_name, health_url=args.health_url, timeout=args.timeout)
+            deploy(args.image, name=args.name, rollback_name=args.rollback_name, health_url=args.health_url, timeout=args.timeout, deployment_id=args.deployment_id)
         except DockerDeployError as exc:
             print(str(exc), file=sys.stderr)
             return 1

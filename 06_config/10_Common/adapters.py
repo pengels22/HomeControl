@@ -112,13 +112,15 @@ class BaseAdapter:
                     continue
                 if step.name == "transfer_artifact":
                     transport.transfer_file(self.entry.ssh_alias, artifact.path, self.remote_archive_path(artifact), timeout=step.timeout)
+                    detail = step.command
                 else:
-                    transport.execute(self.entry.ssh_alias, step.command, timeout=step.timeout, step_name=step.name)
+                    result = transport.execute(self.entry.ssh_alias, step.command, timeout=step.timeout, step_name=step.name)
+                    detail = result.stdout.strip() or step.command
             except Exception as exc:
                 executed.append(
                     {"name": step.name, "status": "FAIL", "detail": str(exc), "changes_system": step.changes_system}
                 )
-                if changed or step.changes_system:
+                if changed:
                     rollback = self.rollback_after_failure(transport, artifact, deployment_id=deployment_id)
                     executed.extend({"rollback": True, **item} for item in rollback.steps)
                     if rollback.status == "PASS":
@@ -127,7 +129,7 @@ class BaseAdapter:
             if step.changes_system:
                 changed = True
             executed.append(
-                {"name": step.name, "status": "PASS", "detail": step.command, "changes_system": step.changes_system}
+                {"name": step.name, "status": "PASS", "detail": detail, "changes_system": step.changes_system}
             )
         return AdapterResult(target=self.entry.name, status="PASS", steps=executed)
 
@@ -153,6 +155,9 @@ class BaseAdapter:
 
     def rollback_after_failure(self, transport: SSHTransport, artifact: ReleaseArtifact, deployment_id: str | None = None) -> AdapterResult:
         return self._run_rollback_steps(transport, self.rollback_steps(artifact))
+
+    def safety_gate_steps(self, artifact: ReleaseArtifact, deployment_id: str) -> list[AdapterStep]:
+        return []
 
     def _run_rollback_steps(self, transport: SSHTransport, steps: list[AdapterStep]) -> AdapterResult:
         executed: list[dict[str, Any]] = []
@@ -251,13 +256,18 @@ class JetsonDockerAdapter(BaseAdapter):
     def steps(self, artifact: ReleaseArtifact, deployment_id: str | None = None) -> list[AdapterStep]:
         release_dir = self.release_dir(artifact)
         image = f"homecontrol-hcm:{artifact.release}"
+        rollback_name = self._rollback_container_name(deployment_id or artifact.release)
         return super().steps(artifact, deployment_id=deployment_id) + [
             AdapterStep("preflight_docker_layout", self._docker_preflight_command()),
             AdapterStep("build_hcm_image", f"sudo docker build -t {image} -f {release_dir}/06_config/01_HCM/Dockerfile.live {release_dir}", changes_system=True, timeout=600),
-            AdapterStep("replace_hcm_container", f"sudo python3 {release_dir}/10_scripts/hcm_docker_deploy.py deploy --image {image}", changes_system=True, timeout=180),
+            AdapterStep("replace_hcm_container", f"sudo python3 {release_dir}/10_scripts/hcm_docker_deploy.py deploy --image {image} --rollback-name {rollback_name} --deployment-id {deployment_id or artifact.release}", changes_system=True, timeout=180),
             AdapterStep("verify_hcm_api", self._hcm_health_command(), timeout=60),
             AdapterStep("record_release", f"printf '%s\\n' {artifact.release} | sudo tee {self.release_marker()} >/dev/null", changes_system=True),
         ]
+
+    def _rollback_container_name(self, deployment_id: str) -> str:
+        safe = "".join(ch if ch.isalnum() or ch in "-_." else "-" for ch in deployment_id).strip("-")
+        return f"hcm-rollback-{safe}"
 
     def _docker_preflight_command(self) -> str:
         return (
@@ -347,11 +357,21 @@ class JetsonDockerAdapter(BaseAdapter):
     def rollback_steps(self, artifact: ReleaseArtifact | None = None) -> list[AdapterStep]:
         if artifact:
             helper = f"{self.release_dir(artifact)}/10_scripts/hcm_docker_deploy.py"
+            rollback_name = self._rollback_container_name(artifact.release)
         else:
             helper = "/tmp/homecontrol-current/10_scripts/hcm_docker_deploy.py"
+            rollback_name = "hcm-rollback-manual"
         return [
-            AdapterStep("restore_previous_container", f"sudo python3 {helper} rollback", changes_system=True, timeout=180),
+            AdapterStep("restore_previous_container", f"sudo python3 {helper} rollback --rollback-name {rollback_name}", changes_system=True, timeout=180),
             AdapterStep("verify_hcm_api", self._hcm_health_command(), timeout=60),
+        ]
+
+    def safety_gate_steps(self, artifact: ReleaseArtifact, deployment_id: str) -> list[AdapterStep]:
+        rollback_name = self._rollback_container_name(deployment_id)
+        return [
+            AdapterStep("rollback_container_available", f"! sudo -n docker inspect {rollback_name} >/dev/null 2>&1"),
+            AdapterStep("docker_replace_prereqs", "sudo -n docker inspect hcm-test >/dev/null && sudo -n docker inspect hcm-postgres >/dev/null && sudo -n docker network inspect hcm-control >/dev/null && sudo -n docker network inspect hcm-internal >/dev/null"),
+            AdapterStep("docker_storage_available", "df -Pk /var/lib/docker | awk 'NR==2 { print \"available_kb=\"$4; if ($4 < 102400) exit 1 }'"),
         ]
 
 
@@ -390,6 +410,14 @@ class Lab1Adapter(BaseAdapter):
             AdapterStep("lab1_state_safety", "python3 - <<'PY'\nimport json\ns=json.load(open('/opt/homecontrol-lab/state/module.json'))\nassert s.get('device_id') == '2ccf675d3414'\nassert s.get('hostname') == 'lab1'\nassert s.get('simulation') is True\nassert s.get('physical_outputs_enabled') is False\nassert 'role' in s\nPY"),
             AdapterStep("lab1_services", self._lab_services_command()),
             AdapterStep("lab1_heartbeat_client", self._lab_heartbeat_client_command()),
+        ]
+
+    def safety_gate_steps(self, artifact: ReleaseArtifact, deployment_id: str) -> list[AdapterStep]:
+        backup_dir = self._backup_dir(deployment_id)
+        return [
+            AdapterStep("lab1_backup_prereqs", "sudo -n test -f /opt/homecontrol-lab/lab1_role_agent.py && sudo -n test -r /opt/homecontrol-lab/lab1_role_agent.py && sudo -n test -d /opt/homecontrol-lab && sudo -n test -w /opt/homecontrol-lab"),
+            AdapterStep("lab1_backup_unique", f"! sudo -n test -e {backup_dir}"),
+            AdapterStep("lab1_backup_storage", "df -Pk /opt/homecontrol-lab | awk 'NR==2 { print \"available_kb=\"$4; if ($4 < 10240) exit 1 }'"),
         ]
 
     def no_change_health_steps(self) -> list[AdapterStep]:
