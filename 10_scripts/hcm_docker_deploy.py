@@ -79,6 +79,14 @@ def remove_container(name):
     docker("DELETE", f"/containers/{quote(name, safe='')}?force=true", ok=(204, 404))
 
 
+def connect_network(container, network_name, endpoint):
+    # type: (str, str, Dict[str, Any]) -> None
+    body = {"Container": container}
+    if endpoint:
+        body["EndpointConfig"] = endpoint
+    docker("POST", f"/networks/{quote(network_name, safe='')}/connect", body=body, ok=(200, 204))
+
+
 def container_id(info):
     # type: (Dict[str, Any]) -> str
     return str(info.get("Id") or "")[:12]
@@ -110,8 +118,18 @@ def create_clone(source, image, name):
             endpoint["Aliases"] = network["Aliases"]
         if network.get("MacAddress"):
             endpoint["MacAddress"] = network["MacAddress"]
-        # Do not pin dynamic IPs unless the live container already had a user-specified static IPAM config.
+        if network.get("DriverOpts"):
+            endpoint["DriverOpts"] = network["DriverOpts"]
+        if network.get("Links"):
+            endpoint["Links"] = network["Links"]
+        # Preserve only explicitly configured IPAM. Do not pin dynamic IPAddress values.
+        if network.get("IPAMConfig"):
+            endpoint["IPAMConfig"] = network["IPAMConfig"]
         endpoints[network_name] = endpoint
+    if not endpoints:
+        raise DockerDeployError("current container has no Docker networks to clone")
+    primary_network = "hcm-control" if "hcm-control" in endpoints else sorted(endpoints)[0]
+    additional_networks = [(network_name, endpoints[network_name]) for network_name in sorted(endpoints) if network_name != primary_network]
     config["Image"] = image
     body = {
         "Hostname": config.get("Hostname"),
@@ -134,10 +152,15 @@ def create_clone(source, image, name):
         "StopTimeout": config.get("StopTimeout"),
         "Shell": config.get("Shell"),
         "HostConfig": host_config,
-        "NetworkingConfig": {"EndpointsConfig": endpoints},
+        "NetworkingConfig": {"EndpointsConfig": {primary_network: endpoints[primary_network]}},
     }
     body = {key: value for key, value in body.items() if value is not None}
     docker("POST", f"/containers/create?name={quote(name)}", body=body, ok=(201,))
+    for network_name, endpoint in additional_networks:
+        try:
+            connect_network(name, network_name, endpoint)
+        except DockerDeployError as exc:
+            raise DockerDeployError("failure connecting replacement container {} to network {}: {}".format(name, network_name, exc))
 
 
 def validate_clone_source(source):

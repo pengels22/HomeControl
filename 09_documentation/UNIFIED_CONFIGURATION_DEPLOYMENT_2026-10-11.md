@@ -181,6 +181,19 @@ health is reported as failed.
 
 ## Jetson Recovery Safety
 
+During the first live Jetson-only deployment attempt for deployment
+`hc-20261012T031811Z-2ce2d59a`, Docker rejected replacement creation with:
+
+```text
+HTTP 400: Container cannot be connected to network endpoints: hcm-control, hcm-internal
+```
+
+The helper restored the original `hcm-test` container, confirmed health, and
+left `homecontrol-hcm:roles` running. Subsequent independent verification
+passed. The compatibility fix is to create the replacement container attached
+to one supported network first, then attach additional required networks through
+Docker's network-connect API before starting the application.
+
 The Jetson HCM deployment helper records the immutable Docker ID of the
 currently running `hcm-test` container before any mutation. It refuses to start
 if the deployment-specific rollback container name already exists. The
@@ -198,6 +211,10 @@ recoverable operation:
   replacement path.
 - Existing rollback containers are treated as protected recovery points and are
   never overwritten as part of a later deployment.
+- A failed `replace_hcm_container` step does not trigger a second framework
+  rollback after the helper has handled or classified the container state. The
+  deployment remains `FAIL`; successful internal recovery is not reported as a
+  successful deployment.
 
 If the helper cannot prove whether `hcm-test` or the rollback name refers to the
 original container, it stops with a manual-intervention error rather than
@@ -216,6 +233,13 @@ Manual Jetson rollback uses the deployment record's ID to restore
 `hcm-rollback-manual` or any name derived from the release SHA. If the report is
 missing, has multiple Jetson entries, is a dry run, or does not show a completed
 `replace_hcm_container` step, rollback is rejected before mutation.
+
+The clone operation preserves the inspected container configuration, published
+ports, mounts, environment, command/entrypoint, restart policy, security-related
+host config, aliases, MAC address, driver options, links, and explicit IPAM
+settings. It does not copy Docker-assigned dynamic `IPAddress` values into the
+replacement request and does not invent static addresses. All required networks
+must be attached before the replacement is started.
 
 ## Conflict Backup And Rollback
 
@@ -321,14 +345,16 @@ Fleet-wide live deployment remains a separate explicit operation:
   `hcm-test` port bindings. The Docker API helper clones the inspected container
   configuration and swaps only the application image, while preserving
   environment entries, mounts, ports, restart policy, and network attachments.
-  It fails closed before stopping `hcm-test` if the current container lacks the
-  required HCM Docker networks or API port binding, or if it appears to contain
-  PostgreSQL data storage. Rollback containers use deployment-specific names,
-  preserve the previous container identity, and are refused if the target
-  rollback name already exists. Failed swaps inspect both `hcm-test` and the
-  deployment rollback name by immutable Docker ID before attempting recovery; an
-  ambiguous or mismatched identity requires manual intervention instead of
-  deleting an unidentified container.
+  Replacement creation now attaches one Docker network in the container-create
+  request and connects additional required networks before start for Jetson
+  Docker API compatibility. It fails closed before stopping `hcm-test` if the
+  current container lacks the required HCM Docker networks or API port binding,
+  or if it appears to contain PostgreSQL data storage. Rollback containers use
+  deployment-specific names, preserve the previous container identity, and are
+  refused if the target rollback name already exists. Failed swaps inspect both
+  `hcm-test` and the deployment rollback name by immutable Docker ID before
+  attempting recovery; an ambiguous or mismatched identity requires manual
+  intervention instead of deleting an unidentified container.
 - Conflict preflight uses noninteractive `sudo -n` for protected heartbeat
   metadata and reports only safe summaries such as auth mode, secret file
   presence/mode, registry integrity, service status, and TCP 6004 availability.

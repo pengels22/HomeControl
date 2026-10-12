@@ -120,7 +120,7 @@ class BaseAdapter:
                 executed.append(
                     {"name": step.name, "status": "FAIL", "detail": str(exc), "changes_system": step.changes_system}
                 )
-                if changed:
+                if changed and self.framework_rollback_needed(step, exc):
                     rollback = self.rollback_after_failure(transport, artifact, deployment_id=deployment_id)
                     executed.extend({"rollback": True, **item} for item in rollback.steps)
                     if rollback.status == "PASS":
@@ -158,6 +158,9 @@ class BaseAdapter:
 
     def rollback_after_failure(self, transport: SSHTransport, artifact: ReleaseArtifact, deployment_id: str | None = None) -> AdapterResult:
         return self._run_rollback_steps(transport, self.rollback_steps(artifact))
+
+    def framework_rollback_needed(self, step: AdapterStep, exc: Exception) -> bool:
+        return True
 
     def rollback_steps_for_deployment(self, deployment_id: str, release: str) -> list[AdapterStep]:
         artifact = ReleaseArtifact(release=release, path=Path("/tmp/homecontrol-manual-rollback.tar.gz"), sha256="manual", metadata_path=Path("/tmp/homecontrol-manual-rollback.json"))
@@ -448,6 +451,16 @@ class JetsonDockerAdapter(BaseAdapter):
             AdapterStep("restore_previous_container", f"sudo python3 {helper} rollback --rollback-name {rollback_name}", changes_system=True, timeout=180),
             AdapterStep("verify_hcm_api", self._hcm_health_command(), timeout=60),
         ]
+
+    def rollback_after_failure(self, transport: SSHTransport, artifact: ReleaseArtifact, deployment_id: str | None = None) -> AdapterResult:
+        if not deployment_id:
+            return AdapterResult(target=self.entry.name, status="FAIL", steps=[{"name": "rollback_context", "status": "FAIL", "detail": "missing deployment_id for Jetson rollback", "changes_system": False}])
+        return self._run_rollback_steps(transport, self.rollback_steps_for_deployment(deployment_id, artifact.release))
+
+    def framework_rollback_needed(self, step: AdapterStep, exc: Exception) -> bool:
+        if step.name == "replace_hcm_container":
+            return False
+        return True
 
     def safety_gate_steps(self, artifact: ReleaseArtifact, deployment_id: str) -> list[AdapterStep]:
         rollback_name = self._rollback_container_name(deployment_id)

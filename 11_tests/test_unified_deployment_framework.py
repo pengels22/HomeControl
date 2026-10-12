@@ -1212,12 +1212,10 @@ def test_preflight_reports_facts_and_blockers():
 
 def test_hcm_docker_clone_preserves_mounts_networks_environment_and_command(monkeypatch):
     module = load_script_module("hcm_docker_deploy_test", "10_scripts/hcm_docker_deploy.py")
-    captured = {}
+    calls = []
 
     def fake_docker(method, path, body=None, ok=(200, 201, 204, 304)):
-        captured["method"] = method
-        captured["path"] = path
-        captured["body"] = body
+        calls.append((method, path, body))
         return {}
 
     monkeypatch.setattr(module, "docker", fake_docker)
@@ -1242,21 +1240,53 @@ def test_hcm_docker_clone_preserves_mounts_networks_environment_and_command(monk
         },
         "NetworkSettings": {
             "Networks": {
-                "hcm-control": {"Aliases": ["hcm-test"], "MacAddress": "02:42:ac:13:00:02"},
-                "hcm-internal": {"Aliases": ["hcm-test"]},
+                "hcm-control": {"Aliases": ["hcm-test"], "MacAddress": "02:42:ac:13:00:02", "IPAddress": "172.19.0.2"},
+                "hcm-internal": {"Aliases": ["hcm-test"], "IPAMConfig": {"IPv4Address": "172.18.0.9"}},
             }
         },
     }
 
     module.create_clone(source, image="homecontrol-hcm:new", name="hcm-test")
 
-    body = captured["body"]
+    create = next(call for call in calls if call[1].startswith("/containers/create"))
+    connect = next(call for call in calls if call[1] == "/networks/hcm-internal/connect")
+    body = create[2]
     assert body["Image"] == "homecontrol-hcm:new"
     assert body["Env"] == ["HCM_DATABASE_URL=postgres://redacted"]
     assert body["Cmd"] == ["python", "-m", "uvicorn", "01_HCM.main:app"]
     assert body["HostConfig"]["Binds"] == ["/etc/hcm/postgres-password:/run/secrets/postgres_password:ro"]
     assert body["HostConfig"]["PortBindings"]["8080/tcp"][0]["HostIp"] == "192.168.20.27"
-    assert set(body["NetworkingConfig"]["EndpointsConfig"]) == {"hcm-control", "hcm-internal"}
+    assert set(body["NetworkingConfig"]["EndpointsConfig"]) == {"hcm-control"}
+    assert body["NetworkingConfig"]["EndpointsConfig"]["hcm-control"]["Aliases"] == ["hcm-test"]
+    assert "IPAddress" not in body["NetworkingConfig"]["EndpointsConfig"]["hcm-control"]
+    assert connect[2]["Container"] == "hcm-test"
+    assert connect[2]["EndpointConfig"]["Aliases"] == ["hcm-test"]
+    assert connect[2]["EndpointConfig"]["IPAMConfig"] == {"IPv4Address": "172.18.0.9"}
+
+
+def test_hcm_docker_clone_reports_additional_network_connect_failure(monkeypatch):
+    module = load_script_module("hcm_docker_deploy_connect_fail_test", "10_scripts/hcm_docker_deploy.py")
+    calls = []
+
+    def fake_docker(method, path, body=None, ok=(200, 201, 204, 304)):
+        calls.append((method, path, body))
+        if path == "/networks/hcm-internal/connect":
+            raise module.DockerDeployError("HTTP 400: connect failed")
+        return {}
+
+    monkeypatch.setattr(module, "docker", fake_docker)
+    source = {
+        "Config": {"Image": "homecontrol-hcm:old", "Cmd": ["run"]},
+        "HostConfig": {"PortBindings": {"8080/tcp": [{"HostIp": "192.168.20.27", "HostPort": "8080"}]}},
+        "Mounts": [],
+        "NetworkSettings": {"Networks": {"hcm-control": {}, "hcm-internal": {}}},
+    }
+
+    with pytest.raises(module.DockerDeployError, match="failure connecting replacement container hcm-test to network hcm-internal"):
+        module.create_clone(source, image="homecontrol-hcm:new", name="hcm-test")
+
+    assert any(path.startswith("/containers/create") for _, path, _ in calls)
+    assert any(path == "/networks/hcm-internal/connect" for _, path, _ in calls)
 
 
 def test_hcm_docker_clone_rejects_postgres_data_mount_and_missing_networks():
@@ -1375,6 +1405,97 @@ def test_safety_gate_checks_adapter_read_only_steps(tmp_path, monkeypatch):
     joined = [" ".join(command) for command in tx.runner.commands]
     assert not any("scp" == command[0] for command in tx.runner.commands)
     assert not any("systemctl restart homecontrol-lab.service" in command for command in joined)
+
+
+def test_jetson_replace_failure_with_internal_recovery_does_not_attempt_duplicate_framework_rollback(tmp_path, monkeypatch):
+    fake_artifact = artifact.ReleaseArtifact(
+        release="6" * 40,
+        path=tmp_path / "homecontrol.tar.gz",
+        sha256="abc123",
+        metadata_path=tmp_path / "homecontrol.json",
+    )
+    fake_artifact.path.write_text("artifact")
+    fake_artifact.metadata_path.write_text("{}")
+    monkeypatch.setattr(engine.artifact_mod, "create_release_artifact", lambda repo_root, release, output_dir: fake_artifact)
+
+    class JetsonReplaceRecoveredRunner(FakeRunner):
+        def __call__(self, command, *, input=None, timeout=None):
+            self.commands.append(command)
+            joined = " ".join(command)
+            if "hcm_docker_deploy.py deploy" in joined:
+                return transport.CommandResult(
+                    command,
+                    1,
+                    "",
+                    "failure creating replacement container hcm-test image homecontrol-hcm:roles: HTTP 400: Container cannot be connected to network endpoints: hcm-control, hcm-internal; recovery=original_container_restored_from_hcm-rollback-hc-20261012T031811Z-2ce2d59a_id_abc123_health=ok",
+                )
+            return transport.CommandResult(command, 0, "ok\n", "")
+
+    tx = transport.SSHTransport(runner=JetsonReplaceRecoveredRunner())
+
+    report = engine.deploy(
+        repo_root=ROOT,
+        release="6" * 40,
+        target="jetson",
+        dry_run=False,
+        transport=tx,
+        run_tests=False,
+    )
+
+    joined = [" ".join(command) for command in tx.runner.commands]
+    assert report["targets"][0]["status"] == "FAIL"
+    assert report["summary"]["status"] == "FAIL"
+    assert not any(step.get("rollback") for step in report["targets"][0]["steps"])
+    assert sum("hcm_docker_deploy.py rollback" in command for command in joined) == 0
+    assert any("hcm-postgres" in command for command in joined)
+    assert not any("rm hcm-postgres" in command or "stop hcm-postgres" in command for command in joined)
+
+
+def test_jetson_post_replace_verification_failure_uses_deployment_specific_framework_rollback(tmp_path, monkeypatch):
+    fake_artifact = artifact.ReleaseArtifact(
+        release="7" * 40,
+        path=tmp_path / "homecontrol.tar.gz",
+        sha256="abc123",
+        metadata_path=tmp_path / "homecontrol.json",
+    )
+    fake_artifact.path.write_text("artifact")
+    fake_artifact.metadata_path.write_text("{}")
+    monkeypatch.setattr(engine.artifact_mod, "create_release_artifact", lambda repo_root, release, output_dir: fake_artifact)
+
+    class JetsonVerifyFailureRunner(FakeRunner):
+        def __init__(self):
+            super().__init__()
+            self.replaced = False
+            self.failed = False
+
+        def __call__(self, command, *, input=None, timeout=None):
+            self.commands.append(command)
+            joined = " ".join(command)
+            if "hcm_docker_deploy.py deploy" in joined:
+                self.replaced = True
+            if self.replaced and not self.failed and "api/v1/health" in joined:
+                self.failed = True
+                return transport.CommandResult(command, 1, "", "health failed after replacement")
+            return transport.CommandResult(command, 0, "ok\n", "")
+
+    tx = transport.SSHTransport(runner=JetsonVerifyFailureRunner())
+
+    report = engine.deploy(
+        repo_root=ROOT,
+        release="7" * 40,
+        target="jetson",
+        dry_run=False,
+        transport=tx,
+        run_tests=False,
+    )
+
+    joined = [" ".join(command) for command in tx.runner.commands]
+    assert report["targets"][0]["status"] == "ROLLED BACK"
+    assert report["summary"]["status"] == "FAIL"
+    rollback_commands = [command for command in joined if "hcm_docker_deploy.py rollback" in command]
+    assert len(rollback_commands) == 1
+    assert "--rollback-name hcm-rollback-hc-" in rollback_commands[0]
+    assert "hcm-rollback-" + "7" * 40 not in rollback_commands[0]
 
 
 def test_hcm_docker_deploy_rolls_back_when_health_check_fails(monkeypatch):
