@@ -30,6 +30,10 @@ import sys
 
 conn = sqlite3.connect(sys.argv[1])
 try:
+    integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+    if integrity != "ok":
+        raise SystemExit("registry integrity_check={}".format(integrity))
+    print("registry integrity: ok")
     for table in ("authorized_devices", "devices", "communication_faults", "heartbeat_events"):
         try:
             count = conn.execute("SELECT COUNT(*) FROM {}".format(table)).fetchone()[0]

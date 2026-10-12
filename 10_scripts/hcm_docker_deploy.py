@@ -84,6 +84,19 @@ def container_id(info):
     return str(info.get("Id") or "")[:12]
 
 
+def full_container_id(info):
+    # type: (Dict[str, Any]) -> str
+    return str(info.get("Id") or "")
+
+
+def inspect_optional(name):
+    # type: (str) -> Optional[Dict[str, Any]]
+    try:
+        return inspect_container(name)
+    except DockerDeployError:
+        return None
+
+
 def create_clone(source, image, name):
     # type: (Dict[str, Any], str, str) -> None
     validate_clone_source(source)
@@ -180,30 +193,64 @@ def healthcheck(name, url, timeout):
     raise DockerDeployError(f"health check failed for {url}: {last}")
 
 
-def restore_previous(active_name, rollback_name, health_url, timeout):
-    # type: (str, str, Optional[str], int) -> None
-    errors = []
-    if container_exists(active_name):
+def recover_original_container(active_name, rollback_name, original_id, health_url, timeout):
+    # type: (str, str, str, Optional[str], int) -> str
+    active = inspect_optional(active_name)
+    rollback = inspect_optional(rollback_name)
+    active_id = full_container_id(active) if active else None
+    rollback_id = full_container_id(rollback) if rollback else None
+
+    if active_id == original_id:
         try:
-            stop_container(active_name)
+            start_container(active_name)
+            healthcheck(active_name, health_url, timeout)
         except DockerDeployError as exc:
-            errors.append("stop failed replacement: {}".format(exc))
+            raise DockerDeployError("failure restoring the original container already at {}: {}".format(active_name, exc))
+        return "original_container_already_named_{}_id_{}_health=ok".format(active_name, container_id(active))
+
+    if rollback_id == original_id:
+        if active is not None:
+            if active_id:
+                try:
+                    stop_container(active_name)
+                except DockerDeployError as exc:
+                    raise DockerDeployError("failure restoring the original container: could not stop replacement {} id {}: {}".format(active_name, container_id(active), exc))
+                try:
+                    remove_container(active_name)
+                except DockerDeployError as exc:
+                    raise DockerDeployError("failure restoring the original container: could not remove replacement {} id {}: {}".format(active_name, container_id(active), exc))
+            else:
+                raise DockerDeployError("manual intervention required: {} exists with no inspectable container ID; refusing removal".format(active_name))
         try:
-            remove_container(active_name)
+            rename_container(rollback_name, active_name)
+            start_container(active_name)
+            healthcheck(active_name, health_url, timeout)
         except DockerDeployError as exc:
-            errors.append("remove failed replacement: {}".format(exc))
-    if errors:
-        raise DockerDeployError("; ".join(errors))
-    rename_container(rollback_name, active_name)
-    start_container(active_name)
-    healthcheck(active_name, health_url, timeout)
+            raise DockerDeployError("failure restoring the original container from {}: {}".format(rollback_name, exc))
+        return "original_container_restored_from_{}_id_{}_health=ok".format(rollback_name, container_id(rollback))
+
+    if active is None and rollback is None:
+        raise DockerDeployError("manual intervention required: original container id {} is not present as {} or {}".format(original_id[:12], active_name, rollback_name))
+    raise DockerDeployError(
+        "manual intervention required: ambiguous container identity after failure; "
+        "{} id={}, {} id={}, expected original id {}; refusing destructive cleanup".format(
+            active_name,
+            container_id(active) if active else "missing",
+            rollback_name,
+            container_id(rollback) if rollback else "missing",
+            original_id[:12],
+        )
+    )
 
 
 def deploy(image, name, rollback_name, health_url, timeout, deployment_id=None):
     # type: (str, str, str, Optional[str], int, Optional[str]) -> None
     source = inspect_container(name)
+    source_id = full_container_id(source)
+    if not source_id:
+        raise DockerDeployError("current container {} has no inspectable immutable ID".format(name))
     if container_exists(rollback_name):
-        raise DockerDeployError(f"rollback container {rollback_name} already exists; refusing to overwrite recovery point")
+        raise DockerDeployError("rollback container {} already exists; refusing to overwrite recovery point".format(rollback_name))
     validate_clone_source(source)
     print(
         "previous_container name={} id={} image={} rollback_name={} deployment_id={}".format(
@@ -215,30 +262,69 @@ def deploy(image, name, rollback_name, health_url, timeout, deployment_id=None):
         ),
         flush=True,
     )
-    stop_container(name)
-    rename_container(name, rollback_name)
-    rollback = inspect_container(rollback_name)
-    if container_id(rollback) != container_id(source):
-        raise DockerDeployError("rollback container identity mismatch after rename")
-    print("rollback_container name={} id={} verified=true".format(rollback_name, container_id(rollback)), flush=True)
     try:
-        create_clone(source, image=image, name=name)
-        start_container(name)
-        healthcheck(name, health_url, timeout)
+        try:
+            stop_container(name)
+        except DockerDeployError as exc:
+            raise DockerDeployError("failure stopping original container {} id {}: {}".format(name, container_id(source), exc))
+        try:
+            rename_container(name, rollback_name)
+        except DockerDeployError as exc:
+            raise DockerDeployError("failure renaming original container {} id {} to {}: {}".format(name, container_id(source), rollback_name, exc))
+        rollback = inspect_container(rollback_name)
+        if full_container_id(rollback) != source_id:
+            raise DockerDeployError(
+                "rollback container identity mismatch after rename: {} id {} != expected {}".format(
+                    rollback_name,
+                    container_id(rollback),
+                    source_id[:12],
+                )
+            )
+        print("rollback_container name={} id={} verified=true".format(rollback_name, container_id(rollback)), flush=True)
+        try:
+            create_clone(source, image=image, name=name)
+        except DockerDeployError as exc:
+            raise DockerDeployError("failure creating replacement container {} image {}: {}".format(name, image, exc))
+        try:
+            start_container(name)
+        except DockerDeployError as exc:
+            raise DockerDeployError("failure starting replacement container {} image {}: {}".format(name, image, exc))
+        try:
+            healthcheck(name, health_url, timeout)
+        except DockerDeployError as exc:
+            raise DockerDeployError("failure verifying replacement health for {} image {}: {}".format(name, image, exc))
         print("replacement_container name={} image={} health=ok".format(name, image), flush=True)
-    except Exception:
-        restore_previous(name, rollback_name, health_url, timeout)
-        raise
+    except DockerDeployError as exc:
+        try:
+            recovery = recover_original_container(name, rollback_name, source_id, health_url, timeout)
+        except DockerDeployError as recovery_exc:
+            raise DockerDeployError("{}; recovery_failed={}".format(exc, recovery_exc))
+        raise DockerDeployError("{}; recovery={}".format(exc, recovery))
 
 
 def rollback(name, rollback_name, health_url, timeout):
     # type: (str, str, Optional[str], int) -> None
     if not container_exists(rollback_name):
-        raise DockerDeployError(f"rollback container {rollback_name} is missing")
+        raise DockerDeployError("rollback container {} is missing".format(rollback_name))
+    rollback_info = inspect_container(rollback_name)
+    rollback_id = full_container_id(rollback_info)
+    if not rollback_id:
+        raise DockerDeployError("rollback container {} has no inspectable immutable ID".format(rollback_name))
     if container_exists(name):
+        active = inspect_container(name)
+        active_id = full_container_id(active)
+        if active_id == rollback_id:
+            start_container(name)
+            healthcheck(name, health_url, timeout)
+            return
+        if not active_id:
+            raise DockerDeployError("manual intervention required: {} exists with no inspectable container ID; refusing removal".format(name))
         stop_container(name)
         remove_container(name)
     rename_container(rollback_name, name)
+    restored = inspect_container(name)
+    if full_container_id(restored) != rollback_id:
+        raise DockerDeployError("restored container identity mismatch after rollback")
     start_container(name)
     healthcheck(name, health_url, timeout)
 

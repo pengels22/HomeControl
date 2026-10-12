@@ -11,14 +11,23 @@ stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 dest="${HC_HEARTBEAT_BACKUP_DIR:-/var/backups/homecontrol-heartbeat/${target}-${stamp}}"
 config="${HC_HEARTBEAT_CONFIG:-/etc/hcm-heartbeat/config.json}"
 db="${HC_HEARTBEAT_DB:-/var/lib/hcm-heartbeat/registry.sqlite3}"
+release_marker="${HC_HEARTBEAT_RELEASE_MARKER:-/var/lib/hcm-heartbeat/homecontrol-release}"
+require_app_backup="${HC_REQUIRE_APP_BACKUP:-1}"
 
 if [ "$(id -u)" -ne 0 ]; then
   if [ "${HC_ALLOW_NONROOT:-0}" != "1" ]; then
     echo "run with sudo so root-owned heartbeat files can be copied" >&2
     exit 1
   fi
+  if [ "${HC_REQUIRE_APP_BACKUP:-}" = "" ]; then
+    require_app_backup=0
+  fi
 fi
 
+if [ -e "$dest" ]; then
+  echo "backup destination already exists: $dest" >&2
+  exit 1
+fi
 mkdir -p "$dest"
 chmod 0700 "$dest"
 
@@ -34,6 +43,20 @@ copy_if_present /usr/local/lib/hcm-heartbeat/hcm_heartbeat.py
 copy_if_present /usr/local/lib/hcm-heartbeat/homecontrol_identity.py
 copy_if_present /usr/local/bin/hcm-heartbeat
 copy_if_present /etc/systemd/system/hcm-heartbeat.service
+
+for required in hcm_heartbeat.py homecontrol_identity.py hcm-heartbeat hcm-heartbeat.service; do
+  if [ "$require_app_backup" = "1" ] && [ ! -e "$dest/$required" ]; then
+    echo "incomplete heartbeat application backup: missing $required" >&2
+    exit 1
+  fi
+done
+
+if [ -f "$release_marker" ]; then
+  cp -a "$release_marker" "$dest/homecontrol-release"
+  cmp -s "$release_marker" "$dest/homecontrol-release"
+else
+  : >"$dest/homecontrol-release.absent"
+fi
 
 if [ -e "$db" ]; then
   python3 - "$db" "${dest}/registry.sqlite3" <<'PY'
@@ -61,6 +84,38 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl --no-pager cat hcm-heartbeat.service >"${dest}/hcm-heartbeat.service.cat" 2>/dev/null || true
   systemctl --no-pager status hcm-heartbeat.service >"${dest}/hcm-heartbeat.service.status" 2>/dev/null || true
 fi
+
+{
+  for path in \
+    "$config" \
+    /usr/local/lib/hcm-heartbeat/hcm_heartbeat.py \
+    /usr/local/lib/hcm-heartbeat/homecontrol_identity.py \
+    /usr/local/bin/hcm-heartbeat \
+    /etc/systemd/system/hcm-heartbeat.service
+  do
+    if [ -e "$path" ]; then
+      python3 - "$path" <<'PY'
+import os
+import pwd
+import grp
+import stat
+import sys
+
+path = sys.argv[1]
+st = os.stat(path)
+try:
+    user = pwd.getpwuid(st.st_uid).pw_name
+except KeyError:
+    user = str(st.st_uid)
+try:
+    group = grp.getgrgid(st.st_gid).gr_name
+except KeyError:
+    group = str(st.st_gid)
+print("{}:{} {:o} {}".format(user, group, stat.S_IMODE(st.st_mode), path))
+PY
+    fi
+  done
+} >"${dest}/manifest.txt"
 
 cat >"${dest}/RESTORE_NOTES.txt" <<EOF
 Heartbeat backup for ${target}

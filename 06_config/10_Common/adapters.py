@@ -176,10 +176,10 @@ class ConflictAdapter(BaseAdapter):
 
     def steps(self, artifact: ReleaseArtifact, deployment_id: str | None = None) -> list[AdapterStep]:
         release_dir = self.release_dir(artifact)
-        backup_dir = f"/var/backups/homecontrol-heartbeat/app-rollback-{artifact.release}"
+        backup_dir = self._backup_dir(deployment_id or artifact.release)
         return super().steps(artifact, deployment_id=deployment_id) + [
             AdapterStep("preflight_auth", "sudo -n python3 - <<'PY'\nimport json,os,stat\ncfg=json.load(open('/etc/hcm-heartbeat/config.json'))\nassert cfg.get('heartbeat_auth_mode') == 'hmac-sha256'\npath=cfg.get('heartbeat_auth_secret_file')\nassert path and os.path.exists(path)\nmode=stat.S_IMODE(os.stat(path).st_mode)\nassert mode == 0o600, oct(mode)\nprint('auth_mode=hmac-sha256 secret_present=true secret_mode=0600')\nPY"),
-            AdapterStep("online_sqlite_backup", f"sudo sh -c 'HC_HEARTBEAT_BACKUP_DIR={backup_dir} {release_dir}/10_scripts/heartbeat_backup.sh conflict >/tmp/homecontrol-heartbeat-backup-path && ln -sfn {backup_dir} /var/backups/homecontrol-heartbeat/homecontrol-deploy-rollback'", changes_system=True, timeout=120),
+            AdapterStep("backup_heartbeat_app", self._conflict_backup_command(backup_dir, release_dir), changes_system=True, timeout=120),
             AdapterStep("install_heartbeat_skip_start", f"cd {release_dir}/00_Heartbeat && sudo HC_SKIP_START=1 ./install.sh conflict", changes_system=True, timeout=120),
             AdapterStep("restart_heartbeat", "sudo systemctl restart hcm-heartbeat.service", changes_system=True, timeout=60),
             AdapterStep("verify_heartbeat", self._heartbeat_verify_command(script=f"{release_dir}/10_scripts/heartbeat_verify_readonly.sh"), timeout=60),
@@ -204,12 +204,71 @@ class ConflictAdapter(BaseAdapter):
         ]
 
     def rollback_steps(self, artifact: ReleaseArtifact | None = None) -> list[AdapterStep]:
-        backup_dir = f"/var/backups/homecontrol-heartbeat/app-rollback-{artifact.release}" if artifact else "/var/backups/homecontrol-heartbeat/homecontrol-deploy-rollback"
+        backup_dir = self._backup_dir(artifact.release) if artifact else "/var/backups/homecontrol-heartbeat/homecontrol-deploy-rollback"
+        verify = self._heartbeat_verify_command(script=f"{self.release_dir(artifact)}/10_scripts/heartbeat_verify_readonly.sh") if artifact else self._heartbeat_service_command()
         return [
             AdapterStep("app_backup_present", f"sudo -n test -d {backup_dir}"),
-            AdapterStep("rollback_heartbeat_app", f"sudo sh -c 'set -e; b={backup_dir}; systemctl stop hcm-heartbeat.service; [ -e \"$b/hcm_heartbeat.py\" ] && install -m 755 \"$b/hcm_heartbeat.py\" /usr/local/lib/hcm-heartbeat/hcm_heartbeat.py; [ -e \"$b/homecontrol_identity.py\" ] && install -m 644 \"$b/homecontrol_identity.py\" /usr/local/lib/hcm-heartbeat/homecontrol_identity.py; [ -e \"$b/hcm-heartbeat\" ] && install -m 755 \"$b/hcm-heartbeat\" /usr/local/bin/hcm-heartbeat; [ -e \"$b/hcm-heartbeat.service\" ] && install -m 644 \"$b/hcm-heartbeat.service\" /etc/systemd/system/hcm-heartbeat.service; systemctl daemon-reload; systemctl restart hcm-heartbeat.service'", changes_system=True, timeout=120),
-            AdapterStep("verify_heartbeat", self._heartbeat_service_command(), timeout=60),
+            AdapterStep("rollback_heartbeat_app", self._conflict_restore_command(backup_dir), changes_system=True, timeout=120),
+            AdapterStep("verify_heartbeat", verify, timeout=60),
         ]
+
+    def rollback_after_failure(self, transport: SSHTransport, artifact: ReleaseArtifact, deployment_id: str | None = None) -> AdapterResult:
+        backup_dir = self._backup_dir(deployment_id or artifact.release)
+        return self._run_rollback_steps(
+            transport,
+            [
+                AdapterStep("app_backup_present", f"sudo -n test -d {backup_dir}"),
+                AdapterStep("rollback_heartbeat_app", self._conflict_restore_command(backup_dir), changes_system=True, timeout=120),
+                AdapterStep("verify_heartbeat", self._heartbeat_verify_command(script=f"{self.release_dir(artifact)}/10_scripts/heartbeat_verify_readonly.sh"), timeout=60),
+            ],
+        )
+
+    def safety_gate_steps(self, artifact: ReleaseArtifact, deployment_id: str) -> list[AdapterStep]:
+        backup_dir = self._backup_dir(deployment_id)
+        return [
+            AdapterStep("heartbeat_backup_available", f"! sudo -n test -e {backup_dir}"),
+            AdapterStep("heartbeat_backup_prereqs", "sudo -n test -r /etc/hcm-heartbeat/config.json && sudo -n test -f /var/lib/hcm-heartbeat/registry.sqlite3 && sudo -n test -r /var/lib/hcm-heartbeat/registry.sqlite3 && sudo -n test -x /usr/local/bin/hcm-heartbeat && sudo -n test -r /usr/local/lib/hcm-heartbeat/hcm_heartbeat.py && sudo -n test -r /usr/local/lib/hcm-heartbeat/homecontrol_identity.py && sudo -n test -r /etc/systemd/system/hcm-heartbeat.service && sudo -n sh -c '[ -d /var/backups/homecontrol-heartbeat ] || [ -w /var/backups ]'"),
+            AdapterStep("heartbeat_backup_storage", "df -Pk /var/backups | awk 'NR==2 { print \"available_kb=\"$4; if ($4 < 10240) exit 1 }'"),
+            AdapterStep("heartbeat_registry_integrity", "sudo -n python3 - <<'PY'\nimport sqlite3\nconn=sqlite3.connect('file:/var/lib/hcm-heartbeat/registry.sqlite3?mode=ro', uri=True)\ntry:\n result=conn.execute('PRAGMA integrity_check').fetchone()[0]\n if result != 'ok':\n  raise SystemExit('registry integrity_check={}'.format(result))\n print('registry_integrity=ok')\nfinally:\n conn.close()\nPY"),
+        ]
+
+    def _backup_dir(self, deployment_id: str) -> str:
+        safe = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in deployment_id)
+        return f"/var/backups/homecontrol-heartbeat/app-rollback-{safe}"
+
+    def _conflict_backup_command(self, backup_dir: str, release_dir: str) -> str:
+        marker = self.release_marker()
+        return (
+            "sudo sh -c 'set -eu; "
+            f"b={backup_dir}; marker={marker}; "
+            "[ ! -e \"$b\" ] || { echo backup_exists:$b >&2; exit 1; }; "
+            "install -d -m 0755 /var/backups/homecontrol-heartbeat; "
+            f"HC_HEARTBEAT_BACKUP_DIR=\"$b\" HC_HEARTBEAT_RELEASE_MARKER=\"$marker\" {release_dir}/10_scripts/heartbeat_backup.sh conflict >/tmp/homecontrol-heartbeat-backup-path; "
+            "[ \"$(cat /tmp/homecontrol-heartbeat-backup-path)\" = \"$b\" ]; "
+            "for f in hcm_heartbeat.py homecontrol_identity.py hcm-heartbeat hcm-heartbeat.service manifest.txt; do [ -e \"$b/$f\" ] || { echo incomplete_backup:$f >&2; exit 1; }; done; "
+            "if [ -f \"$marker\" ]; then cmp -s \"$marker\" \"$b/homecontrol-release\"; else [ -f \"$b/homecontrol-release.absent\" ]; fi; "
+            "ln -sfn \"$b\" /var/backups/homecontrol-heartbeat/homecontrol-deploy-rollback; "
+            "echo heartbeat_backup=$b verified=true marker_preserved=true registry_snapshot=disaster_recovery_only'"
+        )
+
+    def _conflict_restore_command(self, backup_dir: str) -> str:
+        marker = self.release_marker()
+        return (
+            "sudo sh -c 'set -eu; "
+            f"b={backup_dir}; marker={marker}; "
+            "[ -d \"$b\" ] || { echo missing_backup:$b >&2; exit 1; }; "
+            "for f in hcm_heartbeat.py homecontrol_identity.py hcm-heartbeat hcm-heartbeat.service; do [ -e \"$b/$f\" ] || { echo incomplete_backup:$f >&2; exit 1; }; done; "
+            "systemctl stop hcm-heartbeat.service; "
+            "install -m 755 \"$b/hcm_heartbeat.py\" /usr/local/lib/hcm-heartbeat/hcm_heartbeat.py; "
+            "install -m 644 \"$b/homecontrol_identity.py\" /usr/local/lib/hcm-heartbeat/homecontrol_identity.py; "
+            "install -m 755 \"$b/hcm-heartbeat\" /usr/local/bin/hcm-heartbeat; "
+            "install -m 644 \"$b/hcm-heartbeat.service\" /etc/systemd/system/hcm-heartbeat.service; "
+            "if [ -f \"$b/homecontrol-release\" ]; then install -d -m 0755 \"$(dirname \"$marker\")\"; cp -a \"$b/homecontrol-release\" \"$marker\"; "
+            "elif [ -f \"$b/homecontrol-release.absent\" ]; then rm -f \"$marker\"; "
+            "else echo missing_marker_backup >&2; exit 1; fi; "
+            "systemctl daemon-reload; systemctl restart hcm-heartbeat.service; "
+            "echo heartbeat_restore=$b marker_restored=true registry_preserved=true'"
+        )
 
     def _heartbeat_endpoint_snippet(self) -> str:
         return (

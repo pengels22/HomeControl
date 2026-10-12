@@ -170,3 +170,65 @@ def test_online_backup_is_consistent_while_database_writes_are_active(tmp_path):
     finally:
         restored.close()
     assert count > 0
+
+
+def test_heartbeat_backup_refuses_existing_destination(tmp_path):
+    config = tmp_path / "config.json"
+    write_config(config, auth_mode="none")
+    backup_dir = tmp_path / "backup"
+    backup_dir.mkdir()
+
+    result = run_script(
+        [str(BACKUP), "conflict"],
+        {
+            "HC_ALLOW_NONROOT": "1",
+            "HC_HEARTBEAT_CONFIG": str(config),
+            "HC_HEARTBEAT_DB": str(tmp_path / "missing.sqlite3"),
+            "HC_HEARTBEAT_BACKUP_DIR": str(backup_dir),
+        },
+    )
+
+    assert result.returncode != 0
+    assert "backup destination already exists" in result.stderr
+
+
+def test_heartbeat_backup_preserves_absent_release_marker(tmp_path):
+    config = tmp_path / "config.json"
+    write_config(config, auth_mode="none")
+    marker = tmp_path / "homecontrol-release"
+    backup_dir = tmp_path / "backup"
+
+    result = run_script(
+        [str(BACKUP), "conflict"],
+        {
+            "HC_ALLOW_NONROOT": "1",
+            "HC_HEARTBEAT_CONFIG": str(config),
+            "HC_HEARTBEAT_DB": str(tmp_path / "missing.sqlite3"),
+            "HC_HEARTBEAT_BACKUP_DIR": str(backup_dir),
+            "HC_HEARTBEAT_RELEASE_MARKER": str(marker),
+        },
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert (backup_dir / "homecontrol-release.absent").exists()
+    assert not (backup_dir / "homecontrol-release").exists()
+
+
+def test_heartbeat_backup_detects_incomplete_application_backup_when_required(tmp_path):
+    config = tmp_path / "config.json"
+    write_config(config, auth_mode="none")
+    backup_dir = tmp_path / "backup"
+
+    result = run_script(
+        [str(BACKUP), "conflict"],
+        {
+            "HC_ALLOW_NONROOT": "1",
+            "HC_REQUIRE_APP_BACKUP": "1",
+            "HC_HEARTBEAT_CONFIG": str(config),
+            "HC_HEARTBEAT_DB": str(tmp_path / "missing.sqlite3"),
+            "HC_HEARTBEAT_BACKUP_DIR": str(backup_dir),
+        },
+    )
+
+    assert result.returncode != 0
+    assert "incomplete heartbeat application backup" in result.stderr

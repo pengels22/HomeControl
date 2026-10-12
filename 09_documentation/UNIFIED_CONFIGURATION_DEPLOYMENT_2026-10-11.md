@@ -115,13 +115,17 @@ operational state, persistent databases, certificates, and secrets.
 The framework requires rollback and backup declarations in every manifest.
 Actual live backup and rollback are adapter-specific:
 
-- Conflict must use SQLite online backup and must not overwrite its registry or
-  heartbeat authentication secret. Rollback requires an explicit backup path.
+- Conflict must use a deployment-specific application backup directory and must
+  not overwrite its active registry, configuration, or heartbeat authentication
+  secret. The SQLite online backup in that directory is disaster-recovery
+  evidence only; automatic application rollback does not replace the active
+  registry database.
 - Jetson rollback must preserve Docker networks, PostgreSQL USB storage,
   environment files, certificates, watchdogs, and rollback containers. The
   adapter preserves the previous HCM container under a deployment-specific
   `hcm-rollback-<deployment-id>` name before replacing `hcm-test`; existing
-  rollback containers are never overwritten or deleted automatically.
+  rollback containers are never overwritten or deleted automatically. Recovery
+  decisions are based on immutable Docker container IDs rather than names alone.
 - LAB1 rollback must preserve hostname, IP, device identity, simulation-only
   state, physical-output-disabled state, certificates, HMAC secret, and role
   history.
@@ -167,6 +171,79 @@ files but leaves LAB1 with the wrong identity, non-simulation state, enabled
 physical outputs, inactive required services, or failed observable heartbeat
 health is reported as failed.
 
+## Jetson Recovery Safety
+
+The Jetson HCM deployment helper records the immutable Docker ID of the
+currently running `hcm-test` container before any mutation. It refuses to start
+if the deployment-specific rollback container name already exists. The
+stop/rename/identity-check/create/start/health sequence is handled as one
+recoverable operation:
+
+- A failure before mutation reports failure without deleting or renaming
+  containers.
+- A stop or rename failure inspects the actual container state before recovery.
+- After rename, the rollback container must have the original immutable ID; an
+  identity mismatch aborts and requires manual intervention.
+- Replacement create/start/health failures attempt to remove only the known
+  replacement container and restore the original container ID to `hcm-test`.
+- Recovery never deletes a container whose identity cannot be tied to the failed
+  replacement path.
+- Existing rollback containers are treated as protected recovery points and are
+  never overwritten as part of a later deployment.
+
+If the helper cannot prove whether `hcm-test` or the rollback name refers to the
+original container, it stops with a manual-intervention error rather than
+performing destructive cleanup. PostgreSQL (`hcm-postgres`), Docker networks,
+USB database storage, environment files, secrets, and independent Heartbeat V3
+remain outside the HCM container swap.
+
+After a successful deployment or successful recovery, the name `hcm-test` must
+refer to the intended application container so the existing `hcm.service`
+continues to operate. A restored deployment is still reported as an unsuccessful
+rollout; restoration success does not convert the failed deployment into a
+deployment success.
+
+## Conflict Backup And Rollback
+
+Conflict deployment creates a unique recovery directory for every deployment:
+
+```text
+/var/backups/homecontrol-heartbeat/app-rollback-<deployment-id>
+```
+
+Predeployment gates check that the directory does not already exist, the active
+heartbeat application files are present, the protected configuration and HMAC
+secret metadata are readable via noninteractive `sudo`, the active registry
+passes `PRAGMA integrity_check`, and `/var/backups` has sufficient free space.
+These gates are read-only; they do not create test directories or backup files.
+
+The backup script refuses to write into an existing destination. Before
+installing the new heartbeat application it copies the previous application
+files, systemd unit, safe metadata manifest, existing release marker or an
+explicit marker-absent sentinel, and an online SQLite snapshot for disaster
+recovery evidence. The active `/var/lib/hcm-heartbeat/registry.sqlite3`,
+`/etc/hcm-heartbeat/config.json`, and HMAC secret file are not replaced by the
+deployment or by automatic rollback.
+
+After install, Conflict verification checks the service endpoint, registry
+integrity, expected authorized and registered Jetson/LAB1 identities, and
+unexpected active communication faults. The new
+`/var/lib/hcm-heartbeat/homecontrol-release` marker is written only after those
+checks pass.
+
+Automatic Conflict rollback restores the previous application files and the
+previous release marker state from the deployment-specific backup. If the marker
+was absent before deployment, rollback removes the marker. Rollback then
+restarts `hcm-heartbeat.service` and reruns heartbeat verification. If file
+restoration, marker restoration, restart, endpoint health, registry integrity,
+authorized-device verification, or fault checks fail, rollback is reported as
+failed.
+
+Recovery backup directories are retained for operator review. Clean them up only
+after a later verified deployment and rollback window make the older recovery
+point unnecessary. Retain at least the most recent known-good recovery point and
+never remove a backup that is named in a deployment report still under review.
+
 ## Live Migration Plan
 
 1. Run `homecontrol status` and `homecontrol deploy --dry-run` locally.
@@ -186,6 +263,19 @@ The first live mutation should be a single-device command, for example:
 .venv/bin/python homecontrol_cli.py deploy --target lab1 --dry-run
 .venv/bin/python homecontrol_cli.py verify --remote --target lab1
 .venv/bin/python homecontrol_cli.py deploy --target lab1 --yes
+```
+
+For Jetson and Conflict, use the same single-target pattern and review the
+dry-run report before any approved live mutation:
+
+```bash
+.venv/bin/python homecontrol_cli.py deploy --target jetson --dry-run
+.venv/bin/python homecontrol_cli.py verify --remote --target jetson
+.venv/bin/python homecontrol_cli.py deploy --target jetson --yes
+
+.venv/bin/python homecontrol_cli.py deploy --target conflict --dry-run
+.venv/bin/python homecontrol_cli.py verify --remote --target conflict
+.venv/bin/python homecontrol_cli.py deploy --target conflict --yes
 ```
 
 Fleet-wide live deployment remains a separate explicit operation:
@@ -214,7 +304,10 @@ Fleet-wide live deployment remains a separate explicit operation:
   required HCM Docker networks or API port binding, or if it appears to contain
   PostgreSQL data storage. Rollback containers use deployment-specific names,
   preserve the previous container identity, and are refused if the target
-  rollback name already exists.
+  rollback name already exists. Failed swaps inspect both `hcm-test` and the
+  deployment rollback name by immutable Docker ID before attempting recovery; an
+  ambiguous or mismatched identity requires manual intervention instead of
+  deleting an unidentified container.
 - Conflict preflight uses noninteractive `sudo -n` for protected heartbeat
   metadata and reports only safe summaries such as auth mode, secret file
   presence/mode, registry integrity, service status, and TCP 6004 availability.
@@ -224,6 +317,13 @@ Fleet-wide live deployment remains a separate explicit operation:
   `10_scripts/heartbeat_status_verify.py` to fetch `/status`, require HTTP 200,
   parse the actual JSON response, confirm the expected registered and authorized
   Jetson/LAB1 identities, and fail on unexpected active communication faults.
+  Conflict deployment backups now use
+  `/var/backups/homecontrol-heartbeat/app-rollback-<deployment-id>`, preserve
+  the prior release marker or its absence, and refuse destination reuse.
+  Automatic rollback restores only application files and marker state; it does
+  not replace the active registry database, protected configuration, HMAC
+  secret, authorized-device table, registered-device rows, heartbeat history, or
+  their live permissions.
 - LAB1 preflight validates the real `/opt/homecontrol-lab` layout, permanent
   identity, simulation-only state, disabled physical outputs, valid module
   state JSON, role presence, and required services without changing role state.

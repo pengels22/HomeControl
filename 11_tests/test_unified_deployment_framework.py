@@ -437,7 +437,7 @@ def test_adapter_dry_run_includes_preservation_checks():
     jetson_steps = adapters.adapter_for(by_name["jetson"]).dry_run(fake_artifact).steps
     lab_steps = adapters.adapter_for(by_name["lab1"]).dry_run(fake_artifact).steps
 
-    assert any(step["name"] == "online_sqlite_backup" for step in conflict_steps)
+    assert any(step["name"] == "backup_heartbeat_app" for step in conflict_steps)
     assert any(step["name"] == "preflight_docker_layout" for step in jetson_steps)
     assert any(step["name"] == "preflight_lab1_safety" for step in lab_steps)
     assert all(step["status"] == "PLANNED" for step in jetson_steps)
@@ -484,6 +484,57 @@ def test_conflict_verify_command_uses_python_status_verifier_without_pipe_heredo
     assert "urllib" not in command
     assert "| python3 - <<'PY'" not in command
     assert 'curl -fsS "$endpoint/status"' not in command
+
+
+def test_conflict_adapter_uses_deployment_specific_backup_and_restores_marker():
+    fake_artifact = artifact.ReleaseArtifact(
+        release="e" * 40,
+        path=Path("/tmp/homecontrol.tar.gz"),
+        sha256="abc123",
+        metadata_path=Path("/tmp/homecontrol.json"),
+    )
+    adapter = adapters.adapter_for(inventory.inventory()["conflict"])
+    steps = adapter.steps(fake_artifact, deployment_id="hc-20261012T010203Z-test")
+    backup = next(step.command for step in steps if step.name == "backup_heartbeat_app")
+    names = [step.name for step in steps]
+
+    assert "/var/backups/homecontrol-heartbeat/app-rollback-hc-20261012T010203Z-test" in backup
+    assert "app-rollback-" + "e" * 40 not in backup
+    assert "HC_HEARTBEAT_RELEASE_MARKER" in backup
+    assert "homecontrol-release.absent" in backup
+    assert "registry_snapshot=disaster_recovery_only" in backup
+    assert names.index("verify_heartbeat") < names.index("record_release")
+
+    rollback = adapter.rollback_after_failure(
+        transport.SSHTransport(runner=FakeRunner()),
+        fake_artifact,
+        deployment_id="hc-20261012T010203Z-test",
+    )
+    restore = next(step["detail"] for step in rollback.steps if step["name"] == "rollback_heartbeat_app")
+    assert "/var/backups/homecontrol-heartbeat/app-rollback-hc-20261012T010203Z-test" in restore
+    assert "marker_restored=true" in restore
+    assert "registry_preserved=true" in restore
+    assert "registry.sqlite3" not in restore
+    assert "/etc/hcm-heartbeat/config.json" not in restore
+
+
+def test_conflict_safety_gate_checks_backup_collision_storage_and_registry_readonly():
+    adapter = adapters.adapter_for(inventory.inventory()["conflict"])
+    fake_artifact = artifact.ReleaseArtifact(
+        release="e" * 40,
+        path=Path("/tmp/homecontrol.tar.gz"),
+        sha256="abc123",
+        metadata_path=Path("/tmp/homecontrol.json"),
+    )
+    steps = adapter.safety_gate_steps(fake_artifact, "hc-collision-test")
+    commands = "\n".join(step.command for step in steps)
+
+    assert "app-rollback-hc-collision-test" in commands
+    assert "! sudo -n test -e" in commands
+    assert "df -Pk /var/backups" in commands
+    assert "PRAGMA integrity_check" in commands
+    assert "mkdir" not in commands
+    assert "heartbeat_backup.sh" not in commands
 
 
 def test_heartbeat_status_verifier_accepts_valid_registered_authorized_devices():
@@ -752,6 +803,113 @@ def test_lab1_backup_creation_failure_does_not_restart_or_restore(tmp_path, monk
     assert not any(step.get("rollback") for step in report["targets"][0]["steps"])
     assert not any("systemctl restart homecontrol-lab.service" in command for command in joined)
     assert not any("lab1_restore=" in command for command in joined)
+
+
+def test_conflict_backup_failure_before_mutation_does_not_restart_or_restore(tmp_path, monkeypatch):
+    fake_artifact = artifact.ReleaseArtifact(
+        release="e" * 40,
+        path=tmp_path / "homecontrol.tar.gz",
+        sha256="abc123",
+        metadata_path=tmp_path / "homecontrol.json",
+    )
+    fake_artifact.path.write_text("artifact")
+    fake_artifact.metadata_path.write_text("{}")
+    monkeypatch.setattr(engine.artifact_mod, "create_release_artifact", lambda repo_root, release, output_dir: fake_artifact)
+    tx = transport.SSHTransport(runner=FakeRunner(fail_contains="heartbeat_backup="))
+
+    report = engine.deploy(
+        repo_root=ROOT,
+        release="e" * 40,
+        target="conflict",
+        dry_run=False,
+        transport=tx,
+        run_tests=False,
+    )
+
+    joined = [" ".join(command) for command in tx.runner.commands]
+    assert report["targets"][0]["status"] == "FAIL"
+    assert not any(step.get("rollback") for step in report["targets"][0]["steps"])
+    assert not any("systemctl restart hcm-heartbeat.service" in command for command in joined)
+    assert not any("heartbeat_restore=" in command for command in joined)
+
+
+def test_conflict_post_verify_failure_rolls_back_and_does_not_write_new_marker(tmp_path, monkeypatch):
+    fake_artifact = artifact.ReleaseArtifact(
+        release="f" * 40,
+        path=tmp_path / "homecontrol.tar.gz",
+        sha256="abc123",
+        metadata_path=tmp_path / "homecontrol.json",
+    )
+    fake_artifact.path.write_text("artifact")
+    fake_artifact.metadata_path.write_text("{}")
+    monkeypatch.setattr(engine.artifact_mod, "create_release_artifact", lambda repo_root, release, output_dir: fake_artifact)
+
+    class ConflictVerifyFailureRunner(FakeRunner):
+        def __init__(self):
+            super().__init__()
+            self.failed = False
+
+        def __call__(self, command, *, input=None, timeout=None):
+            self.commands.append(command)
+            joined = " ".join(command)
+            if "heartbeat_status_verify.py" in joined and not self.failed:
+                self.failed = True
+                return transport.CommandResult(command, 1, "", "missing registered devices")
+            return transport.CommandResult(command, 0, "ok\n", "")
+
+    tx = transport.SSHTransport(runner=ConflictVerifyFailureRunner())
+
+    report = engine.deploy(
+        repo_root=ROOT,
+        release="f" * 40,
+        target="conflict",
+        dry_run=False,
+        transport=tx,
+        run_tests=False,
+    )
+
+    joined = [" ".join(command) for command in tx.runner.commands]
+    assert report["targets"][0]["status"] == "ROLLED BACK"
+    assert report["summary"]["status"] == "FAIL"
+    assert any(step.get("rollback") and step["name"] == "rollback_heartbeat_app" for step in report["targets"][0]["steps"])
+    assert not any("tee /var/lib/hcm-heartbeat/homecontrol-release" in command for command in joined)
+
+
+def test_conflict_failed_rollback_reports_failure_not_success(tmp_path, monkeypatch):
+    fake_artifact = artifact.ReleaseArtifact(
+        release="0" * 40,
+        path=tmp_path / "homecontrol.tar.gz",
+        sha256="abc123",
+        metadata_path=tmp_path / "homecontrol.json",
+    )
+    fake_artifact.path.write_text("artifact")
+    fake_artifact.metadata_path.write_text("{}")
+    monkeypatch.setattr(engine.artifact_mod, "create_release_artifact", lambda repo_root, release, output_dir: fake_artifact)
+
+    class ConflictRollbackFailureRunner(FakeRunner):
+        def __call__(self, command, *, input=None, timeout=None):
+            self.commands.append(command)
+            joined = " ".join(command)
+            if "heartbeat_status_verify.py" in joined:
+                return transport.CommandResult(command, 1, "", "unexpected active faults")
+            if "heartbeat_restore=" in joined:
+                return transport.CommandResult(command, 1, "", "restore failed")
+            return transport.CommandResult(command, 0, "ok\n", "")
+
+    tx = transport.SSHTransport(runner=ConflictRollbackFailureRunner())
+
+    report = engine.deploy(
+        repo_root=ROOT,
+        release="0" * 40,
+        target="conflict",
+        dry_run=False,
+        transport=tx,
+        run_tests=False,
+    )
+
+    assert report["targets"][0]["status"] == "FAIL"
+    assert report["summary"]["status"] == "FAIL"
+    assert any(step.get("rollback") and step["status"] == "FAIL" for step in report["targets"][0]["steps"])
 
 
 def test_lab1_post_deploy_state_failure_rolls_back_without_new_marker(tmp_path, monkeypatch):
@@ -1114,12 +1272,13 @@ def test_safety_gate_checks_adapter_read_only_steps(tmp_path, monkeypatch):
 def test_hcm_docker_deploy_rolls_back_when_health_check_fails(monkeypatch):
     module = load_script_module("hcm_docker_deploy_rollback_test", "10_scripts/hcm_docker_deploy.py")
     calls = []
-    containers = {"hcm-test"}
+    containers = {"hcm-test": "old-container-id"}
 
     def fake_inspect(name):
         if name not in containers:
             raise module.DockerDeployError("missing {}".format(name))
         return {
+            "Id": containers[name],
             "Config": {"Image": "old"},
             "HostConfig": {"PortBindings": {"8080/tcp": [{"HostIp": "192.168.20.27", "HostPort": "8080"}]}},
             "Mounts": [],
@@ -1128,7 +1287,7 @@ def test_hcm_docker_deploy_rolls_back_when_health_check_fails(monkeypatch):
 
     def fake_create_clone(source, image, name):
         calls.append(("create", name, image))
-        containers.add(name)
+        containers[name] = "new-container-id"
 
     def fake_stop(name):
         calls.append(("stop", name))
@@ -1138,12 +1297,11 @@ def test_hcm_docker_deploy_rolls_back_when_health_check_fails(monkeypatch):
 
     def fake_rename(old, new):
         calls.append(("rename", old, new))
-        containers.remove(old)
-        containers.add(new)
+        containers[new] = containers.pop(old)
 
     def fake_remove(name):
         calls.append(("remove", name))
-        containers.discard(name)
+        containers.pop(name, None)
 
     def fake_healthcheck(name, url, timeout):
         calls.append(("health", name))
@@ -1201,6 +1359,127 @@ def test_hcm_docker_deploy_restores_previous_when_create_fails(monkeypatch):
     assert ("rename", "hcm-test", "hcm-rollback-hc-new") in calls
     assert ("rename", "hcm-rollback-hc-new", "hcm-test") in calls
     assert ("start", "hcm-test") in calls
+
+
+@pytest.mark.parametrize(
+    ("stage", "message"),
+    [
+        ("stop", "failure stopping original container"),
+        ("rename", "failure renaming original container"),
+        ("start", "failure starting replacement container"),
+    ],
+)
+def test_hcm_docker_deploy_reports_stage_failures_and_attempts_safe_recovery(stage, message, monkeypatch):
+    module = load_script_module("hcm_docker_deploy_stage_failure_test_" + stage, "10_scripts/hcm_docker_deploy.py")
+    calls = []
+    containers = {"hcm-test": "old-container-id"}
+
+    def fake_inspect(name):
+        if name not in containers:
+            raise module.DockerDeployError("missing {}".format(name))
+        return {
+            "Id": containers[name],
+            "Config": {"Image": "old"},
+            "HostConfig": {"PortBindings": {"8080/tcp": [{"HostIp": "192.168.20.27", "HostPort": "8080"}]}},
+            "Mounts": [],
+            "NetworkSettings": {"Networks": {"hcm-control": {}, "hcm-internal": {}}},
+        }
+
+    def fake_stop(name):
+        calls.append(("stop", name))
+        if stage == "stop" and name == "hcm-test" and "hcm-rollback-hc-new" not in containers:
+            raise module.DockerDeployError("stop failed")
+
+    def fake_rename(old, new):
+        calls.append(("rename", old, new))
+        if stage == "rename":
+            raise module.DockerDeployError("rename failed")
+        containers[new] = containers.pop(old)
+
+    def fake_create(source, image, name):
+        calls.append(("create", name))
+        containers[name] = "new-container-id"
+
+    def fake_start(name):
+        calls.append(("start", name))
+        if stage == "start" and containers.get(name) == "new-container-id":
+            raise module.DockerDeployError("start failed")
+
+    def fake_remove(name):
+        calls.append(("remove", name))
+        containers.pop(name, None)
+
+    monkeypatch.setattr(module, "inspect_container", fake_inspect)
+    monkeypatch.setattr(module, "stop_container", fake_stop)
+    monkeypatch.setattr(module, "rename_container", fake_rename)
+    monkeypatch.setattr(module, "create_clone", fake_create)
+    monkeypatch.setattr(module, "start_container", fake_start)
+    monkeypatch.setattr(module, "remove_container", fake_remove)
+    monkeypatch.setattr(module, "healthcheck", lambda name, url, timeout: calls.append(("health", name)))
+
+    with pytest.raises(module.DockerDeployError, match=message):
+        module.deploy("new-image", name="hcm-test", rollback_name="hcm-rollback-hc-new", health_url=None, timeout=1)
+
+    assert containers.get("hcm-test") == "old-container-id"
+    assert "hcm-rollback-hc-new" not in containers
+
+
+def test_hcm_docker_deploy_identity_mismatch_requires_manual_intervention(monkeypatch):
+    module = load_script_module("hcm_docker_deploy_identity_mismatch_test", "10_scripts/hcm_docker_deploy.py")
+    containers = {"hcm-test": "old-container-id"}
+
+    def fake_inspect(name):
+        if name not in containers:
+            raise module.DockerDeployError("missing {}".format(name))
+        return {
+            "Id": containers[name],
+            "Config": {"Image": "old"},
+            "HostConfig": {"PortBindings": {"8080/tcp": [{"HostIp": "192.168.20.27", "HostPort": "8080"}]}},
+            "Mounts": [],
+            "NetworkSettings": {"Networks": {"hcm-control": {}, "hcm-internal": {}}},
+        }
+
+    def fake_rename(old, new):
+        containers.pop(old)
+        containers[new] = "unexpected-container-id"
+
+    monkeypatch.setattr(module, "inspect_container", fake_inspect)
+    monkeypatch.setattr(module, "stop_container", lambda name: None)
+    monkeypatch.setattr(module, "rename_container", fake_rename)
+
+    with pytest.raises(module.DockerDeployError, match="manual intervention required"):
+        module.deploy("new-image", name="hcm-test", rollback_name="hcm-rollback-hc-new", health_url=None, timeout=1)
+
+    assert containers == {"hcm-rollback-hc-new": "unexpected-container-id"}
+
+
+def test_hcm_docker_deploy_never_removes_ambiguous_active_container(monkeypatch):
+    module = load_script_module("hcm_docker_deploy_ambiguous_recovery_test", "10_scripts/hcm_docker_deploy.py")
+    removed = []
+    containers = {
+        "hcm-test": "unexpected-active-id",
+        "hcm-rollback-hc-new": "unexpected-rollback-id",
+    }
+
+    def fake_inspect(name):
+        if name not in containers:
+            raise module.DockerDeployError("missing {}".format(name))
+        return {"Id": containers[name]}
+
+    monkeypatch.setattr(module, "inspect_container", fake_inspect)
+    monkeypatch.setattr(module, "remove_container", lambda name: removed.append(name))
+
+    with pytest.raises(module.DockerDeployError, match="manual intervention required"):
+        module.recover_original_container("hcm-test", "hcm-rollback-hc-new", "old-container-id", None, 1)
+
+    assert removed == []
+
+
+def test_hcm_docker_deploy_python36_parse_compatible():
+    import ast
+
+    source = (ROOT / "10_scripts" / "hcm_docker_deploy.py").read_text()
+    ast.parse(source, filename="hcm_docker_deploy.py", feature_version=(3, 6))
 
 
 def test_cli_exit_code_helper_flags_failed_reports():
