@@ -137,17 +137,34 @@ Actual live backup and rollback are adapter-specific:
 - The SSH deployment path is implemented but has only been exercised with mocked
   transports in automated tests during this commit. A live dry-run/verification
   report should be reviewed before first deployment.
-- Jetson preflight and replacement now discover the actual Docker layout instead
-  of assuming `/etc/hcm/hcm.env` exists. The Docker API helper clones the
-  inspected container configuration and swaps only the application image, while
-  preserving environment entries, mounts, ports, restart policy, and network
-  attachments.
+- Jetson preflight and replacement discover the actual Docker layout instead of
+  assuming `/etc/hcm/hcm.env` exists. Docker inspection snippets avoid
+  Python features missing from the Jetson host's Python 3.6.9. HCM API health is
+  checked through the concrete Docker-published `8080/tcp` host binding, and
+  ambiguous wildcard bindings are rejected rather than silently falling back to
+  loopback.
+- `10_scripts/hcm_docker_deploy.py` is compatible with Jetson host Python 3.6
+  and derives its default post-swap and rollback health URL from the inspected
+  `hcm-test` port bindings. The Docker API helper clones the inspected container
+  configuration and swaps only the application image, while preserving
+  environment entries, mounts, ports, restart policy, and network attachments.
 - Conflict preflight uses noninteractive `sudo -n` for protected heartbeat
   metadata and reports only safe summaries such as auth mode, secret file
   presence/mode, registry integrity, service status, and TCP 6004 availability.
+  The heartbeat endpoint is resolved from the protected config's bind or
+  advertised address, so a supervisor bound only to `192.168.20.26:6004` is not
+  incorrectly tested through loopback.
 - LAB1 preflight validates the real `/opt/homecontrol-lab` layout, permanent
   identity, simulation-only state, disabled physical outputs, and required
-  services without changing role state.
+  services without changing role state. Service checks now report each required
+  systemd unit and its substate explicitly; the heartbeat control socket path is
+  reported as metadata but is not treated as proof that the heartbeat service is
+  active.
+- Read-only SSH checks use bounded retries for transient transport failures such
+  as banner-exchange or ProxyJump timeouts while preserving BatchMode,
+  key-only authentication, strict host-key validation, and SSH aliases. Commands
+  that can change remote state are not automatically retried after ambiguous
+  transport failure.
 - Jetson database migrations remain out of scope and require a separately
   approved plan.
 - LAB1 deployment updates only the role helper after confirming the installed

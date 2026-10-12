@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-from __future__ import annotations
 
 import argparse
 import http.client
@@ -8,23 +7,29 @@ import socket
 import sys
 import time
 from copy import deepcopy
+from typing import Any, Dict, Optional, Tuple
 from urllib.parse import quote
 
 
 SOCKET = "/var/run/docker.sock"
 
 
+class DockerDeployError(RuntimeError):
+    pass
+
+
 class UnixHTTPConnection(http.client.HTTPConnection):
-    def __init__(self, path: str):
+    def __init__(self, path):
         super().__init__("localhost")
         self.path = path
 
-    def connect(self) -> None:
+    def connect(self):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.connect(self.path)
 
 
-def docker(method: str, path: str, body: dict | None = None, ok: tuple[int, ...] = (200, 201, 204, 304)) -> dict:
+def docker(method, path, body=None, ok=(200, 201, 204, 304)):
+    # type: (str, str, Optional[Dict[str, Any]], Tuple[int, ...]) -> Dict[str, Any]
     conn = UnixHTTPConnection(SOCKET)
     payload = None if body is None else json.dumps(body).encode()
     headers = {"Content-Type": "application/json"} if payload is not None else {}
@@ -34,41 +39,48 @@ def docker(method: str, path: str, body: dict | None = None, ok: tuple[int, ...]
     conn.close()
     if response.status not in ok:
         detail = data.decode(errors="replace")
-        raise SystemExit(f"Docker API {method} {path} failed: HTTP {response.status}: {detail}")
+        raise DockerDeployError(f"Docker API {method} {path} failed: HTTP {response.status}: {detail}")
     if not data:
         return {}
     return json.loads(data)
 
 
-def inspect_container(name: str) -> dict:
+def inspect_container(name):
+    # type: (str) -> Dict[str, Any]
     return docker("GET", f"/containers/{quote(name, safe='')}/json")
 
 
-def container_exists(name: str) -> bool:
+def container_exists(name):
+    # type: (str) -> bool
     try:
         inspect_container(name)
-    except SystemExit:
+    except DockerDeployError:
         return False
     return True
 
 
-def stop_container(name: str) -> None:
+def stop_container(name):
+    # type: (str) -> None
     docker("POST", f"/containers/{quote(name, safe='')}/stop?t=20", ok=(204, 304))
 
 
-def start_container(name: str) -> None:
+def start_container(name):
+    # type: (str) -> None
     docker("POST", f"/containers/{quote(name, safe='')}/start", ok=(204, 304))
 
 
-def rename_container(old: str, new: str) -> None:
+def rename_container(old, new):
+    # type: (str, str) -> None
     docker("POST", f"/containers/{quote(old, safe='')}/rename?name={quote(new, safe='')}", ok=(204,))
 
 
-def remove_container(name: str) -> None:
+def remove_container(name):
+    # type: (str) -> None
     docker("DELETE", f"/containers/{quote(name, safe='')}?force=true", ok=(204, 404))
 
 
-def create_clone(source: dict, *, image: str, name: str) -> None:
+def create_clone(source, image, name):
+    # type: (Dict[str, Any], str, str) -> None
     config = deepcopy(source["Config"])
     host_config = deepcopy(source["HostConfig"])
     networks = source.get("NetworkSettings", {}).get("Networks", {})
@@ -104,7 +116,27 @@ def create_clone(source: dict, *, image: str, name: str) -> None:
     docker("POST", f"/containers/create?name={quote(name)}", body=body, ok=(201,))
 
 
-def healthcheck(name: str, url: str, timeout: int) -> None:
+def published_health_url(name):
+    # type: (str) -> str
+    container = inspect_container(name)
+    bindings = (container.get("HostConfig") or {}).get("PortBindings") or {}
+    published = []
+    for item in bindings.get("8080/tcp") or []:
+        host = item.get("HostIp") or ""
+        port = item.get("HostPort") or ""
+        if host in ("", "0.0.0.0", "::") or not port:
+            continue
+        published.append((host, port))
+    if len(published) != 1:
+        raise DockerDeployError("expected one concrete 8080/tcp binding, found {}".format(bindings.get("8080/tcp")))
+    host, port = published[0]
+    return "http://{}:{}/api/v1/health".format(host, port)
+
+
+def healthcheck(name, url, timeout):
+    # type: (str, Optional[str], int) -> None
+    if url is None:
+        url = published_health_url(name)
     deadline = time.time() + timeout
     import urllib.request
 
@@ -117,10 +149,11 @@ def healthcheck(name: str, url: str, timeout: int) -> None:
         except Exception as exc:  # pragma: no cover - exercised on target host
             last = exc
         time.sleep(2)
-    raise SystemExit(f"health check failed for {url}: {last}")
+    raise DockerDeployError(f"health check failed for {url}: {last}")
 
 
-def deploy(image: str, *, name: str, rollback_name: str, health_url: str, timeout: int) -> None:
+def deploy(image, name, rollback_name, health_url, timeout):
+    # type: (str, str, str, Optional[str], int) -> None
     source = inspect_container(name)
     if container_exists(rollback_name):
         rollback = inspect_container(rollback_name)
@@ -140,9 +173,10 @@ def deploy(image: str, *, name: str, rollback_name: str, health_url: str, timeou
         raise
 
 
-def rollback(*, name: str, rollback_name: str, health_url: str, timeout: int) -> None:
+def rollback(name, rollback_name, health_url, timeout):
+    # type: (str, str, Optional[str], int) -> None
     if not container_exists(rollback_name):
-        raise SystemExit(f"rollback container {rollback_name} is missing")
+        raise DockerDeployError(f"rollback container {rollback_name} is missing")
     if container_exists(name):
         stop_container(name)
         remove_container(name)
@@ -151,21 +185,30 @@ def rollback(*, name: str, rollback_name: str, health_url: str, timeout: int) ->
     healthcheck(name, health_url, timeout)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv=None):
+    # type: (Optional[list]) -> int
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=("deploy", "rollback"))
     parser.add_argument("--image")
     parser.add_argument("--name", default="hcm-test")
     parser.add_argument("--rollback-name", default="hcm-rollback-before-deploy")
-    parser.add_argument("--health-url", default="http://127.0.0.1:8080/api/v1/health")
+    parser.add_argument("--health-url", default=None)
     parser.add_argument("--timeout", type=int, default=60)
     args = parser.parse_args(argv)
     if args.action == "deploy":
         if not args.image:
             parser.error("--image is required for deploy")
-        deploy(args.image, name=args.name, rollback_name=args.rollback_name, health_url=args.health_url, timeout=args.timeout)
+        try:
+            deploy(args.image, name=args.name, rollback_name=args.rollback_name, health_url=args.health_url, timeout=args.timeout)
+        except DockerDeployError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
     else:
-        rollback(name=args.name, rollback_name=args.rollback_name, health_url=args.health_url, timeout=args.timeout)
+        try:
+            rollback(name=args.name, rollback_name=args.rollback_name, health_url=args.health_url, timeout=args.timeout)
+        except DockerDeployError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
     return 0
 
 

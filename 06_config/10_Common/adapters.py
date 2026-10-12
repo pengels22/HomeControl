@@ -81,7 +81,7 @@ class BaseAdapter:
         status = "PASS"
         for step in self.preflight_steps():
             try:
-                result = transport.execute(self.entry.ssh_alias, step.command, timeout=step.timeout, step_name=step.name)
+                result = transport.execute(self.entry.ssh_alias, step.command, timeout=step.timeout, step_name=step.name, read_only=True)
             except Exception as exc:
                 status = "FAIL"
                 executed.append({"name": step.name, "status": "FAIL", "detail": str(exc), "fact": False})
@@ -95,7 +95,7 @@ class BaseAdapter:
         for step in self.steps(artifact):
             try:
                 if step.name == "check_installed_release":
-                    result = transport.execute(self.entry.ssh_alias, step.command, timeout=step.timeout, step_name=step.name)
+                    result = transport.execute(self.entry.ssh_alias, step.command, timeout=step.timeout, step_name=step.name, read_only=True)
                     installed = result.stdout.strip()
                     executed.append(
                         {"name": step.name, "status": "PASS", "detail": installed or "not installed", "changes_system": False}
@@ -138,7 +138,7 @@ class BaseAdapter:
         executed: list[dict[str, Any]] = []
         for step in self.no_change_health_steps():
             try:
-                result = transport.execute(self.entry.ssh_alias, step.command, timeout=step.timeout, step_name=step.name)
+                result = transport.execute(self.entry.ssh_alias, step.command, timeout=step.timeout, step_name=step.name, read_only=True)
             except Exception as exc:
                 executed.append({"name": step.name, "status": "FAIL", "detail": str(exc), "changes_system": False})
                 return AdapterResult(target=self.entry.name, status="FAIL", steps=executed)
@@ -177,7 +177,7 @@ class ConflictAdapter(BaseAdapter):
             AdapterStep("online_sqlite_backup", f"sudo sh -c 'HC_HEARTBEAT_BACKUP_DIR={backup_dir} {release_dir}/10_scripts/heartbeat_backup.sh conflict >/tmp/homecontrol-heartbeat-backup-path && ln -sfn {backup_dir} /var/backups/homecontrol-heartbeat/homecontrol-deploy-rollback'", changes_system=True, timeout=120),
             AdapterStep("install_heartbeat_skip_start", f"cd {release_dir}/00_Heartbeat && sudo HC_SKIP_START=1 ./install.sh conflict", changes_system=True, timeout=120),
             AdapterStep("restart_heartbeat", "sudo systemctl restart hcm-heartbeat.service", changes_system=True, timeout=60),
-            AdapterStep("verify_heartbeat", f"HC_HEARTBEAT_DB=/var/lib/hcm-heartbeat/registry.sqlite3 {release_dir}/10_scripts/heartbeat_verify_readonly.sh http://127.0.0.1:6004 && curl -fsS http://127.0.0.1:6004/status | python3 - <<'PY'\nimport json,sys\ns=json.load(sys.stdin).get('status',{{}}).get('registry',{{}})\nmissing=[d for d in ('48b02d87db16','2ccf675d3414') if d not in s]\nassert not missing, missing\nPY", timeout=60),
+            AdapterStep("verify_heartbeat", self._heartbeat_verify_command(script=f"{release_dir}/10_scripts/heartbeat_verify_readonly.sh"), timeout=60),
             AdapterStep("record_release", f"sudo install -d -m 0755 /var/lib/hcm-heartbeat && printf '%s\\n' {artifact.release} | sudo tee {self.release_marker()} >/dev/null", changes_system=True),
         ]
 
@@ -189,12 +189,12 @@ class ConflictAdapter(BaseAdapter):
             AdapterStep("heartbeat_paths", "sudo -n test -f /etc/hcm-heartbeat/config.json && sudo -n test -f /var/lib/hcm-heartbeat/registry.sqlite3 && test -x /usr/local/bin/hcm-heartbeat && test -f /usr/local/lib/hcm-heartbeat/hcm_heartbeat.py"),
             AdapterStep("heartbeat_auth_config", "sudo -n python3 - <<'PY'\nimport json,os,stat\nc=json.load(open('/etc/hcm-heartbeat/config.json'))\nassert c.get('heartbeat_auth_mode') == 'hmac-sha256'\np=c.get('heartbeat_auth_secret_file')\nassert p and os.path.exists(p)\nst=os.stat(p)\nmode=stat.S_IMODE(st.st_mode)\nassert mode == 0o600, oct(mode)\nprint('auth_mode=hmac-sha256 secret_present=true secret_mode=0600 secret_uid={}'.format(st.st_uid))\nPY"),
             AdapterStep("heartbeat_registry", "sudo -n python3 - <<'PY'\nimport sqlite3\nconn=sqlite3.connect('/var/lib/hcm-heartbeat/registry.sqlite3')\ntry:\n print('integrity={}'.format(conn.execute('PRAGMA integrity_check').fetchone()[0]))\n for t in ('authorized_devices','devices','heartbeat_events'):\n  print('{}={}'.format(t, conn.execute('SELECT COUNT(*) FROM {}'.format(t)).fetchone()[0]))\nfinally:\n conn.close()\nPY"),
-            AdapterStep("heartbeat_service", "systemctl is-active --quiet hcm-heartbeat.service && python3 - <<'PY'\nimport socket\ns=socket.create_connection(('127.0.0.1',6004),timeout=3)\ns.close()\nprint('tcp_6004=listening')\nPY"),
+            AdapterStep("heartbeat_service", self._heartbeat_service_command()),
         ]
 
     def no_change_health_steps(self) -> list[AdapterStep]:
         return [
-            AdapterStep("heartbeat_service", "systemctl is-active --quiet hcm-heartbeat.service && curl -fsS http://127.0.0.1:6004/status >/dev/null"),
+            AdapterStep("heartbeat_service", self._heartbeat_service_command()),
             AdapterStep("heartbeat_registry", "sudo -n python3 - <<'PY'\nimport sqlite3\nconn=sqlite3.connect('/var/lib/hcm-heartbeat/registry.sqlite3')\ntry:\n assert conn.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'\nfinally:\n conn.close()\nPY"),
         ]
 
@@ -203,8 +203,50 @@ class ConflictAdapter(BaseAdapter):
         return [
             AdapterStep("app_backup_present", f"sudo -n test -d {backup_dir}"),
             AdapterStep("rollback_heartbeat_app", f"sudo sh -c 'set -e; b={backup_dir}; systemctl stop hcm-heartbeat.service; [ -e \"$b/hcm_heartbeat.py\" ] && install -m 755 \"$b/hcm_heartbeat.py\" /usr/local/lib/hcm-heartbeat/hcm_heartbeat.py; [ -e \"$b/homecontrol_identity.py\" ] && install -m 644 \"$b/homecontrol_identity.py\" /usr/local/lib/hcm-heartbeat/homecontrol_identity.py; [ -e \"$b/hcm-heartbeat\" ] && install -m 755 \"$b/hcm-heartbeat\" /usr/local/bin/hcm-heartbeat; [ -e \"$b/hcm-heartbeat.service\" ] && install -m 644 \"$b/hcm-heartbeat.service\" /etc/systemd/system/hcm-heartbeat.service; systemctl daemon-reload; systemctl restart hcm-heartbeat.service'", changes_system=True, timeout=120),
-            AdapterStep("verify_heartbeat", "systemctl is-active --quiet hcm-heartbeat.service && curl -fsS http://127.0.0.1:6004/status >/dev/null", timeout=60),
+            AdapterStep("verify_heartbeat", self._heartbeat_service_command(), timeout=60),
         ]
+
+    def _heartbeat_endpoint_snippet(self) -> str:
+        return (
+            "import json\n"
+            "c=json.load(open('/etc/hcm-heartbeat/config.json'))\n"
+            "addr=c.get('bind_address') or c.get('advertise_ip')\n"
+            "if addr in ('0.0.0.0','::',''):\n"
+            " addr=c.get('advertise_ip')\n"
+            "port=int(c.get('port',6004))\n"
+            "if not addr or addr in ('0.0.0.0','::'):\n"
+            " raise SystemExit('heartbeat endpoint is ambiguous: bind_address={} advertise_ip={}'.format(c.get('bind_address'), c.get('advertise_ip')))\n"
+            "endpoint='http://{}:{}'.format(addr,port)\n"
+        )
+
+    def _heartbeat_service_command(self) -> str:
+        return (
+            "systemctl is-active --quiet hcm-heartbeat.service && sudo -n python3 - <<'PY'\n"
+            "import socket, urllib.request\n"
+            + self._heartbeat_endpoint_snippet() +
+            "s=socket.create_connection((addr,port),timeout=3)\n"
+            "s.close()\n"
+            "with urllib.request.urlopen(endpoint + '/status', timeout=5) as r:\n"
+            " status=r.getcode()\n"
+            "assert status == 200, status\n"
+            "print('heartbeat_endpoint={} tcp=reachable http_status=200'.format(endpoint))\n"
+            "PY"
+        )
+
+    def _heartbeat_verify_command(self, *, script: str) -> str:
+        return (
+            "endpoint=$(sudo -n python3 - <<'PY'\n"
+            + self._heartbeat_endpoint_snippet() +
+            "print(endpoint)\n"
+            "PY\n"
+            f") && HC_HEARTBEAT_DB=/var/lib/hcm-heartbeat/registry.sqlite3 {script} \"$endpoint\" && "
+            "curl -fsS \"$endpoint/status\" | python3 - <<'PY'\n"
+            "import json,sys\n"
+            "s=json.load(sys.stdin).get('status',{}).get('registry',{})\n"
+            "missing=[d for d in ('48b02d87db16','2ccf675d3414') if d not in s]\n"
+            "assert not missing, missing\n"
+            "PY"
+        )
 
 
 class JetsonDockerAdapter(BaseAdapter):
@@ -217,7 +259,7 @@ class JetsonDockerAdapter(BaseAdapter):
             AdapterStep("preflight_docker_layout", self._docker_preflight_command()),
             AdapterStep("build_hcm_image", f"sudo docker build -t {image} -f {release_dir}/06_config/01_HCM/Dockerfile.live {release_dir}", changes_system=True, timeout=600),
             AdapterStep("replace_hcm_container", f"sudo python3 {release_dir}/10_scripts/hcm_docker_deploy.py deploy --image {image}", changes_system=True, timeout=180),
-            AdapterStep("verify_hcm_api", "curl -fsS http://127.0.0.1:8080/api/v1/health >/dev/null && systemctl is-active --quiet hcm-watchdog.timer && systemctl is-active --quiet hcm-heartbeat.service", timeout=60),
+            AdapterStep("verify_hcm_api", self._hcm_health_command(), timeout=60),
             AdapterStep("record_release", f"printf '%s\\n' {artifact.release} | sudo tee {self.release_marker()} >/dev/null", changes_system=True),
         ]
 
@@ -229,8 +271,11 @@ class JetsonDockerAdapter(BaseAdapter):
             "sudo -n python3 - <<'PY'\n"
             "import json,subprocess\n"
             "def inspect(name):\n"
-            " r=subprocess.run(['docker','inspect',name],text=True,capture_output=True,check=True)\n"
-            " return json.loads(r.stdout)[0]\n"
+            " p=subprocess.Popen(['docker','inspect',name],stdout=subprocess.PIPE,stderr=subprocess.PIPE)\n"
+            " out,err=p.communicate()\n"
+            " if p.returncode != 0:\n"
+            "  raise SystemExit(err.decode('utf-8','replace'))\n"
+            " return json.loads(out.decode('utf-8'))[0]\n"
             "h=inspect('hcm-test')\n"
             "p=inspect('hcm-postgres')\n"
             "nets=set(h['NetworkSettings']['Networks'])\n"
@@ -245,18 +290,59 @@ class JetsonDockerAdapter(BaseAdapter):
             "PY"
         )
 
+    def _hcm_endpoint_snippet(self) -> str:
+        return (
+            "import json, subprocess\n"
+            "def inspect(name):\n"
+            " p=subprocess.Popen(['docker','inspect',name],stdout=subprocess.PIPE,stderr=subprocess.PIPE)\n"
+            " out,err=p.communicate()\n"
+            " if p.returncode != 0:\n"
+            "  raise SystemExit(err.decode('utf-8','replace'))\n"
+            " return json.loads(out.decode('utf-8'))[0]\n"
+            "h=inspect('hcm-test')\n"
+            "bindings=(h.get('HostConfig') or {}).get('PortBindings') or {}\n"
+            "published=[]\n"
+            "for item in bindings.get('8080/tcp') or []:\n"
+            " host=item.get('HostIp') or ''\n"
+            " port=item.get('HostPort') or ''\n"
+            " if host in ('','0.0.0.0','::') or not port:\n"
+            "  continue\n"
+            " published.append((host,port))\n"
+            "if len(published) != 1:\n"
+            " raise SystemExit('expected one concrete 8080/tcp binding, found {}'.format(bindings.get('8080/tcp')))\n"
+            "host,port=published[0]\n"
+            "url='http://{}:{}/api/v1/health'.format(host,port)\n"
+        )
+
+    def _hcm_health_command(self) -> str:
+        return (
+            "systemctl is-active --quiet hcm.service && "
+            "sudo -n docker ps --format '{{.Names}}' | grep -qx hcm-test && "
+            "sudo -n docker ps --format '{{.Names}}' | grep -qx hcm-postgres && "
+            "sudo -n python3 - <<'PY' && "
+            "systemctl is-active --quiet hcm-watchdog.timer && "
+            "systemctl is-active --quiet hcm-heartbeat.service\n"
+            "import urllib.request\n"
+            + self._hcm_endpoint_snippet() +
+            "with urllib.request.urlopen(url, timeout=5) as r:\n"
+            " status=r.getcode()\n"
+            "assert status == 200, status\n"
+            "print('hcm_api_endpoint={} http_status=200'.format(url))\n"
+            "PY"
+        )
+
     def preflight_steps(self) -> list[AdapterStep]:
         return super().preflight_steps() + [
             AdapterStep("hcm_systemd_unit", "systemctl cat hcm.service && systemctl is-enabled hcm.service || true"),
             AdapterStep("hcm_docker_layout", self._docker_preflight_command()),
-            AdapterStep("hcm_health", "systemctl is-active --quiet hcm.service && sudo -n docker ps --format '{{.Names}}' | grep -qx hcm-test && sudo -n docker ps --format '{{.Names}}' | grep -qx hcm-postgres && curl -fsS http://127.0.0.1:8080/api/v1/health >/dev/null && systemctl is-active --quiet hcm-heartbeat.service"),
+            AdapterStep("hcm_health", self._hcm_health_command()),
             AdapterStep("hcm_no_db_migration", "test -d /srv/hcm-data/postgres && sudo -n docker inspect hcm-postgres >/dev/null"),
         ]
 
     def no_change_health_steps(self) -> list[AdapterStep]:
         return [
             AdapterStep("hcm_docker_layout", self._docker_preflight_command()),
-            AdapterStep("hcm_health", "systemctl is-active --quiet hcm.service && curl -fsS http://127.0.0.1:8080/api/v1/health >/dev/null && systemctl is-active --quiet hcm-heartbeat.service"),
+            AdapterStep("hcm_health", self._hcm_health_command()),
         ]
 
     def release_marker(self) -> str:
@@ -269,7 +355,7 @@ class JetsonDockerAdapter(BaseAdapter):
             helper = "/tmp/homecontrol-current/10_scripts/hcm_docker_deploy.py"
         return [
             AdapterStep("restore_previous_container", f"sudo python3 {helper} rollback", changes_system=True, timeout=180),
-            AdapterStep("verify_hcm_api", "curl -fsS http://127.0.0.1:8080/api/v1/health >/dev/null", timeout=60),
+            AdapterStep("verify_hcm_api", self._hcm_health_command(), timeout=60),
         ]
 
 
@@ -294,7 +380,7 @@ class Lab1Adapter(BaseAdapter):
             AdapterStep("backup_lab_agent_components", "sudo install -d -m 0755 /opt/homecontrol-lab/backups && sudo cp -a /opt/homecontrol-lab/lab1_role_agent.py /opt/homecontrol-lab/backups/lab1_role_agent.py.previous", changes_system=True),
             AdapterStep("install_role_helper", f"sudo install -m 0755 {release_dir}/10_scripts/lab1_role_agent.py /opt/homecontrol-lab/lab1_role_agent.py", changes_system=True),
             AdapterStep("restart_lab_agent", "sudo systemctl restart homecontrol-lab.service", changes_system=True, timeout=60),
-            AdapterStep("verify_lab_services", "systemctl is-active --quiet homecontrol-lab.service && systemctl is-active --quiet hcm-heartbeat.service && test -S /run/hcm-heartbeat/control.sock", timeout=60),
+            AdapterStep("verify_lab_services", self._lab_services_command(), timeout=60),
             AdapterStep("record_release", f"printf '%s\\n' {artifact.release} | sudo tee {self.release_marker()} >/dev/null", changes_system=True),
         ]
 
@@ -305,21 +391,47 @@ class Lab1Adapter(BaseAdapter):
         return super().preflight_steps() + [
             AdapterStep("lab1_agent_layout", "python3 - <<'PY'\nimport os,socket\nassert socket.gethostname().split('.')[0] == 'lab1'\nfor p in ('/opt/homecontrol-lab/lab_agent.py','/opt/homecontrol-lab/lab1_role_agent.py','/opt/homecontrol-lab/state/module.json'):\n assert os.path.isfile(p), p\nprint('lab1_layout=ok')\nPY"),
             AdapterStep("lab1_state_safety", "python3 - <<'PY'\nimport json\ns=json.load(open('/opt/homecontrol-lab/state/module.json'))\nassert s.get('device_id') == '2ccf675d3414'\nassert s.get('hostname') == 'lab1'\nassert s.get('simulation') is True\nassert s.get('physical_outputs_enabled') is False\nassert 'role' in s\nPY"),
-            AdapterStep("lab1_services", "systemctl is-active --quiet homecontrol-lab.service && systemctl is-active --quiet hcm-heartbeat.service && test -S /run/hcm-heartbeat/control.sock"),
+            AdapterStep("lab1_services", self._lab_services_command()),
         ]
 
     def no_change_health_steps(self) -> list[AdapterStep]:
         return [
             AdapterStep("lab1_state_safety", "python3 - <<'PY'\nimport json\ns=json.load(open('/opt/homecontrol-lab/state/module.json'))\nassert s.get('simulation') is True\nassert s.get('physical_outputs_enabled') is False\nPY"),
-            AdapterStep("lab1_services", "systemctl is-active --quiet homecontrol-lab.service && systemctl is-active --quiet hcm-heartbeat.service"),
+            AdapterStep("lab1_services", self._lab_services_command()),
         ]
 
     def rollback_steps(self, artifact: ReleaseArtifact | None = None) -> list[AdapterStep]:
         return [
             AdapterStep("restore_role_helper", "sudo install -m 0755 /opt/homecontrol-lab/backups/lab1_role_agent.py.previous /opt/homecontrol-lab/lab1_role_agent.py", changes_system=True),
             AdapterStep("restart_lab_agent", "sudo systemctl restart homecontrol-lab.service", changes_system=True, timeout=60),
-            AdapterStep("verify_lab_services", "systemctl is-active --quiet homecontrol-lab.service && systemctl is-active --quiet hcm-heartbeat.service", timeout=60),
+            AdapterStep("verify_lab_services", self._lab_services_command(), timeout=60),
         ]
+
+    def _lab_services_command(self) -> str:
+        return (
+            "python3 - <<'PY'\n"
+            "import os, subprocess, sys\n"
+            "required=('homecontrol-lab.service','hcm-heartbeat.service')\n"
+            "failed=[]\n"
+            "for svc in required:\n"
+            " p=subprocess.Popen(['systemctl','is-active',svc],stdout=subprocess.PIPE,stderr=subprocess.PIPE)\n"
+            " out,err=p.communicate()\n"
+            " state=out.decode('utf-8','replace').strip() or err.decode('utf-8','replace').strip() or 'unknown'\n"
+            " if p.returncode != 0 or state != 'active':\n"
+            "  failed.append('{} is {}'.format(svc,state))\n"
+            " else:\n"
+            "  print('{}=active'.format(svc))\n"
+            " p=subprocess.Popen(['systemctl','show','-p','SubState','--value',svc],stdout=subprocess.PIPE,stderr=subprocess.PIPE)\n"
+            " out,err=p.communicate()\n"
+            " sub=out.decode('utf-8','replace').strip()\n"
+            " if p.returncode == 0 and sub:\n"
+            "  print('{} substate={}'.format(svc,sub))\n"
+            "sock='/run/hcm-heartbeat/control.sock'\n"
+            "print('heartbeat_control_socket={}'.format('present' if os.path.exists(sock) else 'absent'))\n"
+            "if failed:\n"
+            " raise SystemExit('; '.join(failed))\n"
+            "PY"
+        )
 
 
 def adapter_for(entry: DeviceInventoryEntry) -> BaseAdapter:

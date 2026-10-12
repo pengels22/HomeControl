@@ -222,6 +222,68 @@ def test_ssh_transport_ignores_post_quantum_warning_on_success():
     assert "post-quantum" not in result.stderr.lower()
 
 
+def test_read_only_ssh_retries_transient_banner_timeout():
+    class FlakyRunner:
+        def __init__(self):
+            self.calls = 0
+            self.commands = []
+
+        def __call__(self, command, *, input=None, timeout=None):
+            self.calls += 1
+            self.commands.append(command)
+            if self.calls == 1:
+                return transport.CommandResult(command, 255, "", "Connection timed out during banner exchange")
+            return transport.CommandResult(command, 0, "ok\n", "")
+
+    runner = FlakyRunner()
+    tx = transport.SSHTransport(runner=runner, read_only_retries=2)
+
+    result = tx.execute("jetson", "hostname", read_only=True)
+
+    assert result.stdout == "ok"
+    assert runner.calls == 2
+
+
+def test_state_changing_ssh_does_not_retry_transient_failure():
+    class FlakyRunner:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self, command, *, input=None, timeout=None):
+            self.calls += 1
+            return transport.CommandResult(command, 255, "", "Connection timed out during banner exchange")
+
+    runner = FlakyRunner()
+    tx = transport.SSHTransport(runner=runner, read_only_retries=2)
+
+    with pytest.raises(transport.TransportError, match="banner exchange"):
+        tx.execute("jetson", "sudo systemctl restart hcm.service", read_only=False)
+
+    assert runner.calls == 1
+
+
+def test_proxyjump_timeout_is_retryable_but_host_key_failure_is_not():
+    class ProxyRunner:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self, command, *, input=None, timeout=None):
+            self.calls += 1
+            if self.calls == 1:
+                return transport.CommandResult(command, 255, "", "ProxyJump connection timed out")
+            return transport.CommandResult(command, 0, "ok\n", "")
+
+    proxy = ProxyRunner()
+    transport.SSHTransport(runner=proxy).execute("jetson", "hostname", read_only=True)
+    assert proxy.calls == 2
+
+    runner = FakeRunner(fail_contains="conflict")
+    tx = transport.SSHTransport(runner=runner)
+    with pytest.raises(transport.TransportError, match="host key verification failed"):
+        tx.execute("conflict", "hostname", read_only=True)
+    assert len(runner.commands) == 1
+
+
 def test_live_deploy_uses_single_artifact_and_stops_after_failed_transfer(tmp_path, monkeypatch):
     monkeypatch.setenv("HC_DEPLOY_REPORT_DIR", str(tmp_path))
 
@@ -274,9 +336,21 @@ def test_jetson_preflight_does_not_require_env_file_or_pipe_docker_json_to_hered
     command = adapters.adapter_for(inventory.inventory()["jetson"])._docker_preflight_command()
     assert "/etc/hcm/hcm.env" not in command
     assert "docker inspect hcm-test | python3 - <<'PY'" not in command
-    assert "subprocess.run(['docker','inspect',name]" in command
+    assert "subprocess.Popen(['docker','inspect',name]" in command
+    assert "text=True" not in command
+    assert "capture_output" not in command
     assert "/srv/hcm-data/postgres" in command
     assert "/run/secrets/postgres_password" in command
+
+
+def test_jetson_health_discovers_published_non_loopback_endpoint():
+    command = adapters.adapter_for(inventory.inventory()["jetson"])._hcm_health_command()
+
+    assert "PortBindings" in command
+    assert "8080/tcp" in command
+    assert "api/v1/health" in command
+    assert "127.0.0.1:8080" not in command
+    assert "0.0.0.0" in command
 
 
 def test_conflict_preflight_uses_sudo_noninteractive_and_safe_metadata():
@@ -286,6 +360,10 @@ def test_conflict_preflight_uses_sudo_noninteractive_and_safe_metadata():
     assert "heartbeat_auth_secret_file" in commands
     assert "print('auth_mode=hmac-sha256 secret_present=true" in commands
     assert "cat /etc/hcm-heartbeat/config.json" not in commands
+    service = next(step.command for step in steps if step.name == "heartbeat_service")
+    assert "bind_address" in service
+    assert "advertise_ip" in service
+    assert "127.0.0.1:6004" not in service
 
 
 def test_lab1_layout_preflight_uses_python_hostname_and_file_checks():
@@ -294,6 +372,17 @@ def test_lab1_layout_preflight_uses_python_hostname_and_file_checks():
     assert "socket.gethostname().split('.')[0] == 'lab1'" in layout
     assert "/opt/homecontrol-lab/lab_agent.py" in layout
     assert "/opt/homecontrol-lab/state/module.json" in layout
+
+
+def test_lab1_service_check_reports_individual_service_status_without_socket_requirement():
+    steps = adapters.adapter_for(inventory.inventory()["lab1"]).preflight_steps()
+    command = next(step.command for step in steps if step.name == "lab1_services")
+
+    assert "homecontrol-lab.service" in command
+    assert "hcm-heartbeat.service" in command
+    assert "SubState" in command
+    assert "heartbeat_control_socket" in command
+    assert "test -S /run/hcm-heartbeat/control.sock" not in command
 
 
 def test_rollback_steps_are_adapter_specific():
@@ -336,6 +425,7 @@ def test_live_deploy_skips_target_already_at_release(tmp_path, monkeypatch):
     joined_commands = [" ".join(cmd) for cmd in tx.runner.commands]
     assert any("api/v1/health" in command for command in joined_commands)
     assert all("docker build" not in command for command in joined_commands)
+    assert all("127.0.0.1:8080" not in command for command in joined_commands)
 
 
 def test_no_change_is_success_and_fleet_continues(tmp_path, monkeypatch):
@@ -440,6 +530,86 @@ def test_hcm_docker_clone_preserves_mounts_networks_environment_and_command(monk
     assert body["Cmd"] == ["python", "-m", "uvicorn", "01_HCM.main:app"]
     assert body["HostConfig"]["Binds"] == ["/etc/hcm/postgres-password:/run/secrets/postgres_password:ro"]
     assert set(body["NetworkingConfig"]["EndpointsConfig"]) == {"hcm-control", "hcm-internal"}
+
+
+def test_hcm_docker_deploy_discovers_health_url_from_port_binding(monkeypatch):
+    module = load_script_module("hcm_docker_deploy_health_test", "10_scripts/hcm_docker_deploy.py")
+
+    def fake_inspect(name):
+        return {
+            "HostConfig": {
+                "PortBindings": {
+                    "8080/tcp": [{"HostIp": "192.168.20.27", "HostPort": "8080"}],
+                    "6501/tcp": [{"HostIp": "192.168.20.27", "HostPort": "6501"}],
+                }
+            }
+        }
+
+    monkeypatch.setattr(module, "inspect_container", fake_inspect)
+
+    assert module.published_health_url("hcm-test") == "http://192.168.20.27:8080/api/v1/health"
+
+
+def test_hcm_docker_deploy_rejects_ambiguous_loopback_fallback(monkeypatch):
+    module = load_script_module("hcm_docker_deploy_ambiguous_test", "10_scripts/hcm_docker_deploy.py")
+
+    def fake_inspect(name):
+        return {"HostConfig": {"PortBindings": {"8080/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8080"}]}}}
+
+    monkeypatch.setattr(module, "inspect_container", fake_inspect)
+
+    with pytest.raises(module.DockerDeployError, match="expected one concrete"):
+        module.published_health_url("hcm-test")
+
+
+def test_hcm_docker_deploy_rolls_back_when_health_check_fails(monkeypatch):
+    module = load_script_module("hcm_docker_deploy_rollback_test", "10_scripts/hcm_docker_deploy.py")
+    calls = []
+    containers = {"hcm-test"}
+
+    def fake_inspect(name):
+        if name not in containers:
+            raise module.DockerDeployError("missing {}".format(name))
+        return {"Config": {"Image": "old"}, "HostConfig": {}, "NetworkSettings": {"Networks": {}}}
+
+    def fake_create_clone(source, image, name):
+        calls.append(("create", name, image))
+        containers.add(name)
+
+    def fake_stop(name):
+        calls.append(("stop", name))
+
+    def fake_start(name):
+        calls.append(("start", name))
+
+    def fake_rename(old, new):
+        calls.append(("rename", old, new))
+        containers.remove(old)
+        containers.add(new)
+
+    def fake_remove(name):
+        calls.append(("remove", name))
+        containers.discard(name)
+
+    def fake_healthcheck(name, url, timeout):
+        calls.append(("health", name))
+        raise module.DockerDeployError("health failed")
+
+    monkeypatch.setattr(module, "inspect_container", fake_inspect)
+    monkeypatch.setattr(module, "create_clone", fake_create_clone)
+    monkeypatch.setattr(module, "stop_container", fake_stop)
+    monkeypatch.setattr(module, "start_container", fake_start)
+    monkeypatch.setattr(module, "rename_container", fake_rename)
+    monkeypatch.setattr(module, "remove_container", fake_remove)
+    monkeypatch.setattr(module, "healthcheck", fake_healthcheck)
+
+    with pytest.raises(module.DockerDeployError, match="health failed"):
+        module.deploy("new-image", name="hcm-test", rollback_name="hcm-rollback-before-deploy", health_url=None, timeout=1)
+
+    assert ("rename", "hcm-test", "hcm-rollback-before-deploy") in calls
+    assert ("remove", "hcm-test") in calls
+    assert ("rename", "hcm-rollback-before-deploy", "hcm-test") in calls
+    assert ("start", "hcm-test") in calls
 
 
 def test_cli_exit_code_helper_flags_failed_reports():
