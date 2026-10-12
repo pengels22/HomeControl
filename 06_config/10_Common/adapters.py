@@ -381,23 +381,14 @@ class Lab1Adapter(BaseAdapter):
     def steps(self, artifact: ReleaseArtifact, deployment_id: str | None = None) -> list[AdapterStep]:
         release_dir = self.release_dir(artifact)
         backup_dir = self._backup_dir(deployment_id or artifact.release)
-        safety_check = (
-            "test \"$(hostname)\" = lab1 && "
-            "test -f /opt/homecontrol-lab/state/module.json && "
-            "python3 - <<'PY'\n"
-            "import json\n"
-            "s=json.load(open('/opt/homecontrol-lab/state/module.json'))\n"
-            "assert s.get('device_id') == '2ccf675d3414'\n"
-            "assert s.get('physical_outputs_enabled') is False\n"
-            "assert s.get('simulation') is True\n"
-            "PY"
-        )
         return super().steps(artifact, deployment_id=deployment_id) + [
-            AdapterStep("preflight_lab1_safety", safety_check),
+            AdapterStep("preflight_lab1_safety", self._lab_state_safety_command()),
             AdapterStep("backup_lab_agent_components", self._lab1_backup_command(backup_dir), changes_system=True),
             AdapterStep("install_role_helper", f"sudo install -m 0755 {release_dir}/10_scripts/lab1_role_agent.py /opt/homecontrol-lab/lab1_role_agent.py", changes_system=True),
             AdapterStep("restart_lab_agent", "sudo systemctl restart homecontrol-lab.service", changes_system=True, timeout=60),
+            AdapterStep("verify_lab_state_safety", self._lab_state_safety_command(backup_dir), timeout=60),
             AdapterStep("verify_lab_services", self._lab_services_command(), timeout=60),
+            AdapterStep("verify_lab_heartbeat_client", self._lab_heartbeat_client_command(), timeout=60),
             AdapterStep("record_release", f"printf '%s\\n' {artifact.release} | sudo tee {self.release_marker()} >/dev/null", changes_system=True),
         ]
 
@@ -407,7 +398,7 @@ class Lab1Adapter(BaseAdapter):
     def preflight_steps(self) -> list[AdapterStep]:
         return super().preflight_steps() + [
             AdapterStep("lab1_agent_layout", "python3 - <<'PY'\nimport os,socket\nassert socket.gethostname().split('.')[0] == 'lab1'\nfor p in ('/opt/homecontrol-lab/lab_agent.py','/opt/homecontrol-lab/lab1_role_agent.py','/opt/homecontrol-lab/state/module.json'):\n assert os.path.isfile(p), p\nprint('lab1_layout=ok')\nPY"),
-            AdapterStep("lab1_state_safety", "python3 - <<'PY'\nimport json\ns=json.load(open('/opt/homecontrol-lab/state/module.json'))\nassert s.get('device_id') == '2ccf675d3414'\nassert s.get('hostname') == 'lab1'\nassert s.get('simulation') is True\nassert s.get('physical_outputs_enabled') is False\nassert 'role' in s\nPY"),
+            AdapterStep("lab1_state_safety", self._lab_state_safety_command()),
             AdapterStep("lab1_services", self._lab_services_command()),
             AdapterStep("lab1_heartbeat_client", self._lab_heartbeat_client_command()),
         ]
@@ -422,7 +413,7 @@ class Lab1Adapter(BaseAdapter):
 
     def no_change_health_steps(self) -> list[AdapterStep]:
         return [
-            AdapterStep("lab1_state_safety", "python3 - <<'PY'\nimport json\ns=json.load(open('/opt/homecontrol-lab/state/module.json'))\nassert s.get('simulation') is True\nassert s.get('physical_outputs_enabled') is False\nPY"),
+            AdapterStep("lab1_state_safety", self._lab_state_safety_command()),
             AdapterStep("lab1_services", self._lab_services_command()),
             AdapterStep("lab1_heartbeat_client", self._lab_heartbeat_client_command()),
         ]
@@ -432,7 +423,9 @@ class Lab1Adapter(BaseAdapter):
         return [
             AdapterStep("restore_role_helper", self._lab1_restore_command(backup_dir), changes_system=True),
             AdapterStep("restart_lab_agent", "sudo systemctl restart homecontrol-lab.service", changes_system=True, timeout=60),
+            AdapterStep("verify_lab_state_safety", self._lab_state_safety_command(backup_dir), timeout=60),
             AdapterStep("verify_lab_services", self._lab_services_command(), timeout=60),
+            AdapterStep("verify_lab_heartbeat_client", self._lab_heartbeat_client_command(), timeout=60),
         ]
 
     def rollback_after_failure(self, transport: SSHTransport, artifact: ReleaseArtifact, deployment_id: str | None = None) -> AdapterResult:
@@ -442,6 +435,7 @@ class Lab1Adapter(BaseAdapter):
             [
                 AdapterStep("restore_role_helper", self._lab1_restore_command(backup_dir), changes_system=True),
                 AdapterStep("restart_lab_agent", "sudo systemctl restart homecontrol-lab.service", changes_system=True, timeout=60),
+                AdapterStep("verify_lab_state_safety", self._lab_state_safety_command(backup_dir), timeout=60),
                 AdapterStep("verify_lab_services", self._lab_services_command(), timeout=60),
                 AdapterStep("verify_lab_heartbeat_client", self._lab_heartbeat_client_command(), timeout=60),
             ],
@@ -460,9 +454,11 @@ class Lab1Adapter(BaseAdapter):
             "[ ! -e \"$b\" ] || { echo backup_exists:$b >&2; exit 1; }; "
             "install -d -m 0755 \"$b\"; "
             "cp -a /opt/homecontrol-lab/lab1_role_agent.py \"$b/lab1_role_agent.py\"; "
+            "cp -a /opt/homecontrol-lab/state/module.json \"$b/module.json\"; "
             "if [ -f \"$marker\" ]; then cp -a \"$marker\" \"$b/homecontrol-release\"; else : > \"$b/homecontrol-release.absent\"; fi; "
-            "stat -c \"%U:%G %a %n\" /opt/homecontrol-lab/lab1_role_agent.py \"$b/lab1_role_agent.py\" > \"$b/manifest.txt\"; "
+            "stat -c \"%U:%G %a %n\" /opt/homecontrol-lab/lab1_role_agent.py \"$b/lab1_role_agent.py\" /opt/homecontrol-lab/state/module.json \"$b/module.json\" > \"$b/manifest.txt\"; "
             "cmp -s /opt/homecontrol-lab/lab1_role_agent.py \"$b/lab1_role_agent.py\"; "
+            "cmp -s /opt/homecontrol-lab/state/module.json \"$b/module.json\"; "
             "ln -sfn \"$b\" /opt/homecontrol-lab/backups/homecontrol-deploy-rollback; "
             "echo lab1_backup=$b verified=true'"
         )
@@ -479,6 +475,46 @@ class Lab1Adapter(BaseAdapter):
             "elif [ -f \"$b/homecontrol-release.absent\" ]; then rm -f \"$marker\"; "
             "else echo missing_marker_backup >&2; exit 1; fi; "
             "echo lab1_restore=$b marker_restored=true'"
+        )
+
+    def _lab_state_safety_command(self, backup_dir: str | None = None) -> str:
+        backup_state = f"{backup_dir}/module.json" if backup_dir else ""
+        return (
+            "python3 - <<'PY'\n"
+            "import json, os, socket\n"
+            "state_path='/opt/homecontrol-lab/state/module.json'\n"
+            f"backup_state={backup_state!r}\n"
+            "try:\n"
+            " with open(state_path) as f:\n"
+            "  state=json.load(f)\n"
+            "except Exception as exc:\n"
+            " raise SystemExit('module_state_invalid: {}'.format(exc))\n"
+            "host=socket.gethostname().split('.')[0]\n"
+            "if host != 'lab1':\n"
+            " raise SystemExit('hostname {} != lab1'.format(host))\n"
+            "if state.get('device_id') != '2ccf675d3414':\n"
+            " raise SystemExit('device_id {} != 2ccf675d3414'.format(state.get('device_id')))\n"
+            "if state.get('hostname') != 'lab1':\n"
+            " raise SystemExit('state hostname {} != lab1'.format(state.get('hostname')))\n"
+            "if state.get('simulation') is not True:\n"
+            " raise SystemExit('simulation is not true')\n"
+            "if state.get('physical_outputs_enabled') is not False:\n"
+            " raise SystemExit('physical_outputs_enabled is not false')\n"
+            "if 'role' not in state:\n"
+            " raise SystemExit('role missing')\n"
+            "if backup_state:\n"
+            " if not os.path.isfile(backup_state):\n"
+            "  raise SystemExit('backup module_state missing: {}'.format(backup_state))\n"
+            " try:\n"
+            "  with open(backup_state) as f:\n"
+            "   previous=json.load(f)\n"
+            " except Exception as exc:\n"
+            "  raise SystemExit('backup_module_state_invalid: {}'.format(exc))\n"
+            " for key in ('role','device_id','hostname','simulation','physical_outputs_enabled'):\n"
+            "  if previous.get(key) != state.get(key):\n"
+            "   raise SystemExit('{} changed: {!r} != {!r}'.format(key,state.get(key),previous.get(key)))\n"
+            "print('lab1_state_safety=ok hostname=lab1 device_id=2ccf675d3414 simulation=true physical_outputs_enabled=false role={}'.format(state.get('role')))\n"
+            "PY"
         )
 
     def _lab_services_command(self) -> str:
@@ -510,17 +546,62 @@ class Lab1Adapter(BaseAdapter):
     def _lab_heartbeat_client_command(self) -> str:
         return (
             "sudo -n python3 - <<'PY'\n"
-            "import json, socket\n"
+            "import json, socket, time\n"
+            "try:\n"
+            " import urllib.request as urllib_request\n"
+            "except ImportError:\n"
+            " import urllib2 as urllib_request\n"
             "cfg=json.load(open('/etc/hcm-heartbeat/config.json'))\n"
             "assert cfg.get('role') == 'device', cfg.get('role')\n"
             "assert cfg.get('heartbeat_auth_mode') == 'hmac-sha256'\n"
+            "assert cfg.get('device_id') in (None, '2ccf675d3414')\n"
+            "bind=cfg.get('bind_address') or '127.0.0.1'\n"
+            "status_host='127.0.0.1' if bind in ('0.0.0.0','::','') else bind\n"
             "addr=cfg.get('conflict_address') or cfg.get('conflict_hostname')\n"
             "port=int(cfg.get('port',6004))\n"
             "if not addr:\n"
             " raise SystemExit('missing conflict heartbeat destination')\n"
             "s=socket.create_connection((addr,port),timeout=3)\n"
             "s.close()\n"
-            "print('heartbeat_destination={}:{} tcp=reachable auth_mode=hmac-sha256 control_socket=optional'.format(addr,port))\n"
+            "if ':' in status_host and not status_host.startswith('['):\n"
+            " endpoint='http://[{}]:{}'.format(status_host,port)\n"
+            "else:\n"
+            " endpoint='http://{}:{}'.format(status_host,port)\n"
+            "deadline=time.time()+30\n"
+            "last_error='status not checked'\n"
+            "while time.time() <= deadline:\n"
+            " try:\n"
+            "  response=urllib_request.urlopen(endpoint + '/status', timeout=5)\n"
+            "  try:\n"
+            "   code=response.getcode()\n"
+            "   raw=response.read(65537)\n"
+            "  finally:\n"
+            "   close=getattr(response,'close',None)\n"
+            "   if close:\n"
+            "    close()\n"
+            "  if code != 200:\n"
+            "   raise ValueError('status HTTP {}'.format(code))\n"
+            "  status=json.loads(raw.decode('utf-8'))\n"
+            "  if status.get('device_id') != '2ccf675d3414':\n"
+            "   raise ValueError('status device_id {} != 2ccf675d3414'.format(status.get('device_id')))\n"
+            "  if str(status.get('hostname','')).split('.')[0] != 'lab1':\n"
+            "   raise ValueError('status hostname {} != lab1'.format(status.get('hostname')))\n"
+            "  peer=status.get('status',{}).get('peer',{})\n"
+            "  if peer.get('enabled') is not True:\n"
+            "   raise ValueError('heartbeat peer status not enabled')\n"
+            "  if peer.get('online') is not True:\n"
+            "   raise ValueError('heartbeat peer offline: {}'.format(peer.get('last_error')))\n"
+            "  if peer.get('last_error') not in (None, ''):\n"
+            "   raise ValueError('heartbeat peer error: {}'.format(peer.get('last_error')))\n"
+            "  if peer.get('seconds_since_ack') is None:\n"
+            "   raise ValueError('heartbeat has no ack age')\n"
+            "  print('heartbeat_destination={}:{} tcp=reachable status_endpoint={} peer_online=true seconds_since_ack={} auth_mode=hmac-sha256 control_socket=optional'.format(addr,port,endpoint,peer.get('seconds_since_ack')))\n"
+            "  break\n"
+            " except Exception as exc:\n"
+            "  last_error=str(exc)\n"
+            "  if time.time() > deadline:\n"
+            "   raise SystemExit('heartbeat_client_status_failed: {}'.format(last_error))\n"
+            "  time.sleep(2)\n"
             "PY"
         )
 

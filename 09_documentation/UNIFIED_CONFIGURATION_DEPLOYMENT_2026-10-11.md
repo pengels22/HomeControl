@@ -128,6 +128,45 @@ Actual live backup and rollback are adapter-specific:
 - RMC rollback is firmware-specific and must never flash hardware through a
   generic Linux adapter.
 
+## LAB1 Post-Deployment Acceptance Criteria
+
+LAB1 deployment is accepted only after the restarted device still proves all of
+the following from read-only checks:
+
+- The OS hostname resolves to `lab1`.
+- `/opt/homecontrol-lab/state/module.json` is readable and valid JSON.
+- The module state reports `device_id=2ccf675d3414` and `hostname=lab1`.
+- `simulation` is exactly `true`.
+- `physical_outputs_enabled` is exactly `false`.
+- The existing role and key state fields match the state snapshot captured in
+  the deployment-specific backup.
+- `homecontrol-lab.service` is active.
+- `hcm-heartbeat.service` is active.
+- The heartbeat client exposes `/status`, reports LAB1's identity, and shows an
+  online peer with a recent Conflict acknowledgment.
+
+Any identity mismatch, malformed state file, disabled simulation flag, enabled
+physical outputs flag, inactive required service, or observable heartbeat status
+failure is a deployment failure. The new release marker is written only after
+all LAB1 safety, service, and heartbeat checks pass.
+
+The `/run/hcm-heartbeat/control.sock` path remains optional for LAB1 deployment
+verification. The socket is for local heartbeat control/fault commands, not for
+the normal client heartbeat path. Its absence is reported as metadata by service
+checks and is not treated as a failure. Heartbeat delivery is instead checked by
+TCP reachability to the configured Conflict endpoint and the installed
+heartbeat daemon's existing `/status` endpoint. If `/status` is unavailable or
+does not show a recent successful peer acknowledgment, deployment verification
+fails rather than treating an active systemd service as proof of heartbeat
+delivery.
+
+Automatic LAB1 rollback restores the previous role helper and previous release
+marker state, restarts only `homecontrol-lab.service`, and then runs the same
+post-rollback safety, service, and heartbeat checks. A rollback that restores
+files but leaves LAB1 with the wrong identity, non-simulation state, enabled
+physical outputs, inactive required services, or failed observable heartbeat
+health is reported as failed.
+
 ## Live Migration Plan
 
 1. Run `homecontrol status` and `homecontrol deploy --dry-run` locally.
@@ -186,22 +225,29 @@ Fleet-wide live deployment remains a separate explicit operation:
   parse the actual JSON response, confirm the expected registered and authorized
   Jetson/LAB1 identities, and fail on unexpected active communication faults.
 - LAB1 preflight validates the real `/opt/homecontrol-lab` layout, permanent
-  identity, simulation-only state, disabled physical outputs, and required
-  services without changing role state. Service checks now report each required
+  identity, simulation-only state, disabled physical outputs, valid module
+  state JSON, role presence, and required services without changing role state.
+  Post-install and post-rollback verification repeats those safety checks after
+  restart and compares the role plus identity/safety fields against the
+  deployment backup's state snapshot. Service checks report each required
   systemd unit and its substate explicitly; the heartbeat control socket path is
   reported as metadata but is not treated as proof that the heartbeat service is
   active. The socket is optional for the installed heartbeat client's normal
   client-to-Conflict path: the daemon posts heartbeat packets directly to the
   configured Conflict endpoint over TCP 6004; the Unix socket is for local
-  control/fault commands. LAB1 verification therefore checks the configured
-  Conflict destination over TCP instead of creating or requiring the socket.
+  control/fault commands. LAB1 heartbeat verification therefore checks the
+  configured Conflict destination over TCP and then reads the existing local
+  heartbeat `/status` endpoint, requiring LAB1 identity and an online peer with
+  a recent acknowledgment.
 - LAB1 live deployment creates a deployment-specific backup under
   `/opt/homecontrol-lab/backups/<deployment-id>` before replacing
-  `lab1_role_agent.py`. The backup preserves the previous role helper and
-  release marker state, verifies the copied helper with `cmp`, and updates the
-  `homecontrol-deploy-rollback` symlink. If post-replacement verification
-  fails, rollback restores the previous helper and release marker before
-  restarting only `homecontrol-lab.service`.
+  `lab1_role_agent.py`. The backup preserves the previous role helper, module
+  state snapshot, and release marker state, verifies the copied helper and state
+  snapshot with `cmp`, and updates the `homecontrol-deploy-rollback` symlink. If
+  post-replacement verification fails, rollback restores the previous helper
+  and release marker before restarting only `homecontrol-lab.service`, then
+  fails the rollout if the restored device does not pass the same safety,
+  service, and observable heartbeat checks.
 - Read-only SSH checks use bounded retries for transient transport failures such
   as banner-exchange or ProxyJump timeouts while preserving BatchMode,
   key-only authentication, strict host-key validation, and SSH aliases. Commands

@@ -571,7 +571,38 @@ def test_lab1_heartbeat_socket_is_optional_but_conflict_destination_is_checked()
     assert "control_socket=optional" in heartbeat
     assert "conflict_address" in heartbeat
     assert "socket.create_connection" in heartbeat
+    assert "/status" in heartbeat
+    assert "peer_online=true" in heartbeat
     assert "heartbeat_auth_secret_file" not in heartbeat
+
+
+def test_lab1_state_safety_command_enforces_identity_and_simulation_lockout():
+    command = adapters.adapter_for(inventory.inventory()["lab1"])._lab_state_safety_command("/opt/homecontrol-lab/backups/hc-test")
+
+    assert "module_state_invalid" in command
+    assert "hostname {} != lab1" in command
+    assert "device_id {} != 2ccf675d3414" in command
+    assert "state hostname {} != lab1" in command
+    assert "simulation is not true" in command
+    assert "physical_outputs_enabled is not false" in command
+    assert "role missing" in command
+    assert "for key in ('role','device_id','hostname','simulation','physical_outputs_enabled')" in command
+    assert "backup_module_state_invalid" in command
+
+
+def test_lab1_post_install_verifies_safety_services_and_heartbeat_before_marker():
+    fake_artifact = artifact.ReleaseArtifact(
+        release="a" * 40,
+        path=Path("/tmp/homecontrol.tar.gz"),
+        sha256="abc123",
+        metadata_path=Path("/tmp/homecontrol.json"),
+    )
+    names = [step.name for step in adapters.adapter_for(inventory.inventory()["lab1"]).steps(fake_artifact, deployment_id="hc-test")]
+
+    assert names.index("restart_lab_agent") < names.index("verify_lab_state_safety")
+    assert names.index("verify_lab_state_safety") < names.index("verify_lab_services")
+    assert names.index("verify_lab_services") < names.index("verify_lab_heartbeat_client")
+    assert names.index("verify_lab_heartbeat_client") < names.index("record_release")
 
 
 def test_lab1_deployment_uses_release_specific_backup_and_restores_marker():
@@ -593,6 +624,7 @@ def test_lab1_deployment_uses_release_specific_backup_and_restores_marker():
 
     assert "/opt/homecontrol-lab/backups/hc-test-123" in backup
     assert "cp -a /opt/homecontrol-lab/lab1_role_agent.py" in backup
+    assert "cp -a /opt/homecontrol-lab/state/module.json" in backup
     assert "homecontrol-release.absent" in backup
     assert "cmp -s" in backup
     assert "/opt/homecontrol-lab/backups/hc-test-123" in restore
@@ -689,6 +721,9 @@ def test_changed_failure_attempts_safe_rollback(tmp_path, monkeypatch):
     assert report["targets"][0]["status"] == "ROLLED BACK"
     assert report["summary"]["status"] == "FAIL"
     assert any(step.get("rollback") for step in report["targets"][0]["steps"])
+    rollback_names = [step["name"] for step in report["targets"][0]["steps"] if step.get("rollback")]
+    assert "verify_lab_state_safety" in rollback_names
+    assert "verify_lab_heartbeat_client" in rollback_names
 
 
 def test_lab1_backup_creation_failure_does_not_restart_or_restore(tmp_path, monkeypatch):
@@ -717,6 +752,106 @@ def test_lab1_backup_creation_failure_does_not_restart_or_restore(tmp_path, monk
     assert not any(step.get("rollback") for step in report["targets"][0]["steps"])
     assert not any("systemctl restart homecontrol-lab.service" in command for command in joined)
     assert not any("lab1_restore=" in command for command in joined)
+
+
+def test_lab1_post_deploy_state_failure_rolls_back_without_new_marker(tmp_path, monkeypatch):
+    fake_artifact = artifact.ReleaseArtifact(
+        release="b" * 40,
+        path=tmp_path / "homecontrol.tar.gz",
+        sha256="abc123",
+        metadata_path=tmp_path / "homecontrol.json",
+    )
+    fake_artifact.path.write_text("artifact")
+    fake_artifact.metadata_path.write_text("{}")
+    monkeypatch.setattr(engine.artifact_mod, "create_release_artifact", lambda repo_root, release, output_dir: fake_artifact)
+
+    class PostInstallUnsafeStateRunner(FakeRunner):
+        def __init__(self):
+            super().__init__()
+            self.installed = False
+            self.failed = False
+
+        def __call__(self, command, *, input=None, timeout=None):
+            self.commands.append(command)
+            joined = " ".join(command)
+            if "sudo install -m 0755" in joined:
+                self.installed = True
+            if self.installed and not self.failed and "lab1_state_safety=ok" in joined:
+                self.failed = True
+                return transport.CommandResult(command, 1, "", "simulation is not true")
+            return transport.CommandResult(command, 0, "ok\n", "")
+
+    tx = transport.SSHTransport(runner=PostInstallUnsafeStateRunner())
+
+    report = engine.deploy(
+        repo_root=ROOT,
+        release="b" * 40,
+        target="lab1",
+        dry_run=False,
+        transport=tx,
+        run_tests=False,
+    )
+
+    joined = [" ".join(command) for command in tx.runner.commands]
+    assert report["targets"][0]["status"] == "ROLLED BACK"
+    assert not any("tee /opt/homecontrol-lab/state/homecontrol-release" in command for command in joined)
+
+
+@pytest.mark.parametrize(
+    ("name", "needle", "error"),
+    [
+        ("incorrect_device_id", "lab1_state_safety=ok", "device_id bad != 2ccf675d3414"),
+        ("incorrect_hostname", "lab1_state_safety=ok", "hostname wrong != lab1"),
+        ("simulation_false", "lab1_state_safety=ok", "simulation is not true"),
+        ("physical_outputs_enabled_true", "lab1_state_safety=ok", "physical_outputs_enabled is not false"),
+        ("missing_or_malformed_state_json", "lab1_state_safety=ok", "module_state_invalid"),
+        ("inactive_lab_service", "homecontrol-lab.service','hcm-heartbeat.service", "homecontrol-lab.service is inactive"),
+        ("inactive_heartbeat_service", "homecontrol-lab.service','hcm-heartbeat.service", "hcm-heartbeat.service is inactive"),
+        ("heartbeat_status_failure", "heartbeat_client_status_failed", "heartbeat peer offline"),
+    ],
+)
+def test_lab1_post_install_verification_failures_are_failed_rollouts(name, needle, error, tmp_path, monkeypatch):
+    fake_artifact = artifact.ReleaseArtifact(
+        release="c" * 40,
+        path=tmp_path / "homecontrol.tar.gz",
+        sha256="abc123",
+        metadata_path=tmp_path / "homecontrol.json",
+    )
+    fake_artifact.path.write_text("artifact")
+    fake_artifact.metadata_path.write_text("{}")
+    monkeypatch.setattr(engine.artifact_mod, "create_release_artifact", lambda repo_root, release, output_dir: fake_artifact)
+
+    class OnePostInstallFailureRunner(FakeRunner):
+        def __init__(self):
+            super().__init__()
+            self.installed = False
+            self.failed = False
+
+        def __call__(self, command, *, input=None, timeout=None):
+            self.commands.append(command)
+            joined = " ".join(command)
+            if "sudo install -m 0755" in joined:
+                self.installed = True
+            if self.installed and not self.failed and needle in joined:
+                self.failed = True
+                return transport.CommandResult(command, 1, "", error)
+            return transport.CommandResult(command, 0, "ok\n", "")
+
+    tx = transport.SSHTransport(runner=OnePostInstallFailureRunner())
+
+    report = engine.deploy(
+        repo_root=ROOT,
+        release="c" * 40,
+        target="lab1",
+        dry_run=False,
+        transport=tx,
+        run_tests=False,
+    )
+
+    assert name
+    assert report["targets"][0]["status"] == "ROLLED BACK"
+    assert report["summary"]["status"] == "FAIL"
+    assert any(step["status"] == "FAIL" and error in step["detail"] for step in report["targets"][0]["steps"])
 
 
 def test_rollback_failure_reports_fail_not_success(tmp_path, monkeypatch):
@@ -751,6 +886,52 @@ def test_rollback_failure_reports_fail_not_success(tmp_path, monkeypatch):
     assert report["targets"][0]["status"] == "FAIL"
     assert report["summary"]["status"] == "FAIL"
     assert any(step.get("rollback") and step["status"] == "FAIL" for step in report["targets"][0]["steps"])
+
+
+def test_lab1_rollback_with_unsafe_state_reports_failure(tmp_path, monkeypatch):
+    fake_artifact = artifact.ReleaseArtifact(
+        release="d" * 40,
+        path=tmp_path / "homecontrol.tar.gz",
+        sha256="abc123",
+        metadata_path=tmp_path / "homecontrol.json",
+    )
+    fake_artifact.path.write_text("artifact")
+    fake_artifact.metadata_path.write_text("{}")
+    monkeypatch.setattr(engine.artifact_mod, "create_release_artifact", lambda repo_root, release, output_dir: fake_artifact)
+
+    class UnsafeRollbackStateRunner(FakeRunner):
+        def __init__(self):
+            super().__init__()
+            self.rollback_started = False
+
+        def __call__(self, command, *, input=None, timeout=None):
+            self.commands.append(command)
+            joined = " ".join(command)
+            if "tee /opt/homecontrol-lab/state/homecontrol-release" in joined:
+                return transport.CommandResult(command, 1, "", "marker failure")
+            if "lab1_restore=" in joined:
+                self.rollback_started = True
+            if self.rollback_started and "lab1_state_safety=ok" in joined:
+                return transport.CommandResult(command, 1, "", "physical_outputs_enabled is not false")
+            return transport.CommandResult(command, 0, "ok\n", "")
+
+    tx = transport.SSHTransport(runner=UnsafeRollbackStateRunner())
+
+    report = engine.deploy(
+        repo_root=ROOT,
+        release="d" * 40,
+        target="lab1",
+        dry_run=False,
+        transport=tx,
+        run_tests=False,
+    )
+
+    assert report["targets"][0]["status"] == "FAIL"
+    assert report["summary"]["status"] == "FAIL"
+    assert any(
+        step.get("rollback") and step["name"] == "verify_lab_state_safety" and step["status"] == "FAIL"
+        for step in report["targets"][0]["steps"]
+    )
 
 
 def test_preflight_reports_facts_and_blockers():
