@@ -40,6 +40,10 @@ class DeploymentError(ValueError):
     pass
 
 
+class RollbackResolutionError(DeploymentError):
+    pass
+
+
 @dataclass(frozen=True)
 class DeploymentStep:
     name: str
@@ -364,23 +368,72 @@ def rollback(
     *,
     repo_root: Path,
     target: str,
+    deployment_id: str,
     transport: transport_mod.SSHTransport | None = None,
 ) -> dict[str, Any]:
     manifests = manifest_mod.load_all_manifests(repo_root / "06_config")
     entry = inventory_mod.select_inventory(target)[0]
     _verify_manifest_matches_inventory(entry, manifests[entry.device_type])
+    source = resolve_rollback_source(repo_root, target, deployment_id)
     transport = transport or transport_mod.SSHTransport()
-    result = adapters_mod.adapter_for(entry).rollback(transport)
+    result = adapters_mod.adapter_for(entry).rollback_for_deployment(
+        transport,
+        deployment_id=source["deployment_id"],
+        release=source["release"],
+    )
     return {
         "created_at": datetime.now(UTC).isoformat(),
         "target": target,
+        "deployment_id": source["deployment_id"],
+        "rollback_release": source["release"],
+        "rollback_report": str(source["report_path"]),
         "status": result.status,
         "steps": result.steps,
         "summary": {
             "status": result.status,
-            "rollback_scope": "adapter-specific application rollback",
+            "rollback_scope": "deployment-record-specific application rollback",
         },
     }
+
+
+def resolve_rollback_source(repo_root: Path, target: str, deployment_id: str) -> dict[str, Any]:
+    if not deployment_id:
+        raise RollbackResolutionError("rollback requires an explicit deployment_id")
+    path = _report_dir(repo_root) / f"{deployment_id}.json"
+    if not path.exists():
+        raise RollbackResolutionError(f"deployment report {deployment_id} is missing")
+    try:
+        report = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise RollbackResolutionError(f"deployment report {deployment_id} is not valid JSON: {exc}") from exc
+    if report.get("dry_run") is True:
+        raise RollbackResolutionError(f"deployment report {deployment_id} is a dry run and has no recovery point")
+    if report.get("deployment_id") != deployment_id:
+        raise RollbackResolutionError(f"deployment report ID mismatch: {report.get('deployment_id')} != {deployment_id}")
+    matches = [item for item in report.get("targets", []) if item.get("target") == target]
+    if len(matches) != 1:
+        raise RollbackResolutionError(f"deployment report {deployment_id} has {len(matches)} entries for target {target}; refusing ambiguous rollback")
+    target_record = matches[0]
+    release = target_record.get("release") or report.get("release")
+    if not isinstance(release, str) or len(release) != 40:
+        raise RollbackResolutionError(f"deployment report {deployment_id} does not contain a full release SHA for target {target}")
+    _require_recovery_step(target, target_record, deployment_id)
+    return {"deployment_id": deployment_id, "release": release, "report_path": path}
+
+
+def _require_recovery_step(target: str, target_record: dict[str, Any], deployment_id: str) -> None:
+    required = {
+        "jetson": "replace_hcm_container",
+        "conflict": "backup_heartbeat_app",
+        "lab1": "backup_lab_agent_components",
+    }.get(target)
+    if required is None:
+        raise RollbackResolutionError(f"manual rollback is not configured for target {target}")
+    matches = [step for step in target_record.get("steps", []) if step.get("name") == required]
+    if len(matches) != 1:
+        raise RollbackResolutionError(f"deployment report {deployment_id} has {len(matches)} {required} steps for target {target}; refusing ambiguous rollback")
+    if matches[0].get("status") != PASS:
+        raise RollbackResolutionError(f"deployment report {deployment_id} did not complete {required}; no verified recovery point")
 
 
 def _plan_to_dict(plan: DevicePlan) -> dict[str, Any]:

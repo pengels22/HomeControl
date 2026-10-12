@@ -695,6 +695,114 @@ def test_rollback_steps_are_adapter_specific():
     assert all("registry.sqlite3" not in step.command for step in conflict)
 
 
+def write_deployment_report(report_dir: Path, *, deployment_id: str, target: str, release: str, recovery_step: str, recovery_status: str = "PASS", duplicate: bool = False):
+    target_record = {
+        "target": target,
+        "release": release,
+        "status": "PASS",
+        "steps": [{"name": recovery_step, "status": recovery_status, "detail": "ok"}],
+    }
+    targets = [target_record]
+    if duplicate:
+        targets.append(dict(target_record))
+    report = {
+        "deployment_id": deployment_id,
+        "release": release,
+        "dry_run": False,
+        "targets": targets,
+        "summary": {"status": "PASS"},
+    }
+    report_dir.mkdir(parents=True)
+    (report_dir / f"{deployment_id}.json").write_text(json.dumps(report))
+    return report
+
+
+def test_manual_jetson_rollback_uses_deployment_specific_container_from_report(tmp_path, monkeypatch):
+    deployment_id = "hc-20261012T030000Z-abc12345"
+    release_sha = "a" * 40
+    report_dir = tmp_path / "reports"
+    write_deployment_report(report_dir, deployment_id=deployment_id, target="jetson", release=release_sha, recovery_step="replace_hcm_container")
+    monkeypatch.setenv("HC_DEPLOY_REPORT_DIR", str(report_dir))
+    tx = transport.SSHTransport(runner=FakeRunner())
+
+    report = engine.rollback(repo_root=ROOT, target="jetson", deployment_id=deployment_id, transport=tx)
+
+    joined = [" ".join(command) for command in tx.runner.commands]
+    assert report["status"] == "PASS"
+    assert report["rollback_release"] == release_sha
+    assert any("--rollback-name hcm-rollback-hc-20261012T030000Z-abc12345" in command for command in joined)
+    assert all("hcm-rollback-manual" not in command for command in joined)
+    assert any(f"/tmp/homecontrol-release-{release_sha}/10_scripts/hcm_docker_deploy.py" in command for command in joined)
+
+
+def test_manual_conflict_rollback_uses_deployment_specific_backup_from_report(tmp_path, monkeypatch):
+    deployment_id = "hc-20261012T031500Z-def67890"
+    release_sha = "b" * 40
+    report_dir = tmp_path / "reports"
+    write_deployment_report(report_dir, deployment_id=deployment_id, target="conflict", release=release_sha, recovery_step="backup_heartbeat_app")
+    monkeypatch.setenv("HC_DEPLOY_REPORT_DIR", str(report_dir))
+    tx = transport.SSHTransport(runner=FakeRunner())
+
+    report = engine.rollback(repo_root=ROOT, target="conflict", deployment_id=deployment_id, transport=tx)
+
+    joined = [" ".join(command) for command in tx.runner.commands]
+    assert report["status"] == "PASS"
+    assert any("/var/backups/homecontrol-heartbeat/app-rollback-hc-20261012T031500Z-def67890" in command for command in joined)
+    assert all("/var/backups/homecontrol-heartbeat/homecontrol-deploy-rollback" not in command for command in joined)
+    assert any(f"/tmp/homecontrol-release-{release_sha}/10_scripts/heartbeat_verify_readonly.sh" in command for command in joined)
+
+
+def test_manual_rollback_rejects_missing_or_ambiguous_deployment_records_without_mutation(tmp_path, monkeypatch):
+    report_dir = tmp_path / "reports"
+    monkeypatch.setenv("HC_DEPLOY_REPORT_DIR", str(report_dir))
+    tx = transport.SSHTransport(runner=FakeRunner())
+
+    with pytest.raises(engine.RollbackResolutionError, match="missing"):
+        engine.rollback(repo_root=ROOT, target="jetson", deployment_id="hc-missing", transport=tx)
+    assert tx.runner.commands == []
+
+    write_deployment_report(
+        report_dir,
+        deployment_id="hc-ambiguous",
+        target="jetson",
+        release="c" * 40,
+        recovery_step="replace_hcm_container",
+        duplicate=True,
+    )
+    with pytest.raises(engine.RollbackResolutionError, match="ambiguous"):
+        engine.rollback(repo_root=ROOT, target="jetson", deployment_id="hc-ambiguous", transport=tx)
+    assert tx.runner.commands == []
+
+
+def test_manual_rollback_rejects_unverified_recovery_step_without_mutation(tmp_path, monkeypatch):
+    report_dir = tmp_path / "reports"
+    write_deployment_report(
+        report_dir,
+        deployment_id="hc-no-recovery",
+        target="conflict",
+        release="d" * 40,
+        recovery_step="backup_heartbeat_app",
+        recovery_status="FAIL",
+    )
+    monkeypatch.setenv("HC_DEPLOY_REPORT_DIR", str(report_dir))
+    tx = transport.SSHTransport(runner=FakeRunner())
+
+    with pytest.raises(engine.RollbackResolutionError, match="no verified recovery point"):
+        engine.rollback(repo_root=ROOT, target="conflict", deployment_id="hc-no-recovery", transport=tx)
+    assert tx.runner.commands == []
+
+
+def test_homecontrol_cli_rollback_requires_deployment_id():
+    spec = importlib.util.spec_from_file_location("homecontrol_cli_for_rollback_id_gate", ROOT / "homecontrol_cli.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["homecontrol_cli_for_rollback_id_gate"] = module
+    spec.loader.exec_module(module)
+
+    with pytest.raises(SystemExit) as exc:
+        module.main(["rollback", "--target", "jetson", "--yes"])
+    assert exc.value.code == 2
+
+
 def test_live_deploy_skips_target_already_at_release(tmp_path, monkeypatch):
     fake_artifact = artifact.ReleaseArtifact(
         release="1" * 40,

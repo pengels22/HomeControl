@@ -55,6 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     rollback = subparsers.add_parser("rollback")
     rollback.add_argument("--target", required=True, choices=sorted(inventory_mod.inventory().keys()))
+    rollback.add_argument("--deployment-id", help="deployment report ID whose recovery point should be restored")
     rollback.add_argument("--yes", action="store_true", help="execute adapter rollback over SSH")
     return parser
 
@@ -136,11 +137,17 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     "target": args.target,
                     "status": "MANUAL INTERVENTION REQUIRED",
-                    "detail": "rollback requires --yes and any adapter-specific backup environment variables",
+                    "detail": "rollback requires --yes and --deployment-id for the deployment report to restore",
                 }
             )
             return 0
-        report = engine.rollback(repo_root=ROOT, target=args.target)
+        if not args.deployment_id:
+            parser.error("rollback --yes requires --deployment-id; refusing to guess a recovery point")
+        try:
+            report = engine.rollback(repo_root=ROOT, target=args.target, deployment_id=args.deployment_id)
+        except engine.DeploymentError as exc:
+            _print_json({"target": args.target, "status": "FAIL", "detail": str(exc), "summary": {"status": "FAIL"}})
+            return 1
         _print_json(report)
         return _exit_for_report(report)
 

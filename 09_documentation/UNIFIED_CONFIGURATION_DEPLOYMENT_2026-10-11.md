@@ -72,7 +72,7 @@ homecontrol preflight --remote
 homecontrol verify
 homecontrol verify --remote
 homecontrol history
-homecontrol rollback --target lab1
+homecontrol rollback --target jetson --deployment-id <deployment-id> --yes
 ```
 
 Reports are stored under `runtime/deployments` by default, or under
@@ -84,6 +84,14 @@ must be explicit: use either `--target DEVICE --yes` for a single device or
 operator cannot accidentally expand a single-device deployment into a fleet
 deployment. Target-specific read-only verification is available with
 `homecontrol verify --remote --target lab1`.
+
+Manual rollback is record-driven. A rollback that mutates a device requires
+`--deployment-id`; the engine loads `runtime/deployments/<deployment-id>.json`,
+requires exactly one matching target entry, rejects dry-run reports, and checks
+that the deployment completed the target's recovery-point creation step before
+opening SSH. Missing, malformed, ambiguous, or unverified records fail locally
+without contacting the target. This prevents restoring a guessed backup such as
+"latest", a mutable symlink, or a placeholder container name.
 
 ## HCM Commissioning Integration
 
@@ -203,6 +211,12 @@ continues to operate. A restored deployment is still reported as an unsuccessful
 rollout; restoration success does not convert the failed deployment into a
 deployment success.
 
+Manual Jetson rollback uses the deployment record's ID to restore
+`hcm-rollback-<deployment-id>`. It no longer falls back to
+`hcm-rollback-manual` or any name derived from the release SHA. If the report is
+missing, has multiple Jetson entries, is a dry run, or does not show a completed
+`replace_hcm_container` step, rollback is rejected before mutation.
+
 ## Conflict Backup And Rollback
 
 Conflict deployment creates a unique recovery directory for every deployment:
@@ -238,6 +252,13 @@ restarts `hcm-heartbeat.service` and reruns heartbeat verification. If file
 restoration, marker restoration, restart, endpoint health, registry integrity,
 authorized-device verification, or fault checks fail, rollback is reported as
 failed.
+
+Manual Conflict rollback uses the deployment record's ID to restore
+`/var/backups/homecontrol-heartbeat/app-rollback-<deployment-id>`. It no longer
+uses the mutable `homecontrol-deploy-rollback` symlink for record-driven manual
+rollback. If the report is missing, has multiple Conflict entries, is a dry run,
+or does not show a completed `backup_heartbeat_app` step, rollback is rejected
+locally without touching the service.
 
 Recovery backup directories are retained for operator review. Clean them up only
 after a later verified deployment and rollback window make the older recovery

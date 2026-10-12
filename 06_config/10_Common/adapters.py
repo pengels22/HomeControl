@@ -153,8 +153,15 @@ class BaseAdapter:
     def rollback(self, transport: SSHTransport) -> AdapterResult:
         return self._run_rollback_steps(transport, self.rollback_steps())
 
+    def rollback_for_deployment(self, transport: SSHTransport, deployment_id: str, release: str) -> AdapterResult:
+        return self._run_rollback_steps(transport, self.rollback_steps_for_deployment(deployment_id, release))
+
     def rollback_after_failure(self, transport: SSHTransport, artifact: ReleaseArtifact, deployment_id: str | None = None) -> AdapterResult:
         return self._run_rollback_steps(transport, self.rollback_steps(artifact))
+
+    def rollback_steps_for_deployment(self, deployment_id: str, release: str) -> list[AdapterStep]:
+        artifact = ReleaseArtifact(release=release, path=Path("/tmp/homecontrol-manual-rollback.tar.gz"), sha256="manual", metadata_path=Path("/tmp/homecontrol-manual-rollback.json"))
+        return self.rollback_steps(artifact)
 
     def safety_gate_steps(self, artifact: ReleaseArtifact, deployment_id: str) -> list[AdapterStep]:
         return []
@@ -210,6 +217,15 @@ class ConflictAdapter(BaseAdapter):
             AdapterStep("app_backup_present", f"sudo -n test -d {backup_dir}"),
             AdapterStep("rollback_heartbeat_app", self._conflict_restore_command(backup_dir), changes_system=True, timeout=120),
             AdapterStep("verify_heartbeat", verify, timeout=60),
+        ]
+
+    def rollback_steps_for_deployment(self, deployment_id: str, release: str) -> list[AdapterStep]:
+        backup_dir = self._backup_dir(deployment_id)
+        release_dir = f"/tmp/homecontrol-release-{release}"
+        return [
+            AdapterStep("app_backup_present", f"sudo -n test -d {backup_dir}"),
+            AdapterStep("rollback_heartbeat_app", self._conflict_restore_command(backup_dir), changes_system=True, timeout=120),
+            AdapterStep("verify_heartbeat", self._heartbeat_verify_command(script=f"{release_dir}/10_scripts/heartbeat_verify_readonly.sh"), timeout=60),
         ]
 
     def rollback_after_failure(self, transport: SSHTransport, artifact: ReleaseArtifact, deployment_id: str | None = None) -> AdapterResult:
@@ -425,6 +441,14 @@ class JetsonDockerAdapter(BaseAdapter):
             AdapterStep("verify_hcm_api", self._hcm_health_command(), timeout=60),
         ]
 
+    def rollback_steps_for_deployment(self, deployment_id: str, release: str) -> list[AdapterStep]:
+        helper = f"/tmp/homecontrol-release-{release}/10_scripts/hcm_docker_deploy.py"
+        rollback_name = self._rollback_container_name(deployment_id)
+        return [
+            AdapterStep("restore_previous_container", f"sudo python3 {helper} rollback --rollback-name {rollback_name}", changes_system=True, timeout=180),
+            AdapterStep("verify_hcm_api", self._hcm_health_command(), timeout=60),
+        ]
+
     def safety_gate_steps(self, artifact: ReleaseArtifact, deployment_id: str) -> list[AdapterStep]:
         rollback_name = self._rollback_container_name(deployment_id)
         return [
@@ -479,6 +503,16 @@ class Lab1Adapter(BaseAdapter):
 
     def rollback_steps(self, artifact: ReleaseArtifact | None = None) -> list[AdapterStep]:
         backup_dir = self._backup_dir(artifact.release) if artifact else "/opt/homecontrol-lab/backups/homecontrol-deploy-rollback"
+        return [
+            AdapterStep("restore_role_helper", self._lab1_restore_command(backup_dir), changes_system=True),
+            AdapterStep("restart_lab_agent", "sudo systemctl restart homecontrol-lab.service", changes_system=True, timeout=60),
+            AdapterStep("verify_lab_state_safety", self._lab_state_safety_command(backup_dir), timeout=60),
+            AdapterStep("verify_lab_services", self._lab_services_command(), timeout=60),
+            AdapterStep("verify_lab_heartbeat_client", self._lab_heartbeat_client_command(), timeout=60),
+        ]
+
+    def rollback_steps_for_deployment(self, deployment_id: str, release: str) -> list[AdapterStep]:
+        backup_dir = self._backup_dir(deployment_id)
         return [
             AdapterStep("restore_role_helper", self._lab1_restore_command(backup_dir), changes_system=True),
             AdapterStep("restart_lab_agent", "sudo systemctl restart homecontrol-lab.service", changes_system=True, timeout=60),
