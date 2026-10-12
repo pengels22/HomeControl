@@ -39,7 +39,7 @@ class BaseAdapter:
     def __init__(self, entry: DeviceInventoryEntry):
         self.entry = entry
 
-    def steps(self, artifact: ReleaseArtifact) -> list[AdapterStep]:
+    def steps(self, artifact: ReleaseArtifact, deployment_id: str | None = None) -> list[AdapterStep]:
         remote_archive = self.remote_archive_path(artifact)
         release_dir = self.release_dir(artifact)
         return [
@@ -60,13 +60,13 @@ class BaseAdapter:
     def release_marker(self) -> str:
         return "/var/lib/homecontrol-deploy/current-release"
 
-    def dry_run(self, artifact: ReleaseArtifact) -> AdapterResult:
+    def dry_run(self, artifact: ReleaseArtifact, deployment_id: str | None = None) -> AdapterResult:
         return AdapterResult(
             target=self.entry.name,
             status="PLANNED",
             steps=[
                 {"name": step.name, "status": "PLANNED", "detail": step.command, "changes_system": step.changes_system}
-                for step in self.steps(artifact)
+                for step in self.steps(artifact, deployment_id=deployment_id)
             ],
         )
 
@@ -89,10 +89,10 @@ class BaseAdapter:
                 executed.append({"name": step.name, "status": "PASS", "detail": result.stdout.strip(), "fact": True})
         return AdapterResult(target=self.entry.name, status=status, steps=executed)
 
-    def apply(self, transport: SSHTransport, artifact: ReleaseArtifact) -> AdapterResult:
+    def apply(self, transport: SSHTransport, artifact: ReleaseArtifact, deployment_id: str | None = None) -> AdapterResult:
         executed: list[dict[str, Any]] = []
         changed = False
-        for step in self.steps(artifact):
+        for step in self.steps(artifact, deployment_id=deployment_id):
             try:
                 if step.name == "check_installed_release":
                     result = transport.execute(self.entry.ssh_alias, step.command, timeout=step.timeout, step_name=step.name, read_only=True)
@@ -119,7 +119,7 @@ class BaseAdapter:
                     {"name": step.name, "status": "FAIL", "detail": str(exc), "changes_system": step.changes_system}
                 )
                 if changed or step.changes_system:
-                    rollback = self.rollback_after_failure(transport, artifact)
+                    rollback = self.rollback_after_failure(transport, artifact, deployment_id=deployment_id)
                     executed.extend({"rollback": True, **item} for item in rollback.steps)
                     if rollback.status == "PASS":
                         return AdapterResult(target=self.entry.name, status="ROLLED BACK", steps=executed)
@@ -151,7 +151,7 @@ class BaseAdapter:
     def rollback(self, transport: SSHTransport) -> AdapterResult:
         return self._run_rollback_steps(transport, self.rollback_steps())
 
-    def rollback_after_failure(self, transport: SSHTransport, artifact: ReleaseArtifact) -> AdapterResult:
+    def rollback_after_failure(self, transport: SSHTransport, artifact: ReleaseArtifact, deployment_id: str | None = None) -> AdapterResult:
         return self._run_rollback_steps(transport, self.rollback_steps(artifact))
 
     def _run_rollback_steps(self, transport: SSHTransport, steps: list[AdapterStep]) -> AdapterResult:
@@ -169,10 +169,10 @@ class BaseAdapter:
 class ConflictAdapter(BaseAdapter):
     adapter_name = "conflict_heartbeat"
 
-    def steps(self, artifact: ReleaseArtifact) -> list[AdapterStep]:
+    def steps(self, artifact: ReleaseArtifact, deployment_id: str | None = None) -> list[AdapterStep]:
         release_dir = self.release_dir(artifact)
         backup_dir = f"/var/backups/homecontrol-heartbeat/app-rollback-{artifact.release}"
-        return super().steps(artifact) + [
+        return super().steps(artifact, deployment_id=deployment_id) + [
             AdapterStep("preflight_auth", "sudo -n python3 - <<'PY'\nimport json,os,stat\ncfg=json.load(open('/etc/hcm-heartbeat/config.json'))\nassert cfg.get('heartbeat_auth_mode') == 'hmac-sha256'\npath=cfg.get('heartbeat_auth_secret_file')\nassert path and os.path.exists(path)\nmode=stat.S_IMODE(os.stat(path).st_mode)\nassert mode == 0o600, oct(mode)\nprint('auth_mode=hmac-sha256 secret_present=true secret_mode=0600')\nPY"),
             AdapterStep("online_sqlite_backup", f"sudo sh -c 'HC_HEARTBEAT_BACKUP_DIR={backup_dir} {release_dir}/10_scripts/heartbeat_backup.sh conflict >/tmp/homecontrol-heartbeat-backup-path && ln -sfn {backup_dir} /var/backups/homecontrol-heartbeat/homecontrol-deploy-rollback'", changes_system=True, timeout=120),
             AdapterStep("install_heartbeat_skip_start", f"cd {release_dir}/00_Heartbeat && sudo HC_SKIP_START=1 ./install.sh conflict", changes_system=True, timeout=120),
@@ -234,28 +234,24 @@ class ConflictAdapter(BaseAdapter):
         )
 
     def _heartbeat_verify_command(self, *, script: str) -> str:
+        status_script = str(Path(script).with_name("heartbeat_status_verify.py"))
         return (
             "endpoint=$(sudo -n python3 - <<'PY'\n"
             + self._heartbeat_endpoint_snippet() +
             "print(endpoint)\n"
             "PY\n"
             f") && HC_HEARTBEAT_DB=/var/lib/hcm-heartbeat/registry.sqlite3 {script} \"$endpoint\" && "
-            "curl -fsS \"$endpoint/status\" | python3 - <<'PY'\n"
-            "import json,sys\n"
-            "s=json.load(sys.stdin).get('status',{}).get('registry',{})\n"
-            "missing=[d for d in ('48b02d87db16','2ccf675d3414') if d not in s]\n"
-            "assert not missing, missing\n"
-            "PY"
+            f"sudo -n python3 {status_script} \"$endpoint\" --grace 5"
         )
 
 
 class JetsonDockerAdapter(BaseAdapter):
     adapter_name = "hcm_docker"
 
-    def steps(self, artifact: ReleaseArtifact) -> list[AdapterStep]:
+    def steps(self, artifact: ReleaseArtifact, deployment_id: str | None = None) -> list[AdapterStep]:
         release_dir = self.release_dir(artifact)
         image = f"homecontrol-hcm:{artifact.release}"
-        return super().steps(artifact) + [
+        return super().steps(artifact, deployment_id=deployment_id) + [
             AdapterStep("preflight_docker_layout", self._docker_preflight_command()),
             AdapterStep("build_hcm_image", f"sudo docker build -t {image} -f {release_dir}/06_config/01_HCM/Dockerfile.live {release_dir}", changes_system=True, timeout=600),
             AdapterStep("replace_hcm_container", f"sudo python3 {release_dir}/10_scripts/hcm_docker_deploy.py deploy --image {image}", changes_system=True, timeout=180),
@@ -362,8 +358,9 @@ class JetsonDockerAdapter(BaseAdapter):
 class Lab1Adapter(BaseAdapter):
     adapter_name = "lab1_simulation"
 
-    def steps(self, artifact: ReleaseArtifact) -> list[AdapterStep]:
+    def steps(self, artifact: ReleaseArtifact, deployment_id: str | None = None) -> list[AdapterStep]:
         release_dir = self.release_dir(artifact)
+        backup_dir = self._backup_dir(deployment_id or artifact.release)
         safety_check = (
             "test \"$(hostname)\" = lab1 && "
             "test -f /opt/homecontrol-lab/state/module.json && "
@@ -375,9 +372,9 @@ class Lab1Adapter(BaseAdapter):
             "assert s.get('simulation') is True\n"
             "PY"
         )
-        return super().steps(artifact) + [
+        return super().steps(artifact, deployment_id=deployment_id) + [
             AdapterStep("preflight_lab1_safety", safety_check),
-            AdapterStep("backup_lab_agent_components", "sudo install -d -m 0755 /opt/homecontrol-lab/backups && sudo cp -a /opt/homecontrol-lab/lab1_role_agent.py /opt/homecontrol-lab/backups/lab1_role_agent.py.previous", changes_system=True),
+            AdapterStep("backup_lab_agent_components", self._lab1_backup_command(backup_dir), changes_system=True),
             AdapterStep("install_role_helper", f"sudo install -m 0755 {release_dir}/10_scripts/lab1_role_agent.py /opt/homecontrol-lab/lab1_role_agent.py", changes_system=True),
             AdapterStep("restart_lab_agent", "sudo systemctl restart homecontrol-lab.service", changes_system=True, timeout=60),
             AdapterStep("verify_lab_services", self._lab_services_command(), timeout=60),
@@ -392,20 +389,69 @@ class Lab1Adapter(BaseAdapter):
             AdapterStep("lab1_agent_layout", "python3 - <<'PY'\nimport os,socket\nassert socket.gethostname().split('.')[0] == 'lab1'\nfor p in ('/opt/homecontrol-lab/lab_agent.py','/opt/homecontrol-lab/lab1_role_agent.py','/opt/homecontrol-lab/state/module.json'):\n assert os.path.isfile(p), p\nprint('lab1_layout=ok')\nPY"),
             AdapterStep("lab1_state_safety", "python3 - <<'PY'\nimport json\ns=json.load(open('/opt/homecontrol-lab/state/module.json'))\nassert s.get('device_id') == '2ccf675d3414'\nassert s.get('hostname') == 'lab1'\nassert s.get('simulation') is True\nassert s.get('physical_outputs_enabled') is False\nassert 'role' in s\nPY"),
             AdapterStep("lab1_services", self._lab_services_command()),
+            AdapterStep("lab1_heartbeat_client", self._lab_heartbeat_client_command()),
         ]
 
     def no_change_health_steps(self) -> list[AdapterStep]:
         return [
             AdapterStep("lab1_state_safety", "python3 - <<'PY'\nimport json\ns=json.load(open('/opt/homecontrol-lab/state/module.json'))\nassert s.get('simulation') is True\nassert s.get('physical_outputs_enabled') is False\nPY"),
             AdapterStep("lab1_services", self._lab_services_command()),
+            AdapterStep("lab1_heartbeat_client", self._lab_heartbeat_client_command()),
         ]
 
     def rollback_steps(self, artifact: ReleaseArtifact | None = None) -> list[AdapterStep]:
+        backup_dir = self._backup_dir(artifact.release) if artifact else "/opt/homecontrol-lab/backups/homecontrol-deploy-rollback"
         return [
-            AdapterStep("restore_role_helper", "sudo install -m 0755 /opt/homecontrol-lab/backups/lab1_role_agent.py.previous /opt/homecontrol-lab/lab1_role_agent.py", changes_system=True),
+            AdapterStep("restore_role_helper", self._lab1_restore_command(backup_dir), changes_system=True),
             AdapterStep("restart_lab_agent", "sudo systemctl restart homecontrol-lab.service", changes_system=True, timeout=60),
             AdapterStep("verify_lab_services", self._lab_services_command(), timeout=60),
         ]
+
+    def rollback_after_failure(self, transport: SSHTransport, artifact: ReleaseArtifact, deployment_id: str | None = None) -> AdapterResult:
+        backup_dir = self._backup_dir(deployment_id or artifact.release)
+        return self._run_rollback_steps(
+            transport,
+            [
+                AdapterStep("restore_role_helper", self._lab1_restore_command(backup_dir), changes_system=True),
+                AdapterStep("restart_lab_agent", "sudo systemctl restart homecontrol-lab.service", changes_system=True, timeout=60),
+                AdapterStep("verify_lab_services", self._lab_services_command(), timeout=60),
+                AdapterStep("verify_lab_heartbeat_client", self._lab_heartbeat_client_command(), timeout=60),
+            ],
+        )
+
+    def _backup_dir(self, deployment_id: str) -> str:
+        safe = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in deployment_id)
+        return f"/opt/homecontrol-lab/backups/{safe}"
+
+    def _lab1_backup_command(self, backup_dir: str) -> str:
+        marker = self.release_marker()
+        return (
+            "sudo sh -c 'set -eu; "
+            f"b={backup_dir}; marker={marker}; "
+            "install -d -m 0755 /opt/homecontrol-lab/backups; "
+            "[ ! -e \"$b\" ] || { echo backup_exists:$b >&2; exit 1; }; "
+            "install -d -m 0755 \"$b\"; "
+            "cp -a /opt/homecontrol-lab/lab1_role_agent.py \"$b/lab1_role_agent.py\"; "
+            "if [ -f \"$marker\" ]; then cp -a \"$marker\" \"$b/homecontrol-release\"; else : > \"$b/homecontrol-release.absent\"; fi; "
+            "stat -c \"%U:%G %a %n\" /opt/homecontrol-lab/lab1_role_agent.py \"$b/lab1_role_agent.py\" > \"$b/manifest.txt\"; "
+            "cmp -s /opt/homecontrol-lab/lab1_role_agent.py \"$b/lab1_role_agent.py\"; "
+            "ln -sfn \"$b\" /opt/homecontrol-lab/backups/homecontrol-deploy-rollback; "
+            "echo lab1_backup=$b verified=true'"
+        )
+
+    def _lab1_restore_command(self, backup_dir: str) -> str:
+        marker = self.release_marker()
+        return (
+            "sudo sh -c 'set -eu; "
+            f"b={backup_dir}; marker={marker}; "
+            "[ -d \"$b\" ] || { echo missing_backup:$b >&2; exit 1; }; "
+            "[ -f \"$b/lab1_role_agent.py\" ] || { echo missing_role_backup >&2; exit 1; }; "
+            "cp -a \"$b/lab1_role_agent.py\" /opt/homecontrol-lab/lab1_role_agent.py; "
+            "if [ -f \"$b/homecontrol-release\" ]; then cp -a \"$b/homecontrol-release\" \"$marker\"; "
+            "elif [ -f \"$b/homecontrol-release.absent\" ]; then rm -f \"$marker\"; "
+            "else echo missing_marker_backup >&2; exit 1; fi; "
+            "echo lab1_restore=$b marker_restored=true'"
+        )
 
     def _lab_services_command(self) -> str:
         return (
@@ -430,6 +476,23 @@ class Lab1Adapter(BaseAdapter):
             "print('heartbeat_control_socket={}'.format('present' if os.path.exists(sock) else 'absent'))\n"
             "if failed:\n"
             " raise SystemExit('; '.join(failed))\n"
+            "PY"
+        )
+
+    def _lab_heartbeat_client_command(self) -> str:
+        return (
+            "sudo -n python3 - <<'PY'\n"
+            "import json, socket\n"
+            "cfg=json.load(open('/etc/hcm-heartbeat/config.json'))\n"
+            "assert cfg.get('role') == 'device', cfg.get('role')\n"
+            "assert cfg.get('heartbeat_auth_mode') == 'hmac-sha256'\n"
+            "addr=cfg.get('conflict_address') or cfg.get('conflict_hostname')\n"
+            "port=int(cfg.get('port',6004))\n"
+            "if not addr:\n"
+            " raise SystemExit('missing conflict heartbeat destination')\n"
+            "s=socket.create_connection((addr,port),timeout=3)\n"
+            "s.close()\n"
+            "print('heartbeat_destination={}:{} tcp=reachable auth_mode=hmac-sha256 control_socket=optional'.format(addr,port))\n"
             "PY"
         )
 

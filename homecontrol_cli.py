@@ -47,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     deploy = subparsers.add_parser("deploy")
     deploy.add_argument("--target", choices=sorted(inventory_mod.inventory().keys()))
+    deploy.add_argument("--all", action="store_true", help="explicitly approve a fleet-wide live deployment")
     deploy.add_argument("--release")
     deploy.add_argument("--dry-run", action="store_true")
     deploy.add_argument("--yes", action="store_true", help="execute the approved SSH deployment plan")
@@ -64,7 +65,7 @@ def _print_json(data) -> None:
 
 def _exit_for_report(report) -> int:
     status = report.get("summary", {}).get("status", report.get("status"))
-    return 1 if status in {"FAIL", "MANUAL INTERVENTION REQUIRED"} else 0
+    return 1 if status in {"FAIL", "MANUAL INTERVENTION REQUIRED", "ROLLED BACK"} else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -94,12 +95,17 @@ def main(argv: list[str] | None = None) -> int:
         return _exit_for_report(report)
 
     if args.command == "deploy":
+        if args.target and args.all:
+            parser.error("deploy requires either --target DEVICE or --all, not both")
+        if args.yes and not args.target and not args.all:
+            parser.error("live deployment requires --target DEVICE --yes or --all --yes")
         dry_run = args.dry_run or not args.yes
         report = engine.deploy(
             repo_root=ROOT,
             release=args.release,
             target=args.target,
             dry_run=dry_run,
+            explicit_all=args.all,
             run_tests=not args.skip_tests,
         )
         path = engine.write_report(ROOT, report)

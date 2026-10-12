@@ -67,6 +67,7 @@ homecontrol inventory
 homecontrol deploy --dry-run
 homecontrol deploy --target jetson --release <full-sha> --dry-run
 homecontrol deploy --target jetson --release <full-sha> --yes
+homecontrol deploy --all --release <full-sha> --yes
 homecontrol preflight --remote
 homecontrol verify
 homecontrol verify --remote
@@ -76,6 +77,13 @@ homecontrol rollback --target lab1
 
 Reports are stored under `runtime/deployments` by default, or under
 `HC_DEPLOY_REPORT_DIR` in tests. The CLI does not store or print secrets.
+
+Dry-run planning may inspect the fleet by default, but state-changing deploys
+must be explicit: use either `--target DEVICE --yes` for a single device or
+`--all --yes` for a fleet rollout. A bare `deploy --yes` is rejected so an
+operator cannot accidentally expand a single-device deployment into a fleet
+deployment. Target-specific read-only verification is available with
+`homecontrol verify --remote --target lab1`.
 
 ## HCM Commissioning Integration
 
@@ -132,6 +140,20 @@ Actual live backup and rollback are adapter-specific:
 8. Request explicit deployment approval.
 9. Deploy one adapter at a time with rollback ready and live monitoring active.
 
+The first live mutation should be a single-device command, for example:
+
+```bash
+.venv/bin/python homecontrol_cli.py deploy --target lab1 --dry-run
+.venv/bin/python homecontrol_cli.py verify --remote --target lab1
+.venv/bin/python homecontrol_cli.py deploy --target lab1 --yes
+```
+
+Fleet-wide live deployment remains a separate explicit operation:
+
+```bash
+.venv/bin/python homecontrol_cli.py deploy --all --yes
+```
+
 ## Known Limitations
 
 - The SSH deployment path is implemented but has only been exercised with mocked
@@ -148,23 +170,43 @@ Actual live backup and rollback are adapter-specific:
   `hcm-test` port bindings. The Docker API helper clones the inspected container
   configuration and swaps only the application image, while preserving
   environment entries, mounts, ports, restart policy, and network attachments.
+  It fails closed before stopping `hcm-test` if the current container lacks the
+  required HCM Docker networks or API port binding, or if it appears to contain
+  PostgreSQL data storage.
 - Conflict preflight uses noninteractive `sudo -n` for protected heartbeat
   metadata and reports only safe summaries such as auth mode, secret file
   presence/mode, registry integrity, service status, and TCP 6004 availability.
   The heartbeat endpoint is resolved from the protected config's bind or
   advertised address, so a supervisor bound only to `192.168.20.26:6004` is not
-  incorrectly tested through loopback.
+  incorrectly tested through loopback. Post-deployment verification uses
+  `10_scripts/heartbeat_status_verify.py` to fetch `/status`, require HTTP 200,
+  parse the actual JSON response, confirm the expected registered and authorized
+  Jetson/LAB1 identities, and fail on unexpected active communication faults.
 - LAB1 preflight validates the real `/opt/homecontrol-lab` layout, permanent
   identity, simulation-only state, disabled physical outputs, and required
   services without changing role state. Service checks now report each required
   systemd unit and its substate explicitly; the heartbeat control socket path is
   reported as metadata but is not treated as proof that the heartbeat service is
-  active.
+  active. The socket is optional for the installed heartbeat client's normal
+  client-to-Conflict path: the daemon posts heartbeat packets directly to the
+  configured Conflict endpoint over TCP 6004; the Unix socket is for local
+  control/fault commands. LAB1 verification therefore checks the configured
+  Conflict destination over TCP instead of creating or requiring the socket.
+- LAB1 live deployment creates a deployment-specific backup under
+  `/opt/homecontrol-lab/backups/<deployment-id>` before replacing
+  `lab1_role_agent.py`. The backup preserves the previous role helper and
+  release marker state, verifies the copied helper with `cmp`, and updates the
+  `homecontrol-deploy-rollback` symlink. If post-replacement verification
+  fails, rollback restores the previous helper and release marker before
+  restarting only `homecontrol-lab.service`.
 - Read-only SSH checks use bounded retries for transient transport failures such
   as banner-exchange or ProxyJump timeouts while preserving BatchMode,
   key-only authentication, strict host-key validation, and SSH aliases. Commands
   that can change remote state are not automatically retried after ambiguous
   transport failure.
+- A deployment that reaches rollback is reported as `ROLLED BACK` for the target
+  but as an unsuccessful rollout in the summary/CLI exit status. The release
+  marker is written only after adapter health checks pass.
 - Jetson database migrations remain out of scope and require a separately
   approved plan.
 - LAB1 deployment updates only the role helper after confirming the installed

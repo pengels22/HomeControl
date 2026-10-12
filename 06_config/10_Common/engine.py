@@ -33,7 +33,7 @@ PLANNED = "PLANNED"
 ROLLED_BACK = "ROLLED BACK"
 MANUAL = "MANUAL INTERVENTION REQUIRED"
 FAIL = "FAIL"
-SUCCESS_STATUSES = {PASS, NO_CHANGE, ROLLED_BACK}
+SUCCESS_STATUSES = {PASS, NO_CHANGE}
 
 
 class DeploymentError(ValueError):
@@ -107,7 +107,7 @@ def plan_deployment(
         manifest = manifests[entry.device_type]
         _verify_manifest_matches_inventory(entry, manifest)
         deployment = manifest.deployment
-        adapter_result = adapters_mod.adapter_for(entry).dry_run(fake_artifact)
+        adapter_result = adapters_mod.adapter_for(entry).dry_run(fake_artifact, deployment_id=deployment_id)
         steps = [
             DeploymentStep("validate_manifest", PASS, f"{manifest.path}"),
             DeploymentStep("validate_identity", PASS, f"device_id={entry.device_id}"),
@@ -139,6 +139,8 @@ def plan_deployment(
         "created_at": datetime.now(UTC).isoformat(),
         "release": selected_release,
         "dry_run": dry_run,
+        "selected_target": target,
+        "fleet_scope": "single-target" if target else "fleet",
         "targets": [_plan_to_dict(plan) for plan in plans],
         "summary": {
             "total": len(plans),
@@ -173,9 +175,12 @@ def deploy(
     dry_run: bool = True,
     transport: transport_mod.SSHTransport | None = None,
     run_tests: bool = True,
+    explicit_all: bool = False,
 ) -> dict[str, Any]:
     if dry_run:
         return plan_deployment(repo_root=repo_root, release=release, target=target, dry_run=True)
+    if target is None and not explicit_all:
+        raise DeploymentError("live deployment requires an explicit target or explicit_all=True")
 
     config_root = repo_root / "06_config"
     manifests = manifest_mod.load_all_manifests(config_root)
@@ -206,7 +211,25 @@ def deploy(
                     }
                 )
                 continue
-            result = adapters_mod.adapter_for(entry).apply(transport, artifact)
+            adapter = adapters_mod.adapter_for(entry)
+            gate = _predeployment_safety_gate(entry, adapter, transport)
+            if gate.status != PASS:
+                failed = True
+                targets.append(
+                    {
+                        "target": entry.name,
+                        "device_id": entry.device_id,
+                        "package": entry.package,
+                        "device_type": entry.device_type,
+                        "adapter": entry.live_adapter,
+                        "release": selected_release,
+                        "status": FAIL,
+                        "steps": [{"name": "predeployment_safety_gate", "status": FAIL, "detail": "critical preflight failed"}] + gate.steps,
+                        "artifact_sha256": artifact.sha256,
+                    }
+                )
+                continue
+            result = adapter.apply(transport, artifact, deployment_id=deployment_id)
             if result.status not in SUCCESS_STATUSES:
                 failed = True
             targets.append(
@@ -223,12 +246,14 @@ def deploy(
                 }
             )
 
-    status = FAIL if any(item["status"] == FAIL for item in targets) else PASS
+    status = FAIL if any(item["status"] not in {PASS, NO_CHANGE, SKIPPED} for item in targets) else PASS
     return {
         "deployment_id": deployment_id,
         "created_at": datetime.now(UTC).isoformat(),
         "release": selected_release,
         "dry_run": False,
+        "selected_target": target,
+        "fleet_scope": "fleet" if explicit_all and target is None else "single-target",
         "targets": targets,
         "summary": {
             "total": len(targets),
@@ -236,6 +261,29 @@ def deploy(
             "remote_execution": "ssh",
         },
     }
+
+
+def _predeployment_safety_gate(
+    entry: inventory_mod.DeviceInventoryEntry,
+    adapter: adapters_mod.BaseAdapter,
+    transport: transport_mod.SSHTransport,
+) -> adapters_mod.AdapterResult:
+    executed: list[dict[str, Any]] = []
+    preflight = adapter.preflight(transport)
+    executed.extend({"gate": True, **step} for step in preflight.steps)
+    if preflight.status != PASS:
+        return adapters_mod.AdapterResult(target=entry.name, status=FAIL, steps=executed)
+    rollback_steps = adapter.rollback_steps()
+    rollback_available = bool(rollback_steps) and not any(step.name == "rollback_not_implemented" for step in rollback_steps)
+    executed.append(
+        {
+            "name": "rollback_available",
+            "status": PASS if rollback_available else FAIL,
+            "detail": "adapter rollback steps available" if rollback_available else "adapter rollback is not implemented",
+            "gate": True,
+        }
+    )
+    return adapters_mod.AdapterResult(target=entry.name, status=PASS if rollback_available else FAIL, steps=executed)
 
 
 def verify(

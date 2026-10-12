@@ -81,6 +81,7 @@ def remove_container(name):
 
 def create_clone(source, image, name):
     # type: (Dict[str, Any], str, str) -> None
+    validate_clone_source(source)
     config = deepcopy(source["Config"])
     host_config = deepcopy(source["HostConfig"])
     networks = source.get("NetworkSettings", {}).get("Networks", {})
@@ -109,11 +110,33 @@ def create_clone(source, image, name):
         "Image": image,
         "Labels": config.get("Labels"),
         "ExposedPorts": config.get("ExposedPorts"),
+        "Healthcheck": config.get("Healthcheck"),
         "WorkingDir": config.get("WorkingDir", ""),
+        "StopSignal": config.get("StopSignal"),
+        "StopTimeout": config.get("StopTimeout"),
+        "Shell": config.get("Shell"),
         "HostConfig": host_config,
         "NetworkingConfig": {"EndpointsConfig": endpoints},
     }
+    body = {key: value for key, value in body.items() if value is not None}
     docker("POST", f"/containers/create?name={quote(name)}", body=body, ok=(201,))
+
+
+def validate_clone_source(source):
+    # type: (Dict[str, Any]) -> None
+    host_config = source.get("HostConfig") or {}
+    networks = (source.get("NetworkSettings") or {}).get("Networks") or {}
+    bindings = host_config.get("PortBindings") or {}
+    mounts = source.get("Mounts") or []
+    if "hcm-control" not in networks or "hcm-internal" not in networks:
+        raise DockerDeployError("current container is missing required HCM Docker networks")
+    if "8080/tcp" not in bindings:
+        raise DockerDeployError("current container is missing HCM API port binding")
+    destinations = {item.get("Destination") for item in mounts}
+    if "/var/lib/postgresql/data" in destinations:
+        raise DockerDeployError("refusing to clone HCM app container with PostgreSQL data mount")
+    if not (source.get("Config") or {}).get("Image"):
+        raise DockerDeployError("current container image is unknown")
 
 
 def published_health_url(name):
@@ -158,8 +181,9 @@ def deploy(image, name, rollback_name, health_url, timeout):
     if container_exists(rollback_name):
         rollback = inspect_container(rollback_name)
         if rollback.get("Config", {}).get("Image") != source.get("Config", {}).get("Image"):
-            raise SystemExit(f"rollback container {rollback_name} exists and does not match current {name}; refusing to overwrite")
+            raise DockerDeployError(f"rollback container {rollback_name} exists and does not match current {name}; refusing to overwrite")
         remove_container(rollback_name)
+    validate_clone_source(source)
     stop_container(name)
     rename_container(name, rollback_name)
     try:

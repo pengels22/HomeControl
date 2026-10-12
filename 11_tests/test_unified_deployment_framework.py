@@ -57,6 +57,38 @@ def load_script_module(name: str, relative: str):
     return module
 
 
+def sample_heartbeat_config():
+    return {
+        "authorized_devices": [
+            {"device_id": "48b02d87db16", "hostname": "jetson", "ip_address": "192.168.20.27"},
+            {"device_id": "2ccf675d3414", "hostname": "lab1", "ip_address": "192.168.20.36"},
+        ]
+    }
+
+
+def sample_heartbeat_status():
+    return {
+        "status": {
+            "registry": {
+                "48b02d87db16": {
+                    "hostname": "jetson",
+                    "ip_address": "192.168.20.27",
+                    "authorized": True,
+                    "maintenance": False,
+                    "active_fault": None,
+                },
+                "2ccf675d3414": {
+                    "hostname": "lab1",
+                    "ip_address": "192.168.20.36",
+                    "authorized": True,
+                    "maintenance": False,
+                    "active_fault": None,
+                },
+            }
+        }
+    }
+
+
 def test_all_device_manifests_validate_and_rmc_is_firmware_only():
     manifests = manifest.load_all_manifests(ROOT / "06_config")
 
@@ -165,6 +197,40 @@ def test_homecontrol_cli_status_inventory_and_dry_run(tmp_path):
     data = json.loads(deploy.stdout)
     assert data["dry_run"] is True
     assert Path(data["report_path"]).exists()
+
+
+def test_homecontrol_cli_rejects_bare_live_deploy_and_all_is_explicit(tmp_path, monkeypatch):
+    spec = importlib.util.spec_from_file_location("homecontrol_cli_for_deploy_gate", ROOT / "homecontrol_cli.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["homecontrol_cli_for_deploy_gate"] = module
+    spec.loader.exec_module(module)
+
+    with pytest.raises(SystemExit) as exc:
+        module.main(["deploy", "--yes", "--skip-tests", "--release", "a" * 40])
+    assert exc.value.code == 2
+
+    monkeypatch.setenv("HC_DEPLOY_REPORT_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        module.engine,
+        "deploy",
+        lambda **kwargs: {
+            "deployment_id": "test-deploy",
+            "summary": {"status": "PASS"},
+            "targets": [{"target": "lab1", "status": "PASS"}],
+        },
+    )
+    assert module.main(["deploy", "--all", "--yes", "--skip-tests", "--release", "a" * 40]) == 0
+
+
+def test_homecontrol_cli_rejects_target_and_all_together():
+    spec = importlib.util.spec_from_file_location("homecontrol_cli_for_target_gate", ROOT / "homecontrol_cli.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["homecontrol_cli_for_target_gate"] = module
+    spec.loader.exec_module(module)
+
+    with pytest.raises(SystemExit) as exc:
+        module.main(["deploy", "--target", "lab1", "--all", "--yes", "--release", "a" * 40])
+    assert exc.value.code == 2
 
 
 def test_ssh_transport_uses_existing_aliases_and_strict_host_keys(tmp_path):
@@ -303,6 +369,7 @@ def test_live_deploy_uses_single_artifact_and_stops_after_failed_transfer(tmp_pa
         repo_root=ROOT,
         release="e" * 40,
         dry_run=False,
+        explicit_all=True,
         transport=tx,
         run_tests=False,
     )
@@ -312,6 +379,50 @@ def test_live_deploy_uses_single_artifact_and_stops_after_failed_transfer(tmp_pa
     assert report["targets"][0]["status"] == "FAIL"
     assert report["targets"][1]["status"] == "SKIPPED"
     assert report["targets"][2]["status"] == "SKIPPED"
+
+
+def test_single_target_live_deploy_only_contacts_selected_device(tmp_path, monkeypatch):
+    fake_artifact = artifact.ReleaseArtifact(
+        release="6" * 40,
+        path=tmp_path / "homecontrol.tar.gz",
+        sha256="abc123",
+        metadata_path=tmp_path / "homecontrol.json",
+    )
+    fake_artifact.path.write_text("artifact")
+    fake_artifact.metadata_path.write_text("{}")
+    monkeypatch.setattr(engine.artifact_mod, "create_release_artifact", lambda repo_root, release, output_dir: fake_artifact)
+    tx = transport.SSHTransport(runner=FakeRunner())
+
+    report = engine.deploy(
+        repo_root=ROOT,
+        release="6" * 40,
+        target="lab1",
+        dry_run=False,
+        transport=tx,
+        run_tests=False,
+    )
+
+    assert report["summary"]["status"] == "PASS"
+    assert [item["target"] for item in report["targets"]] == ["lab1"]
+    joined = [" ".join(command) for command in tx.runner.commands]
+    assert all(" lab1 " in command or "lab1:" in command for command in joined)
+    assert all("jetson" not in command and "conflict" not in command for command in tx.runner.commands)
+
+
+def test_engine_rejects_bare_live_fleet_deploy():
+    with pytest.raises(engine.DeploymentError, match="explicit target"):
+        engine.deploy(repo_root=ROOT, release="7" * 40, dry_run=False, run_tests=False)
+
+
+def test_single_target_dry_run_and_target_verify_scope():
+    report = engine.plan_deployment(repo_root=ROOT, release="8" * 40, target="lab1", dry_run=True)
+
+    assert report["fleet_scope"] == "single-target"
+    assert [item["target"] for item in report["targets"]] == ["lab1"]
+
+    tx = transport.SSHTransport(runner=FakeRunner())
+    verify_report = engine.verify(repo_root=ROOT, target="lab1", transport=tx)
+    assert [item["target"] for item in verify_report["targets"]] == ["lab1"]
 
 
 def test_adapter_dry_run_includes_preservation_checks():
@@ -366,6 +477,74 @@ def test_conflict_preflight_uses_sudo_noninteractive_and_safe_metadata():
     assert "127.0.0.1:6004" not in service
 
 
+def test_conflict_verify_command_uses_python_status_verifier_without_pipe_heredoc():
+    command = adapters.adapter_for(inventory.inventory()["conflict"])._heartbeat_verify_command(script="/tmp/release/10_scripts/heartbeat_verify_readonly.sh")
+
+    assert "heartbeat_status_verify.py" in command
+    assert "urllib" not in command
+    assert "| python3 - <<'PY'" not in command
+    assert 'curl -fsS "$endpoint/status"' not in command
+
+
+def test_heartbeat_status_verifier_accepts_valid_registered_authorized_devices():
+    module = load_script_module("heartbeat_status_verify_test", "10_scripts/heartbeat_status_verify.py")
+
+    result = module.verify_status_payload(sample_heartbeat_status(), sample_heartbeat_config())
+
+    assert result["registered"] == ["48b02d87db16", "2ccf675d3414"]
+    assert result["active_faults"] == "none"
+
+
+def test_heartbeat_status_verifier_rejects_missing_registered_or_authorized_devices():
+    module = load_script_module("heartbeat_status_verify_missing_test", "10_scripts/heartbeat_status_verify.py")
+    status = sample_heartbeat_status()
+    del status["status"]["registry"]["2ccf675d3414"]
+
+    with pytest.raises(module.HeartbeatStatusError, match="missing registered devices"):
+        module.verify_status_payload(status, sample_heartbeat_config())
+
+    cfg = sample_heartbeat_config()
+    cfg["authorized_devices"] = cfg["authorized_devices"][:1]
+    with pytest.raises(module.HeartbeatStatusError, match="missing authorized config entries"):
+        module.verify_status_payload(sample_heartbeat_status(), cfg)
+
+
+def test_heartbeat_status_verifier_rejects_active_faults_and_bad_identity():
+    module = load_script_module("heartbeat_status_verify_fault_test", "10_scripts/heartbeat_status_verify.py")
+    status = sample_heartbeat_status()
+    status["status"]["registry"]["48b02d87db16"]["active_fault"] = {"code": "communication_loss"}
+
+    with pytest.raises(module.HeartbeatStatusError, match="active_fault communication_loss"):
+        module.verify_status_payload(status, sample_heartbeat_config())
+
+    status = sample_heartbeat_status()
+    status["status"]["registry"]["2ccf675d3414"]["hostname"] = "wrong"
+    with pytest.raises(module.HeartbeatStatusError, match="hostname wrong != lab1"):
+        module.verify_status_payload(status, sample_heartbeat_config())
+
+
+def test_heartbeat_status_verifier_rejects_invalid_status_json(monkeypatch):
+    module = load_script_module("heartbeat_status_verify_invalid_json_test", "10_scripts/heartbeat_status_verify.py")
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def getcode(self):
+            return 200
+
+        def read(self):
+            return b"not-json"
+
+    monkeypatch.setattr(module.urllib.request, "urlopen", lambda url, timeout=None: FakeResponse())
+
+    with pytest.raises(module.HeartbeatStatusError, match="invalid status JSON"):
+        module.fetch_status("http://192.0.2.1:6004", 1)
+
+
 def test_lab1_layout_preflight_uses_python_hostname_and_file_checks():
     steps = adapters.adapter_for(inventory.inventory()["lab1"]).preflight_steps()
     layout = next(step.command for step in steps if step.name == "lab1_agent_layout")
@@ -383,6 +562,41 @@ def test_lab1_service_check_reports_individual_service_status_without_socket_req
     assert "SubState" in command
     assert "heartbeat_control_socket" in command
     assert "test -S /run/hcm-heartbeat/control.sock" not in command
+
+
+def test_lab1_heartbeat_socket_is_optional_but_conflict_destination_is_checked():
+    steps = adapters.adapter_for(inventory.inventory()["lab1"]).preflight_steps()
+    heartbeat = next(step.command for step in steps if step.name == "lab1_heartbeat_client")
+
+    assert "control_socket=optional" in heartbeat
+    assert "conflict_address" in heartbeat
+    assert "socket.create_connection" in heartbeat
+    assert "heartbeat_auth_secret_file" not in heartbeat
+
+
+def test_lab1_deployment_uses_release_specific_backup_and_restores_marker():
+    fake_artifact = artifact.ReleaseArtifact(
+        release="9" * 40,
+        path=Path("/tmp/homecontrol.tar.gz"),
+        sha256="abc123",
+        metadata_path=Path("/tmp/homecontrol.json"),
+    )
+    adapter = adapters.adapter_for(inventory.inventory()["lab1"])
+    steps = adapter.steps(fake_artifact, deployment_id="hc-test-123")
+    backup = next(step.command for step in steps if step.name == "backup_lab_agent_components")
+    rollback = adapter.rollback_after_failure(
+        transport.SSHTransport(runner=FakeRunner()),
+        fake_artifact,
+        deployment_id="hc-test-123",
+    )
+    restore = next(step["detail"] for step in rollback.steps if step["name"] == "restore_role_helper")
+
+    assert "/opt/homecontrol-lab/backups/hc-test-123" in backup
+    assert "cp -a /opt/homecontrol-lab/lab1_role_agent.py" in backup
+    assert "homecontrol-release.absent" in backup
+    assert "cmp -s" in backup
+    assert "/opt/homecontrol-lab/backups/hc-test-123" in restore
+    assert "marker_restored=true" in restore
 
 
 def test_rollback_steps_are_adapter_specific():
@@ -442,7 +656,7 @@ def test_no_change_is_success_and_fleet_continues(tmp_path, monkeypatch):
         runner=FakeRunner(stdout_by_contains={"cat /etc/hcm/homecontrol-release": "2" * 40 + "\n"})
     )
 
-    report = engine.deploy(repo_root=ROOT, release="2" * 40, dry_run=False, transport=tx, run_tests=False)
+    report = engine.deploy(repo_root=ROOT, release="2" * 40, dry_run=False, explicit_all=True, transport=tx, run_tests=False)
 
     assert report["summary"]["status"] == "PASS"
     assert [item["status"] for item in report["targets"]][0] == "NO CHANGE"
@@ -473,7 +687,42 @@ def test_changed_failure_attempts_safe_rollback(tmp_path, monkeypatch):
     )
 
     assert report["targets"][0]["status"] == "ROLLED BACK"
+    assert report["summary"]["status"] == "FAIL"
     assert any(step.get("rollback") for step in report["targets"][0]["steps"])
+
+
+def test_rollback_failure_reports_fail_not_success(tmp_path, monkeypatch):
+    fake_artifact = artifact.ReleaseArtifact(
+        release="4" * 40,
+        path=tmp_path / "homecontrol.tar.gz",
+        sha256="abc123",
+        metadata_path=tmp_path / "homecontrol.json",
+    )
+    fake_artifact.path.write_text("artifact")
+    fake_artifact.metadata_path.write_text("{}")
+    monkeypatch.setattr(engine.artifact_mod, "create_release_artifact", lambda repo_root, release, output_dir: fake_artifact)
+    class FailingDeployAndRollbackRunner(FakeRunner):
+        def __call__(self, command, *, input=None, timeout=None):
+            self.commands.append(command)
+            joined = " ".join(command)
+            if "tee /opt/homecontrol-lab/state/homecontrol-release" in joined or "lab1_restore=" in joined:
+                return transport.CommandResult(command, 1, "", "forced failure")
+            return transport.CommandResult(command, 0, "ok\n", "")
+
+    tx = transport.SSHTransport(runner=FailingDeployAndRollbackRunner())
+
+    report = engine.deploy(
+        repo_root=ROOT,
+        release="4" * 40,
+        target="lab1",
+        dry_run=False,
+        transport=tx,
+        run_tests=False,
+    )
+
+    assert report["targets"][0]["status"] == "FAIL"
+    assert report["summary"]["status"] == "FAIL"
+    assert any(step.get("rollback") and step["status"] == "FAIL" for step in report["targets"][0]["steps"])
 
 
 def test_preflight_reports_facts_and_blockers():
@@ -498,9 +747,10 @@ def test_hcm_docker_clone_preserves_mounts_networks_environment_and_command(monk
 
     monkeypatch.setattr(module, "docker", fake_docker)
     source = {
-        "Config": {
-            "Hostname": "abc",
-            "Env": ["HCM_DATABASE_URL=postgres://redacted"],
+            "Config": {
+                "Hostname": "abc",
+                "Image": "homecontrol-hcm:old",
+                "Env": ["HCM_DATABASE_URL=postgres://redacted"],
             "Cmd": ["python", "-m", "uvicorn", "01_HCM.main:app"],
             "Entrypoint": None,
             "Labels": {"homecontrol": "hcm"},
@@ -511,6 +761,7 @@ def test_hcm_docker_clone_preserves_mounts_networks_environment_and_command(monk
         },
         "HostConfig": {
             "Binds": ["/etc/hcm/postgres-password:/run/secrets/postgres_password:ro"],
+            "PortBindings": {"8080/tcp": [{"HostIp": "192.168.20.27", "HostPort": "8080"}]},
             "RestartPolicy": {"Name": "no"},
             "CapAdd": ["NET_ADMIN"],
         },
@@ -529,7 +780,28 @@ def test_hcm_docker_clone_preserves_mounts_networks_environment_and_command(monk
     assert body["Env"] == ["HCM_DATABASE_URL=postgres://redacted"]
     assert body["Cmd"] == ["python", "-m", "uvicorn", "01_HCM.main:app"]
     assert body["HostConfig"]["Binds"] == ["/etc/hcm/postgres-password:/run/secrets/postgres_password:ro"]
+    assert body["HostConfig"]["PortBindings"]["8080/tcp"][0]["HostIp"] == "192.168.20.27"
     assert set(body["NetworkingConfig"]["EndpointsConfig"]) == {"hcm-control", "hcm-internal"}
+
+
+def test_hcm_docker_clone_rejects_postgres_data_mount_and_missing_networks():
+    module = load_script_module("hcm_docker_deploy_safety_test", "10_scripts/hcm_docker_deploy.py")
+    base = {
+        "Config": {"Image": "homecontrol-hcm:old"},
+        "HostConfig": {"PortBindings": {"8080/tcp": [{"HostIp": "192.168.20.27", "HostPort": "8080"}]}},
+        "NetworkSettings": {"Networks": {"hcm-control": {}, "hcm-internal": {}}},
+        "Mounts": [],
+    }
+
+    module.validate_clone_source(base)
+    with pytest.raises(module.DockerDeployError, match="PostgreSQL data mount"):
+        bad = dict(base)
+        bad["Mounts"] = [{"Destination": "/var/lib/postgresql/data"}]
+        module.validate_clone_source(bad)
+    with pytest.raises(module.DockerDeployError, match="required HCM Docker networks"):
+        bad = dict(base)
+        bad["NetworkSettings"] = {"Networks": {"hcm-control": {}}}
+        module.validate_clone_source(bad)
 
 
 def test_hcm_docker_deploy_discovers_health_url_from_port_binding(monkeypatch):
@@ -570,7 +842,12 @@ def test_hcm_docker_deploy_rolls_back_when_health_check_fails(monkeypatch):
     def fake_inspect(name):
         if name not in containers:
             raise module.DockerDeployError("missing {}".format(name))
-        return {"Config": {"Image": "old"}, "HostConfig": {}, "NetworkSettings": {"Networks": {}}}
+        return {
+            "Config": {"Image": "old"},
+            "HostConfig": {"PortBindings": {"8080/tcp": [{"HostIp": "192.168.20.27", "HostPort": "8080"}]}},
+            "Mounts": [],
+            "NetworkSettings": {"Networks": {"hcm-control": {}, "hcm-internal": {}}},
+        }
 
     def fake_create_clone(source, image, name):
         calls.append(("create", name, image))
@@ -619,5 +896,6 @@ def test_cli_exit_code_helper_flags_failed_reports():
     spec.loader.exec_module(module)
 
     assert module._exit_for_report({"summary": {"status": "FAIL"}}) == 1
+    assert module._exit_for_report({"summary": {"status": "ROLLED BACK"}}) == 1
     assert module._exit_for_report({"summary": {"status": "PASS"}}) == 0
     assert module._exit_for_report({"summary": {"status": "NO CHANGE"}}) == 0
