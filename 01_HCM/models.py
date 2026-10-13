@@ -58,6 +58,9 @@ class LcmChannelSettingsIn(BaseModel):
     max_intensity: int | None = Field(default=None, ge=0, le=100)
     fade_seconds: float | None = Field(default=None, ge=0, le=60)
 
+class SimNameIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
 class ModuleRoleChangeIn(BaseModel):
     requested_role: Literal['UNASSIGNED','RCM','SIM','LCM']
     confirm: bool = False

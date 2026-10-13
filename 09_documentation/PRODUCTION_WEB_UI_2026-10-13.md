@@ -31,6 +31,11 @@ physical-output changes.
   commands use HCM logical-device routing; settings update logical-device
   metadata and maintenance lockout continues through the existing safety lockout
   endpoint. Unbound physical channels are visible but disabled.
+- SIM pages render CAN loop status, room-grouped RMC sensor clusters, editable
+  bound RMC names, and ten physical analog inputs (`AI-1` through `AI-10`).
+  RMC and analog names are persisted through HCM logical-device metadata only
+  when a valid binding already exists; unbound inputs/nodes remain visible but
+  non-configurable.
 
 ## Standalone Development Preview
 
@@ -55,6 +60,7 @@ Preview fixtures:
 | LCM1 | LCM | Online |
 | LCM2 | LCM | Online |
 | SIM1 | SIM | Online |
+| SIM2 | SIM | Online |
 | RCM3 | RCM | Offline |
 
 The preview RCM pages simulate ON/OFF, maintenance lockout and channel-name
@@ -65,6 +71,11 @@ Maintenance lockout forces a channel OFF, rejects energizing commands while
 locked, and leaves the channel OFF when cleared. This simulation is for visual
 review and page-by-page frontend development only.
 
+The preview SIM pages simulate independent CAN loop states, multiple rooms,
+multiple RMCs in one room, editable RMC names, active/faulted/stale/missing RMC
+telemetry, and all ten analog input rows. These preview fixtures are isolated
+from production HCM, PostgreSQL, Jetson, Conflict, LAB1 and physical modules.
+
 LCM preview and HCM UI enumeration use this physical mapping:
 
 | Position | Channel | Type |
@@ -72,6 +83,14 @@ LCM preview and HCM UI enumeration use this physical mapping:
 | 1-8 | `A1`-`A8` | Relay |
 | 9-18 | `10-1`-`10-10` | 0-10 V |
 | 19-22 | `HV-1`-`HV-4` | 110 V |
+
+The checked-in RMC/SIM protocol supports these RMC fields: CAN node address,
+CAN loop/interface when recorded by SIM, last seen/heartbeat timing,
+temperature in C/F, relative humidity percent, lux, ENS160 AQI, RCWL-0516
+presence, sensor health flags, fault masks/names, status flags, uptime,
+firmware version and hardware revision when reported during update/application
+flows. The web UI shows `Unknown` or `Stale` when these values are missing or
+stale; it does not infer health from saved configuration alone.
 
 ## Explicitly Not Complete
 
@@ -89,6 +108,15 @@ LCM preview and HCM UI enumeration use this physical mapping:
 - Detailed SIM controls are intentionally deferred. LCM production backend
   integration beyond existing logical command routing and metadata writes is
   intentionally deferred.
+- The SIM UI enumerates ten requested physical analog input rows. The checked-in
+  SIM firmware/config still defines eight Hexa AIO analog inputs (`A1`-`A8`) in
+  `06_config/02_SIM/sim.yaml`; `AI-9` and `AI-10` have no verified module-local
+  telemetry/config source yet and remain `Unknown` unless HCM state later
+  reports them.
+- Production SIM room/RMC assignment depends on existing HCM logical devices,
+  rooms and bindings. There is no separate RMC registry table, CSV sync,
+  local-module persistence, or offline reconciliation implemented by this UI
+  work.
 - The checked-in LCM firmware/config documentation still describes the older
   local module layout of twelve relay labels and eight 0-10 V labels
   (`06_config/03_LCM/Pinout.md`, `06_config/03_LCM/lcm.yaml`,

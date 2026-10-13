@@ -25,6 +25,7 @@ from .models import (
     RoomStateIn,
     SafetyRelayPulseIn,
     SafetyRelayStateIn,
+    SimNameIn,
     UserCreateIn,
 )
 from .auth import (
@@ -197,6 +198,47 @@ async def device_admin_lcm_channel_settings(
             fade_seconds=body.fade_seconds,
             actor=user['user'],
         )
+    except management.NotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except management.ValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+@router.get('/device-admin/{identifier}/sim-dashboard')
+async def device_admin_sim_dashboard(identifier: str, user=Depends(require_user)):
+    try:
+        return await management.get_sim_dashboard(identifier)
+    except management.NotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except management.ValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+@router.patch('/device-admin/{identifier}/sim-rmcs/{rmc_id}/settings')
+async def device_admin_sim_rmc_settings(
+    identifier: str,
+    rmc_id: str,
+    body: SimNameIn,
+    user=Depends(require_user),
+):
+    if user['role'] != 'ADMIN':
+        raise HTTPException(403)
+    try:
+        return await management.update_sim_rmc_name(identifier, rmc_id, name=body.name, actor=user['user'])
+    except management.NotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except management.ValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+@router.patch('/device-admin/{identifier}/sim-analog-inputs/{channel}/settings')
+async def device_admin_sim_analog_settings(
+    identifier: str,
+    channel: str,
+    body: SimNameIn,
+    user=Depends(require_user),
+):
+    if user['role'] != 'ADMIN':
+        raise HTTPException(403)
+    try:
+        return await management.update_sim_analog_name(identifier, channel, name=body.name, actor=user['user'])
     except management.NotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
     except management.ValidationError as exc:

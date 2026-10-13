@@ -199,6 +199,15 @@ def test_lcm_channel_support_accepts_corrected_inventory_without_direct_hardware
     assert management._module_supports_channel('LCM', 'HV-4', capabilities) is True
 
 
+def test_sim_physical_ai_inventory_and_supported_rmc_binding_channels():
+    capabilities = {'hexa-aio', 'rmc-can'}
+
+    assert management._sim_analog_channels() == [f'AI-{i}' for i in range(1, 11)]
+    assert management._module_supports_channel('SIM', 'AI-10', capabilities) is True
+    assert management._module_supports_channel('SIM', 'AI-11', capabilities) is False
+    assert management._module_supports_channel('SIM', 'RMC:CAN0:1', capabilities) is True
+
+
 @pytest.mark.asyncio
 async def test_create_logical_device_records_audit_event(monkeypatch):
     conn = FakeManagementConn()

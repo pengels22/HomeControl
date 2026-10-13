@@ -20,6 +20,7 @@ CHANNELS = [f"{bank}{channel}" for bank in ("A", "B", "C", "D") for channel in r
 LCM_LIGHT_CHANNELS = [f"A{channel}" for channel in range(1, 9)]
 LCM_DIMMER_CHANNELS = [f"10-{channel}" for channel in range(1, 11)] + [f"HV-{channel}" for channel in range(1, 5)]
 LCM_CHANNELS = LCM_LIGHT_CHANNELS + LCM_DIMMER_CHANNELS
+SIM_ANALOG_CHANNELS = [f"AI-{channel}" for channel in range(1, 11)]
 
 
 def _now() -> str:
@@ -71,7 +72,7 @@ def _capabilities(role: str) -> list[dict[str, Any]]:
     mapping = {
         "RCM": ["relay-32"],
         "LCM": ["lighting", "relay-8", "analog-out-10", "high-voltage-dimmer"],
-        "SIM": ["hexa-aio", "hexa-dio"],
+        "SIM": ["rmc-can", "telemetry", "faults", "hexa-aio", "hexa-dio"],
         "UNASSIGNED": [],
     }
     return [
@@ -96,6 +97,7 @@ class PreviewState:
             "LCM1": _module("LCM1", "LCM", "48b02d87dc10"),
             "LCM2": _module("LCM2", "LCM", "48b02d87dc20"),
             "SIM1": _module("SIM1", "SIM", "48b02d87dd10"),
+            "SIM2": _module("SIM2", "SIM", "48b02d87dd20"),
             "RCM3": _module("RCM3", "RCM", "48b02d87db30", online=False),
         }
         self.rcm: dict[str, dict[str, dict[str, Any]]] = {}
@@ -136,6 +138,128 @@ class PreviewState:
                     "maintenance_locked": channel == "10-2" and hostname == "LCM1",
                     "emergency_lighting": channel == "10-1",
                 }
+        self.sim: dict[str, dict[str, Any]] = {
+            "SIM1": {
+                "can_loops": [
+                    {"label": "A", "interface": "can0", "status": "Online", "diagnostics": {"rx_count": 124, "last_frame": {"arbitration_id": 0x110}}},
+                    {"label": "B", "interface": "can1", "status": "Online", "diagnostics": {"rx_count": 52, "last_frame": {"arbitration_id": 0x120}}},
+                    {"label": "C", "interface": "can2", "status": "Fault", "diagnostics": {"fault": "loop_voltage_off"}},
+                ],
+                "rmcs": [
+                    {
+                        "id": "RMC:can0:1",
+                        "logical_identifier": "SIM1 Living RMC East",
+                        "name": "Living Room East",
+                        "room": "Living Room",
+                        "room_id": 1,
+                        "can_interface": "can0",
+                        "can_node_address": 1,
+                        "status": "Online",
+                        "last_seen": _now(),
+                        "last_heartbeat": _now(),
+                        "firmware_version": "0.1.1",
+                        "hardware_revision": "RMC-NANO-ATMEGA328P",
+                        "health_flags": 31,
+                        "faults": [],
+                        "readings": {
+                            "temperature_f": {"value": 72.1, "unit": "F", "status": "OK"},
+                            "humidity_pct": {"value": 43, "unit": "%", "status": "OK"},
+                            "lux": {"value": 318, "unit": "lux", "status": "OK"},
+                            "aqi": {"value": 2, "unit": None, "status": "OK"},
+                            "presence": {"value": True, "unit": None, "status": "OK"},
+                        },
+                        "bound": True,
+                    },
+                    {
+                        "id": "RMC:can0:2",
+                        "logical_identifier": "SIM1 Living RMC West",
+                        "name": "Living Room West",
+                        "room": "Living Room",
+                        "room_id": 1,
+                        "can_interface": "can0",
+                        "can_node_address": 2,
+                        "status": "Online",
+                        "last_seen": _now(),
+                        "last_heartbeat": _now(),
+                        "firmware_version": "0.1.1",
+                        "hardware_revision": "RMC-NANO-ATMEGA328P",
+                        "health_flags": 31,
+                        "faults": [],
+                        "readings": {
+                            "temperature_f": {"value": 71.6, "unit": "F", "status": "OK"},
+                            "humidity_pct": {"value": 44, "unit": "%", "status": "OK"},
+                            "lux": {"value": 286, "unit": "lux", "status": "OK"},
+                            "aqi": {"value": 1, "unit": None, "status": "OK"},
+                            "presence": {"value": False, "unit": None, "status": "OK"},
+                        },
+                        "bound": True,
+                    },
+                    {
+                        "id": "RMC:can1:3",
+                        "logical_identifier": "SIM1 Kitchen RMC",
+                        "name": "Kitchen",
+                        "room": "Kitchen",
+                        "room_id": 2,
+                        "can_interface": "can1",
+                        "can_node_address": 3,
+                        "status": "Stale",
+                        "last_seen": "2026-10-12T23:40:00Z",
+                        "last_heartbeat": "2026-10-12T23:40:00Z",
+                        "firmware_version": "0.1.0",
+                        "hardware_revision": "RMC-NANO-ATMEGA328P",
+                        "health_flags": 31,
+                        "faults": [],
+                        "readings": {
+                            "temperature_f": {"value": 70.4, "unit": "F", "status": "Stale"},
+                            "humidity_pct": {"value": 41, "unit": "%", "status": "Stale"},
+                            "lux": {"value": None, "unit": "lux", "status": "Unknown"},
+                            "aqi": {"value": None, "unit": None, "status": "Unknown"},
+                            "presence": {"value": None, "unit": None, "status": "Unknown"},
+                        },
+                        "bound": True,
+                    },
+                    {
+                        "id": "RMC:can2:4",
+                        "logical_identifier": "RMC:can2:4",
+                        "name": "RMC:can2:4",
+                        "room": "Unassigned",
+                        "room_id": None,
+                        "can_interface": "can2",
+                        "can_node_address": 4,
+                        "status": "Fault",
+                        "last_seen": _now(),
+                        "last_heartbeat": None,
+                        "firmware_version": None,
+                        "hardware_revision": None,
+                        "health_flags": 32,
+                        "faults": ["ens160"],
+                        "readings": {
+                            "temperature_f": {"value": None, "unit": "F", "status": "Unknown"},
+                            "humidity_pct": {"value": None, "unit": "%", "status": "Unknown"},
+                            "lux": {"value": None, "unit": "lux", "status": "Unknown"},
+                            "aqi": {"value": None, "unit": None, "status": "Unknown"},
+                            "presence": {"value": False, "unit": None, "status": "OK"},
+                        },
+                        "bound": False,
+                    },
+                ],
+                "analog_inputs": {
+                    "AI-1": {"name": "Supply Pressure", "value": 2.41, "unit": "V", "status": "OK", "source": "ADS 0x48 CH0", "bound": True},
+                    "AI-2": {"name": "Return Pressure", "value": 1.87, "unit": "V", "status": "OK", "source": "ADS 0x48 CH1", "bound": True},
+                    "AI-3": {"name": "Filter Sensor", "value": None, "unit": "V", "status": "Unknown", "source": "ADS 0x48 CH2", "bound": True},
+                    "AI-4": {"name": "Stale Probe", "value": 3.02, "unit": "V", "status": "Stale", "source": "ADS 0x48 CH3", "bound": True},
+                },
+            },
+            "SIM2": {
+                "can_loops": [
+                    {"label": "A", "interface": "can0", "status": "Unknown", "diagnostics": {}},
+                    {"label": "B", "interface": "can1", "status": "Unknown", "diagnostics": {}},
+                    {"label": "C", "interface": "can2", "status": "Unknown", "diagnostics": {}},
+                ],
+                "rmcs": [],
+                "analog_inputs": {"AI-1": {"name": "SIM2 Input 1", "value": 0.48, "unit": "V", "status": "OK", "source": "ADS 0x48 CH0", "bound": True}},
+            },
+        }
         self._sync_relays()
 
     def _sync_relays(self) -> None:
@@ -159,6 +283,52 @@ class PreviewState:
             self.modules[hostname]["last_state"]["state"]["relays"] = relays
             self.modules[hostname]["last_state"]["state"]["lv_dimmers"] = lv_dimmers
             self.modules[hostname]["last_state"]["state"]["hv_dimmers"] = hv_dimmers
+        for hostname, sim_state in self.sim.items():
+            can = {
+                item["interface"]: {
+                    "label": f"CAN {item['label']}",
+                    "status": item["status"],
+                    **item.get("diagnostics", {}),
+                }
+                for item in sim_state["can_loops"]
+            }
+            rmc_nodes = {
+                str(item["can_node_address"]): {
+                    "rmc_id": item["id"],
+                    "address": item["can_node_address"],
+                    "can_interface": item["can_interface"],
+                    "last_seen": item["last_seen"],
+                    "last_heartbeat": item["last_heartbeat"],
+                    "firmware_version": item["firmware_version"],
+                    "hardware_revision": item["hardware_revision"],
+                    "status_flags": item["health_flags"],
+                    "faults": item["faults"],
+                    "temperature_f": item["readings"]["temperature_f"]["value"],
+                    "humidity_pct": item["readings"]["humidity_pct"]["value"],
+                    "lux": item["readings"]["lux"]["value"],
+                    "aqi": item["readings"]["aqi"]["value"],
+                    "presence": item["readings"]["presence"]["value"],
+                    "stale": item["status"] == "Stale",
+                    "fault_active": item["status"] == "Fault",
+                }
+                for item in sim_state["rmcs"]
+            }
+            analog_inputs = {
+                f"a{index}": {
+                    "label": channel.replace("AI-", "A"),
+                    "source": item.get("source"),
+                    "unit": item.get("unit"),
+                    "value": item.get("value"),
+                    "status": item.get("status"),
+                }
+                for index, (channel, item) in enumerate(sim_state["analog_inputs"].items(), start=1)
+                if index <= 8
+            }
+            self.modules[hostname]["last_state"]["state"].update({
+                "can": can,
+                "rmc_nodes": rmc_nodes,
+                "hexa_board": {"aio": {"analog_inputs": analog_inputs}, "can": can},
+            })
 
     def module(self, identifier: str) -> dict[str, Any]:
         clean = identifier.upper()
@@ -300,6 +470,82 @@ class PreviewState:
         self._sync_relays()
         return self.lcm_channels(hostname)
 
+    def sim_dashboard(self, identifier: str) -> dict[str, Any]:
+        device = self.device_admin(identifier)
+        hostname = device["module"]["hostname"]
+        if device["effective_role"] != "SIM":
+            raise HTTPException(400, f"{hostname} is not a SIM preview fixture")
+        sim_state = self.sim[hostname]
+        room_groups: dict[str, dict[str, Any]] = {}
+        rmcs = []
+        for item in sim_state["rmcs"]:
+            rmc = copy.deepcopy(item)
+            rmc["binding_id"] = 100 + len(rmcs) if rmc["bound"] else None
+            rmc["logical_device_id"] = 200 + len(rmcs) if rmc["bound"] else None
+            rmcs.append(rmc)
+            key = str(rmc["room_id"] or rmc["room"])
+            room_groups.setdefault(key, {"room_id": rmc["room_id"], "room": rmc["room"], "rmcs": []})["rmcs"].append(rmc)
+        analog_inputs = []
+        for index, channel in enumerate(SIM_ANALOG_CHANNELS, start=1):
+            state = sim_state["analog_inputs"].get(channel)
+            bound = bool(state and state.get("bound"))
+            analog_inputs.append({
+                "number": index,
+                "channel": channel,
+                "firmware_channel": f"A{index}" if index <= 8 else None,
+                "name": state.get("name", "") if state else "",
+                "bound": bound,
+                "binding_id": 300 + index if bound else None,
+                "logical_device_id": 400 + index if bound else None,
+                "logical_name": f"{hostname} {channel}" if bound else None,
+                "enabled": bound,
+                "value": state.get("value") if state else None,
+                "unit": state.get("unit") if state else None,
+                "status": state.get("status", "Unknown") if state else "Unknown",
+                "source": state.get("source") if state else None,
+                "config_enabled": bound,
+                "disabled_reason": None if bound else "No logical binding",
+            })
+        return {
+            "device": device,
+            "can_loops": copy.deepcopy(sim_state["can_loops"]),
+            "room_clusters": list(room_groups.values()),
+            "rmcs": rmcs,
+            "analog_inputs": analog_inputs,
+            "diagnostics": {
+                "can": {item["interface"]: item for item in sim_state["can_loops"]},
+                "io_mode": "preview",
+                "hexa_board_model": "ViaGasaFamido preview",
+            },
+        }
+
+    def sim_rmc_settings(self, identifier: str, rmc_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        hostname = self.device_admin(identifier)["module"]["hostname"]
+        name = str(body.get("name", "")).strip()
+        if not name:
+            raise HTTPException(400, "name is required")
+        for rmc in self.sim[hostname]["rmcs"]:
+            if rmc["id"] == rmc_id:
+                if not rmc.get("bound"):
+                    raise HTTPException(404, rmc_id)
+                rmc["name"] = name
+                self._sync_relays()
+                return self.sim_dashboard(hostname)
+        raise HTTPException(404, rmc_id)
+
+    def sim_analog_settings(self, identifier: str, channel: str, body: dict[str, Any]) -> dict[str, Any]:
+        hostname = self.device_admin(identifier)["module"]["hostname"]
+        channel = channel.upper()
+        name = str(body.get("name", "")).strip()
+        if not name:
+            raise HTTPException(400, "name is required")
+        state = self.sim[hostname]["analog_inputs"].get(channel)
+        if not state or not state.get("bound"):
+            raise HTTPException(404, channel)
+        state["name"] = name
+        self._sync_relays()
+        return self.sim_dashboard(hostname)
+
     def command_logical(self, logical_name: str, command: dict[str, Any]) -> dict[str, Any]:
         hostname, channel = self._split_logical(logical_name)
         if hostname in self.rcm:
@@ -429,6 +675,24 @@ async def lcm_channels(identifier: str, authorization: str | None = Header(defau
 async def lcm_settings(identifier: str, channel: str, body: dict[str, Any], authorization: str | None = Header(default=None)):
     _require_preview_auth(authorization)
     return state.lcm_settings(identifier, channel, body)
+
+
+@app.get("/api/v1/device-admin/{identifier}/sim-dashboard")
+async def sim_dashboard(identifier: str, authorization: str | None = Header(default=None)):
+    _require_preview_auth(authorization)
+    return state.sim_dashboard(identifier)
+
+
+@app.patch("/api/v1/device-admin/{identifier}/sim-rmcs/{rmc_id:path}/settings")
+async def sim_rmc_settings(identifier: str, rmc_id: str, body: dict[str, Any], authorization: str | None = Header(default=None)):
+    _require_preview_auth(authorization)
+    return state.sim_rmc_settings(identifier, rmc_id, body)
+
+
+@app.patch("/api/v1/device-admin/{identifier}/sim-analog-inputs/{channel}/settings")
+async def sim_analog_settings(identifier: str, channel: str, body: dict[str, Any], authorization: str | None = Header(default=None)):
+    _require_preview_auth(authorization)
+    return state.sim_analog_settings(identifier, channel, body)
 
 
 @app.post("/api/v1/device/command")

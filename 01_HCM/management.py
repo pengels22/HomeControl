@@ -137,6 +137,18 @@ def _lcm_channel_ids() -> list[str]:
     return _lcm_light_channels() + _lcm_dimmer_channels()
 
 
+def _sim_analog_channels() -> list[str]:
+    return [f"AI-{channel}" for channel in range(1, 11)]
+
+
+def _sim_legacy_analog_channel(channel: str) -> str | None:
+    match = re.fullmatch(r"AI-(10|[1-9])", channel)
+    if not match:
+        return None
+    index = int(match.group(1))
+    return f"A{index}" if index <= 8 else None
+
+
 def _relay_value(last_state: dict[str, Any], channel: str) -> bool | None:
     nested = last_state.get("state") if isinstance(last_state.get("state"), dict) else last_state
     relays = nested.get("relays") if isinstance(nested, dict) else None
@@ -234,8 +246,10 @@ def _module_supports_channel(module_type: str, channel: str | None, capabilities
             return "high-voltage-dimmer" in capabilities or "lighting" in capabilities
         return False
     if module_type == "SIM":
-        if re.fullmatch(r"A[1-8]", channel):
+        if re.fullmatch(r"A[1-8]", channel) or re.fullmatch(r"AI-(10|[1-9])", channel):
             return "hexa-aio" in capabilities
+        if re.fullmatch(r"RMC:[A-Z0-9_-]+:[0-9A-F]+", channel):
+            return "rmc-can" in capabilities
         if re.fullmatch(r"DIO[1-4]", channel):
             return "hexa-dio" in capabilities
         if re.fullmatch(r"SW[1-3]", channel):
@@ -686,6 +700,311 @@ async def update_lcm_channel_settings(
                 details={"module": module["module"]["hostname"], "channel": normalized_channel},
             )
     return await get_lcm_channels(module["module"]["hostname"])
+
+
+def _sim_state(module: dict[str, Any]) -> dict[str, Any]:
+    state = _nested_state(module)
+    return state if isinstance(state, dict) else {}
+
+
+def _sim_can_loops(state: dict[str, Any]) -> list[dict[str, Any]]:
+    can = state.get("can")
+    if not isinstance(can, dict):
+        hexa = state.get("hexa_board")
+        can = hexa.get("can") if isinstance(hexa, dict) else None
+    labels = [("A", "can0"), ("B", "can1"), ("C", "can2")]
+    loops = []
+    for friendly, fallback_interface in labels:
+        item = None
+        interface = fallback_interface
+        if isinstance(can, dict):
+            for name, candidate in can.items():
+                if not isinstance(candidate, dict):
+                    continue
+                label = str(candidate.get("label") or name).upper()
+                if name == fallback_interface or label in {f"CAN {friendly}", friendly}:
+                    item = candidate
+                    interface = name
+                    break
+        status = "Unknown"
+        if isinstance(item, dict):
+            raw_status = str(item.get("status", "")).strip().upper()
+            if raw_status in {"ONLINE", "OFFLINE", "FAULT", "UNKNOWN"}:
+                status = raw_status.title()
+            elif item.get("fault") or item.get("bus_fault") or item.get("error"):
+                status = "Fault"
+            elif item.get("enabled") is False:
+                status = "Offline"
+            elif item.get("last_frame") or int(item.get("rx_count") or 0) > 0 or int(item.get("tx_count") or 0) > 0:
+                status = "Online"
+        loops.append({
+            "label": friendly,
+            "interface": interface,
+            "status": status,
+            "diagnostics": _wire_value(item or {}),
+        })
+    return loops
+
+
+def _sim_rmc_id(node: dict[str, Any]) -> str:
+    address = node.get("address")
+    if address is None:
+        address = node.get("node_id", node.get("id", "unknown"))
+    interface = str(node.get("can_interface") or node.get("interface") or "unknown")
+    return f"RMC:{interface}:{address}"
+
+
+def _sim_node_status(node: dict[str, Any]) -> str:
+    if node.get("fault_active") or node.get("any_sensor_fault"):
+        return "Fault"
+    if node.get("offline"):
+        return "Offline"
+    if node.get("stale"):
+        return "Stale"
+    if node.get("last_seen"):
+        return "Online"
+    return "Unknown"
+
+
+def _measurement(value: Any, unit: str | None = None, *, stale: bool = False) -> dict[str, Any]:
+    return {
+        "value": value if value is not None else None,
+        "unit": unit,
+        "status": "Stale" if stale and value is not None else "Unknown" if value is None else "OK",
+    }
+
+
+def _binding_metadata(row) -> dict[str, Any]:
+    metadata = _wire_value(row["logical_metadata"] or {}) if row else {}
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _matches_rmc_binding(row, rmc_id: str, node: dict[str, Any]) -> bool:
+    channel = row["channel"]
+    metadata = _binding_metadata(row)
+    if channel == rmc_id:
+        return True
+    if metadata.get("rmc_id") == rmc_id:
+        return True
+    address = str(node.get("address", node.get("node_id", "")))
+    interface = str(node.get("can_interface") or node.get("interface") or "")
+    return str(metadata.get("can_address", metadata.get("node_id", ""))) == address and (
+        not interface or str(metadata.get("can_interface", metadata.get("interface", ""))) == interface
+    )
+
+
+async def get_sim_dashboard(identifier: str | int) -> dict[str, Any]:
+    module = await get_device_admin(identifier)
+    if module["effective_role"] != "SIM":
+        raise ValidationError(f"module {module['module']['hostname']} is not currently assigned the SIM role")
+    async with db.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT b.id AS binding_id,
+                   b.channel,
+                   b.enabled AS binding_enabled,
+                   b.metadata AS binding_metadata,
+                   d.id AS logical_device_id,
+                   d.logical_name,
+                   d.room_id,
+                   r.name AS room,
+                   d.enabled AS logical_enabled,
+                   d.metadata AS logical_metadata,
+                   d.device_class
+            FROM device_bindings b
+            JOIN logical_devices d ON d.id=b.logical_device_id
+            LEFT JOIN rooms r ON r.id=d.room_id
+            WHERE b.module_id=$1
+            ORDER BY b.channel, b.id
+            """,
+            module["module"]["id"],
+        )
+    state = _sim_state(module["module"])
+    hexa = state.get("hexa_board") if isinstance(state.get("hexa_board"), dict) else {}
+    aio = hexa.get("aio") if isinstance(hexa.get("aio"), dict) else {}
+    raw_ai = aio.get("analog_inputs") if isinstance(aio.get("analog_inputs"), dict) else {}
+    by_channel = {row["channel"]: row for row in rows}
+    analog_inputs = []
+    for index, channel in enumerate(_sim_analog_channels(), start=1):
+        legacy = _sim_legacy_analog_channel(channel)
+        row = by_channel.get(channel) or (by_channel.get(legacy) if legacy else None)
+        raw = raw_ai.get(f"a{index}") or raw_ai.get(f"ai-{index}") or raw_ai.get(channel) or (raw_ai.get(legacy.lower()) if legacy else None)
+        raw = raw if isinstance(raw, dict) else {}
+        disabled_reason = None
+        if not row:
+            disabled_reason = "No logical binding"
+        elif not row["logical_enabled"] or not row["binding_enabled"]:
+            disabled_reason = "Binding disabled"
+        value = raw.get("value")
+        analog_inputs.append({
+            "number": index,
+            "channel": channel,
+            "firmware_channel": legacy,
+            "name": _channel_display_name(row) if row else "",
+            "bound": row is not None,
+            "binding_id": int(row["binding_id"]) if row else None,
+            "logical_device_id": int(row["logical_device_id"]) if row else None,
+            "logical_name": row["logical_name"] if row else None,
+            "enabled": bool(row and row["logical_enabled"] and row["binding_enabled"]),
+            "value": value if value is not None else None,
+            "unit": raw.get("unit", "V") if raw else None,
+            "status": raw.get("status") if raw else "Unknown",
+            "source": raw.get("source") if raw else None,
+            "config_enabled": disabled_reason is None,
+            "disabled_reason": disabled_reason,
+        })
+    nodes = state.get("rmc_nodes") if isinstance(state.get("rmc_nodes"), dict) else {}
+    rmcs = []
+    for key, raw_node in sorted(nodes.items(), key=lambda item: str(item[0])):
+        node = _wire_value(raw_node)
+        if not isinstance(node, dict):
+            continue
+        node = {**node}
+        node.setdefault("address", key)
+        rmc_id = str(node.get("rmc_id") or _sim_rmc_id(node))
+        row = next((candidate for candidate in rows if _matches_rmc_binding(candidate, rmc_id, node)), None)
+        metadata = _binding_metadata(row)
+        stale = bool(node.get("stale"))
+        room_name = row["room"] if row and row["room"] else "Unassigned"
+        rmcs.append({
+            "id": rmc_id,
+            "logical_identifier": row["logical_name"] if row else rmc_id,
+            "name": metadata.get("rmc_name") or metadata.get("channel_name") or (row["logical_name"] if row else str(node.get("name") or rmc_id)),
+            "bound": row is not None,
+            "binding_id": int(row["binding_id"]) if row else None,
+            "logical_device_id": int(row["logical_device_id"]) if row else None,
+            "room_id": int(row["room_id"]) if row and row["room_id"] is not None else None,
+            "room": room_name,
+            "can_interface": node.get("can_interface") or node.get("interface"),
+            "can_node_address": node.get("address"),
+            "status": _sim_node_status(node),
+            "last_seen": _wire_value(node.get("last_seen")),
+            "last_heartbeat": _wire_value(node.get("last_heartbeat", node.get("last_seen") if node.get("last_frame_kind") == "heartbeat" else None)),
+            "firmware_version": node.get("firmware_version"),
+            "hardware_revision": node.get("hardware_revision"),
+            "health_flags": node.get("status_flags"),
+            "faults": node.get("faults", node.get("sensor_faults", [])),
+            "readings": {
+                "temperature_f": _measurement(node.get("temperature_f"), "F", stale=stale),
+                "humidity_pct": _measurement(node.get("humidity_pct"), "%", stale=stale),
+                "lux": _measurement(node.get("lux"), "lux", stale=stale),
+                "aqi": _measurement(node.get("aqi"), None, stale=stale),
+                "presence": _measurement(node.get("presence"), None, stale=stale),
+            },
+        })
+    room_groups: dict[str, dict[str, Any]] = {}
+    for rmc in rmcs:
+        key = str(rmc["room_id"] or rmc["room"])
+        room_groups.setdefault(key, {
+            "room_id": rmc["room_id"],
+            "room": rmc["room"],
+            "rmcs": [],
+        })["rmcs"].append(rmc)
+    return {
+        "device": module,
+        "can_loops": _sim_can_loops(state),
+        "room_clusters": list(room_groups.values()),
+        "rmcs": rmcs,
+        "analog_inputs": analog_inputs,
+        "diagnostics": {
+            "can": _wire_value(state.get("can") or hexa.get("can") or {}),
+            "hexa_board_model": hexa.get("model"),
+            "io_mode": state.get("io_mode"),
+        },
+    }
+
+
+async def _update_bound_logical_metadata(
+    *,
+    module: dict[str, Any],
+    channel: str,
+    metadata_patch: dict[str, Any],
+    actor: str,
+    action: str,
+) -> dict[str, Any]:
+    async with db.acquire() as conn:
+        async with _transaction(conn):
+            before_row = await conn.fetchrow(
+                """
+                SELECT d.*, NULL::text AS room
+                FROM device_bindings b
+                JOIN logical_devices d ON d.id=b.logical_device_id
+                WHERE b.module_id=$1
+                  AND b.channel=$2
+                FOR UPDATE
+                """,
+                module["module"]["id"],
+                channel,
+            )
+            if not before_row:
+                raise NotFoundError(f"{module['module']['hostname']} {channel}")
+            before = _logical_device(before_row)
+            before_metadata = before["metadata"] if isinstance(before["metadata"], dict) else {}
+            next_metadata = {**before_metadata, **metadata_patch}
+            row = await conn.fetchrow(
+                """
+                UPDATE logical_devices
+                SET metadata=$2::jsonb
+                WHERE id=$1
+                RETURNING *, NULL::text AS room
+                """,
+                before_row["id"],
+                _json_dumps(next_metadata),
+            )
+            after = _logical_device(row)
+            await audit_event(
+                conn,
+                actor=actor,
+                action=action,
+                target_type="logical_device",
+                target_id=str(row["id"]),
+                before_state=before,
+                after_state=after,
+                details={"module": module["module"]["hostname"], "channel": channel},
+            )
+    return after
+
+
+async def update_sim_rmc_name(identifier: str | int, rmc_id: str, *, name: str, actor: str) -> dict[str, Any]:
+    module = await get_device_admin(identifier)
+    if module["effective_role"] != "SIM":
+        raise ValidationError(f"module {module['module']['hostname']} is not currently assigned the SIM role")
+    clean = str(rmc_id).strip()
+    await _update_bound_logical_metadata(
+        module=module,
+        channel=clean,
+        metadata_patch={"rmc_name": name.strip()},
+        actor=actor,
+        action="sim_rmc.name_update",
+    )
+    return await get_sim_dashboard(module["module"]["hostname"])
+
+
+async def update_sim_analog_name(identifier: str | int, channel: str, *, name: str, actor: str) -> dict[str, Any]:
+    module = await get_device_admin(identifier)
+    if module["effective_role"] != "SIM":
+        raise ValidationError(f"module {module['module']['hostname']} is not currently assigned the SIM role")
+    normalized_channel = _normalize_channel(channel)
+    if normalized_channel not in _sim_analog_channels():
+        raise ValidationError("invalid SIM analog input")
+    try_channels = [normalized_channel]
+    legacy = _sim_legacy_analog_channel(normalized_channel)
+    if legacy:
+        try_channels.append(legacy)
+    last_exc = None
+    for candidate in try_channels:
+        try:
+            await _update_bound_logical_metadata(
+                module=module,
+                channel=candidate,
+                metadata_patch={"channel_name": name.strip()},
+                actor=actor,
+                action="sim_analog.name_update",
+            )
+            return await get_sim_dashboard(module["module"]["hostname"])
+        except NotFoundError as exc:
+            last_exc = exc
+    raise last_exc or NotFoundError(f"{module['module']['hostname']} {normalized_channel}")
 
 
 async def list_logical_devices() -> list[dict[str, Any]]:

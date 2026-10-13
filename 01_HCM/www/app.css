@@ -469,6 +469,207 @@ th {
   cursor: not-allowed;
 }
 
+.device-subtitle {
+  margin-top: 4px;
+  color: #98a5ad;
+  font-size: 0.88rem;
+  font-weight: 400;
+}
+
+.can-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.can-status span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #7b8790;
+}
+
+.can-status.online span,
+.status-chip.online {
+  background: #20382f;
+  color: #8ee0be;
+}
+
+.can-status.online span {
+  background: #28a982;
+}
+
+.can-status.fault span {
+  background: #ff9f43;
+}
+
+.can-status.offline span {
+  background: #cf6b62;
+}
+
+.sim-panel {
+  padding: 14px;
+}
+
+.room-clusters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.room-card {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #2b343b;
+  border-radius: 8px;
+  background: #12171b;
+}
+
+.room-card-head,
+.rmc-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.room-card-head {
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #263139;
+}
+
+.room-card-head h4 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.room-card-head span {
+  color: #98a5ad;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.rmc-list {
+  display: grid;
+  gap: 8px;
+}
+
+.rmc-card,
+.ai-card {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #2b343b;
+  border-radius: 8px;
+  background: #171c21;
+}
+
+.rmc-card.fault,
+.ai-card.disabled {
+  border-color: #725938;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #273038;
+  color: #aeb8be;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.status-chip.fault {
+  background: #392d20;
+  color: #ffc976;
+}
+
+.status-chip.offline,
+.status-chip.stale {
+  background: #392a2a;
+  color: #ffb7a8;
+}
+
+.rmc-readings {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.reading {
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid #263139;
+  border-radius: 6px;
+  background: #11161a;
+}
+
+.reading span,
+.ai-reading span,
+.diagnostic-grid span,
+.sim-diagnostics span {
+  display: block;
+  color: #98a5ad;
+  font-size: 0.72rem;
+}
+
+.reading strong,
+.ai-reading strong,
+.diagnostic-grid strong,
+.sim-diagnostics strong {
+  display: block;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+}
+
+.reading.stale strong,
+.reading.unknown strong {
+  color: #ffc976;
+}
+
+.rmc-details summary,
+.sim-panel summary {
+  cursor: pointer;
+  color: #8bd8c3;
+  font-weight: 800;
+}
+
+.diagnostic-grid,
+.sim-diagnostics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.diagnostic-grid div,
+.sim-diagnostics div {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #263139;
+  border-radius: 6px;
+  background: #11161a;
+}
+
+.sim-ai-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ai-card {
+  grid-template-columns: minmax(0, 1fr) minmax(90px, auto);
+  align-items: center;
+}
+
+.ai-reading {
+  text-align: right;
+}
+
 .channel-card {
   display: grid;
   gap: 10px;
@@ -675,7 +876,15 @@ th {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .lcm-columns {
+  .lcm-columns,
+  .room-clusters,
+  .sim-ai-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .rmc-readings,
+  .diagnostic-grid,
+  .sim-diagnostics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -710,14 +919,21 @@ th {
     flex-direction: column;
   }
 
-  .identity-grid, .rcm-grid, .summary-grid, .lcm-columns {
+  .identity-grid, .rcm-grid, .summary-grid, .lcm-columns, .room-clusters, .sim-ai-grid {
     grid-template-columns: 1fr;
   }
 
   .lcm-row,
-  .dimmer-tile {
+  .dimmer-tile,
+  .ai-card {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: stretch;
+  }
+
+  .rmc-readings,
+  .diagnostic-grid,
+  .sim-diagnostics {
+    grid-template-columns: 1fr;
   }
 }
 

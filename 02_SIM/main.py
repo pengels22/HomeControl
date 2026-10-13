@@ -202,6 +202,7 @@ class SIMAgent(common_agent.ModuleAgent):
         addr = str(decoded['address'])
         node = self.rmc_nodes.setdefault(addr, {'address': decoded['address']})
         node['last_seen'] = time.time()
+        node['can_interface'] = interface
         node['last_frame_kind'] = decoded['kind']
         if decoded['kind'] == 'telemetry':
             node.update({

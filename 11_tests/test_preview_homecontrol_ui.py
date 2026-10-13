@@ -55,7 +55,7 @@ def test_preview_devices_include_all_requested_fixtures(client):
     data = client.get("/api/v1/modules", headers=headers()).json()
     modules = {module["hostname"]: module for module in data["modules"]}
 
-    assert set(modules) == {"LAB1", "RCM1", "RCM2", "LCM1", "LCM2", "SIM1", "RCM3"}
+    assert set(modules) == {"LAB1", "RCM1", "RCM2", "LCM1", "LCM2", "SIM1", "SIM2", "RCM3"}
     assert modules["LAB1"]["last_state"]["state"]["lab_role"] == "UNASSIGNED"
     assert modules["LAB1"]["last_state"]["state"]["simulation"] is True
     assert modules["LAB1"]["last_state"]["state"]["physical_outputs_enabled"] is False
@@ -72,6 +72,87 @@ def test_role_based_device_interface_selection_uses_fixture_role(client):
     assert rcm["effective_role"] == "RCM"
     assert lcm["effective_role"] == "LCM"
     assert sim["effective_role"] == "SIM"
+
+
+def test_sim_preview_dashboard_reports_can_loops_room_groups_and_ai(client):
+    data = client.get("/api/v1/device-admin/SIM1/sim-dashboard", headers=headers()).json()
+
+    assert data["device"]["effective_role"] == "SIM"
+    assert [loop["status"] for loop in data["can_loops"]] == ["Online", "Online", "Fault"]
+    rooms = {group["room"]: group for group in data["room_clusters"]}
+    assert "Living Room" in rooms
+    assert len(rooms["Living Room"]["rmcs"]) == 2
+    assert len(data["analog_inputs"]) == 10
+    assert [item["channel"] for item in data["analog_inputs"]] == [f"AI-{index}" for index in range(1, 11)]
+
+
+def test_sim_preview_unknown_status_when_diagnostics_are_missing(client):
+    data = client.get("/api/v1/device-admin/SIM2/sim-dashboard", headers=headers()).json()
+
+    assert [loop["status"] for loop in data["can_loops"]] == ["Unknown", "Unknown", "Unknown"]
+    assert next(item for item in data["analog_inputs"] if item["channel"] == "AI-10")["status"] == "Unknown"
+
+
+def test_sim_rmc_name_change_persists_without_altering_identity(client):
+    before = client.get("/api/v1/device-admin/SIM1/sim-dashboard", headers=headers()).json()
+    original = next(item for item in before["rmcs"] if item["id"] == "RMC:can0:1")
+
+    response = client.patch(
+        "/api/v1/device-admin/SIM1/sim-rmcs/RMC:can0:1/settings",
+        headers=headers(),
+        json={"name": "Living Room Primary"},
+    )
+
+    assert response.status_code == 200
+    updated = next(item for item in response.json()["rmcs"] if item["id"] == "RMC:can0:1")
+    assert updated["name"] == "Living Room Primary"
+    assert updated["id"] == original["id"]
+    assert updated["can_interface"] == original["can_interface"]
+    assert updated["can_node_address"] == original["can_node_address"]
+    assert updated["room"] == original["room"]
+
+
+def test_sim_settings_require_authorization_and_bound_identity(client):
+    unauthorized = client.patch(
+        "/api/v1/device-admin/SIM1/sim-rmcs/RMC:can0:1/settings",
+        json={"name": "Nope"},
+    )
+    unbound_rmc = client.patch(
+        "/api/v1/device-admin/SIM1/sim-rmcs/RMC:can2:4/settings",
+        headers=headers(),
+        json={"name": "Should Not Save"},
+    )
+    unbound_ai = client.patch(
+        "/api/v1/device-admin/SIM1/sim-analog-inputs/AI-10/settings",
+        headers=headers(),
+        json={"name": "Should Not Save"},
+    )
+
+    assert unauthorized.status_code == 401
+    assert unbound_rmc.status_code == 404
+    assert unbound_ai.status_code == 404
+
+
+def test_sim_device_scoping_and_stale_missing_telemetry(client):
+    sim1 = client.get("/api/v1/device-admin/SIM1/sim-dashboard", headers=headers()).json()
+    sim2 = client.get("/api/v1/device-admin/SIM2/sim-dashboard", headers=headers()).json()
+
+    assert sim1["rmcs"]
+    assert sim2["rmcs"] == []
+    stale = next(item for item in sim1["rmcs"] if item["status"] == "Stale")
+    assert stale["readings"]["lux"]["status"] == "Unknown"
+    assert stale["readings"]["temperature_f"]["status"] == "Stale"
+
+
+def test_sim_frontend_uses_dashboard_and_no_output_controls(client):
+    js = client.get("/static/app.js").text
+
+    assert "renderSim" in js
+    assert "/sim-dashboard" in js
+    assert "Room Clusters" in js
+    assert "Analog Inputs" in js
+    assert "data-sim-rmc-settings" in js
+    assert "set_hexa" not in js
 
 
 def test_lcm_preview_loads_lights_and_dimmers(client):
