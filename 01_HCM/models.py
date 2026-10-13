@@ -49,6 +49,9 @@ class DeviceBindingUpdateIn(BaseModel):
     enabled: bool | None = None
     metadata: dict[str, Any] | None = None
 
+class RcmChannelNameIn(BaseModel):
+    name: str = Field(max_length=120)
+
 class ModuleRoleChangeIn(BaseModel):
     requested_role: Literal['UNASSIGNED','RCM','SIM','LCM']
     confirm: bool = False

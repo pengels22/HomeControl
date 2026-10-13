@@ -36,7 +36,7 @@ HomeControl is the source repository for the HCM (House Control Module) system a
 - `09_documentation` — Architecture, wiring, networking, HVAC, commissioning, and build documentation
 - `10_scripts` — Local simulator, provisioning helpers, and admin tooling
 - `11_tests` — Python test coverage for shared services, module behavior, and simulator flows
-- `12_IOS` — iOS companion app prototype
+- `12_IOS` — archived iOS companion app prototype; not part of the active HCM production workflow
 
 ## Architecture baseline
 
@@ -89,9 +89,11 @@ approved subnet is supplied, and VLAN 60 is not valid for module-control pools.
 ## Current implementation status
 
 This repository now contains runnable first-pass software for HCM, Linux modules,
-shared services, deployment scripts, a macOS simulator, and an iOS companion app
-prototype. Some production integrations remain intentionally abstracted until
-hardware and deployment hosts are connected.
+shared services, deployment scripts, and a macOS simulator. The older iOS
+companion app prototype remains archived in the repository, but it is not part
+of the active production/development workflow. Some production integrations
+remain intentionally abstracted until hardware and deployment hosts are
+connected.
 
 ### Local simulator
 
@@ -101,22 +103,20 @@ Run the local simulator on macOS:
 .venv/bin/python 10_scripts/simulate_homecontrol.py
 ```
 
-Open `http://127.0.0.1:8088` on the Mac running the simulator, or use the
-advertised simulator URL shown in the pairing QR from the iOS app/device network. The simulator
-provides the HCM dashboard, Devices, Service, Settings, and Users tabs. Device
-pages expose functional simulated RCM, LCM, SIM, PNL, RMC telemetry, HVAC,
-relay, dimmer, lock, naming, and pairing flows without touching physical GPIO,
-I2C, CAN, PostgreSQL, or systemd.
+Open `http://127.0.0.1:8088` on the Mac running the simulator. The simulator
+provides legacy local UI exercises without touching physical GPIO, I2C, CAN,
+PostgreSQL, or systemd. The production HCM web UI uses authenticated HCM
+backend APIs and the registered module registry rather than simulator-only
+device lists.
 
-### Secure circular pairing
+### Legacy circular pairing prototype
 
-The HCM generates a scanner-compatible pairing code for the 3.3-inch local
-screen. The visible code is a standards-compliant QR URL, framed by the circular
-pairing UI, and the URL query carries an opaque `HC2:...` pairing payload. The
-iOS app scans the QR, extracts only the opaque payload, and posts that payload
-to HCM. HCM verifies/decrypts it using its own secret and the active pairing
-record. On success, HCM returns the app session token. The HCM secret is not
-stored in the iOS app.
+The repository still contains backend pairing-key and circular-code components
+needed by older prototypes and secure provisioning experiments. The production
+web UI no longer exposes pairing-key administration, pairing-code screens, or
+iOS companion-app flows as an active development workflow. Do not remove backend
+authentication, module identity verification, or provisioning primitives that
+remain required for secure device communications.
 
 ## Module details
 
@@ -127,8 +127,8 @@ commissioning and management, DHCP and hostname assignment for the approved HCM
 control network, NTP,
 the rules engine, authentication, fault management, update orchestration,
 PostgreSQL integration, web UI, Zigbee2MQTT integration, media control,
-wall-panel management, life-safety orchestration, HVAC thermostat and zoning
-logic, and the iOS app API.
+wall-panel management, life-safety orchestration, and HVAC thermostat and zoning
+logic.
 
 - Current development/control network: VLAN 20
 - Future production/control network: VLAN 40, subnet not yet approved

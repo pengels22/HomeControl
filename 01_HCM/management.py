@@ -93,6 +93,56 @@ def _module_summary(row, capabilities: list[dict[str, Any]] | None = None) -> di
     }
 
 
+def _state_payload(module: dict[str, Any]) -> dict[str, Any]:
+    state = _json_value(module.get("last_state") or {})
+    return state if isinstance(state, dict) else {}
+
+
+def _nested_state(module: dict[str, Any]) -> dict[str, Any]:
+    state = _state_payload(module)
+    nested = state.get("state")
+    if isinstance(nested, dict):
+        return nested
+    return state
+
+
+def _operational_role(module: dict[str, Any]) -> str:
+    nested = _nested_state(module)
+    role = nested.get("lab_role") or nested.get("operational_role") or nested.get("role")
+    if isinstance(role, str) and role.strip():
+        return role.strip().upper()
+    return str(module.get("module_type") or "UNASSIGNED").upper()
+
+
+def _channel_display_name(row) -> str:
+    metadata = _wire_value(row["logical_metadata"] or {})
+    if isinstance(metadata, dict) and metadata.get("channel_name"):
+        return str(metadata["channel_name"])
+    return row["logical_name"] or ""
+
+
+def _rcm_channel_ids() -> list[str]:
+    return [f"{bank}{channel}" for bank in ("A", "B", "C", "D") for channel in range(1, 9)]
+
+
+def _relay_value(last_state: dict[str, Any], channel: str) -> bool | None:
+    nested = last_state.get("state") if isinstance(last_state.get("state"), dict) else last_state
+    relays = nested.get("relays") if isinstance(nested, dict) else None
+    if not isinstance(relays, dict):
+        return None
+    candidates = (channel, channel.lower(), str(_rcm_channel_ids().index(channel) + 1))
+    for key in candidates:
+        if key not in relays:
+            continue
+        value = relays[key]
+        if isinstance(value, dict):
+            for field in ("on", "value", "active", "state"):
+                if field in value:
+                    return bool(value[field])
+        return bool(value)
+    return None
+
+
 def _logical_device(row) -> dict[str, Any]:
     try:
         room = row["room"]
@@ -325,6 +375,142 @@ async def get_module(identifier: str | int) -> dict[str, Any]:
         for r in capability_rows
     ]
     return _module_summary(row, capabilities)
+
+
+async def get_device_admin(identifier: str | int) -> dict[str, Any]:
+    module = await get_module(identifier)
+    effective_role = _operational_role(module)
+    nested = _nested_state(module)
+    return {
+        "module": module,
+        "effective_role": effective_role,
+        "role_source": "reported_state" if effective_role != module["module_type"] else "registered_module_type",
+        "simulation": nested.get("simulation"),
+        "physical_outputs_enabled": nested.get("physical_outputs_enabled"),
+        "replacement_ready": {
+            "supported": True,
+            "automatic_reassignment_enabled": False,
+            "note": "Logical identities are preserved separately from physical device IDs; replacement is intentionally manual.",
+        },
+    }
+
+
+async def get_rcm_channels(identifier: str | int) -> dict[str, Any]:
+    module = await get_device_admin(identifier)
+    if module["effective_role"] != "RCM":
+        raise ValidationError(f"module {module['module']['hostname']} is not currently assigned the RCM role")
+    async with db.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT b.id AS binding_id,
+                   b.channel,
+                   b.enabled AS binding_enabled,
+                   d.id AS logical_device_id,
+                   d.logical_name,
+                   d.enabled AS logical_enabled,
+                   d.maintenance_locked,
+                   d.metadata AS logical_metadata
+            FROM device_bindings b
+            JOIN logical_devices d ON d.id=b.logical_device_id
+            WHERE b.module_id=$1
+              AND b.channel=ANY($2::text[])
+            ORDER BY b.channel, b.id
+            """,
+            module["module"]["id"],
+            _rcm_channel_ids(),
+        )
+    by_channel = {row["channel"]: row for row in rows}
+    online = bool(module["module"]["online"] or module["module"]["control_session_online"])
+    control_online = bool(module["module"]["control_session_online"])
+    physical_outputs_enabled = module.get("physical_outputs_enabled")
+    inhibited = physical_outputs_enabled is False
+    last_state = _state_payload(module["module"])
+    channels = []
+    for index, channel in enumerate(_rcm_channel_ids(), start=1):
+        row = by_channel.get(channel)
+        disabled_reason = None
+        if not row:
+            disabled_reason = "No logical binding"
+        elif not row["logical_enabled"] or not row["binding_enabled"]:
+            disabled_reason = "Binding disabled"
+        elif row["maintenance_locked"]:
+            disabled_reason = "Maintenance lockout"
+        elif not control_online:
+            disabled_reason = "No authenticated control session"
+        elif inhibited:
+            disabled_reason = "Physical outputs disabled"
+        channels.append({
+            "number": index,
+            "channel": channel,
+            "binding_id": int(row["binding_id"]) if row else None,
+            "logical_device_id": int(row["logical_device_id"]) if row else None,
+            "logical_name": row["logical_name"] if row else None,
+            "name": _channel_display_name(row) if row else "",
+            "bound": row is not None,
+            "enabled": bool(row and row["logical_enabled"] and row["binding_enabled"]),
+            "maintenance_locked": bool(row["maintenance_locked"]) if row else False,
+            "online": online,
+            "control_session_online": control_online,
+            "physical_outputs_enabled": physical_outputs_enabled,
+            "value": _relay_value(last_state, channel),
+            "control_enabled": disabled_reason is None,
+            "disabled_reason": disabled_reason,
+        })
+    return {"device": module, "channels": channels}
+
+
+async def update_rcm_channel_name(
+    identifier: str | int,
+    channel: str,
+    *,
+    name: str,
+    actor: str,
+) -> dict[str, Any]:
+    normalized_channel = _normalize_channel(channel)
+    if normalized_channel not in _rcm_channel_ids():
+        raise ValidationError("invalid RCM channel")
+    module = await get_device_admin(identifier)
+    if module["effective_role"] != "RCM":
+        raise ValidationError(f"module {module['module']['hostname']} is not currently assigned the RCM role")
+    async with db.acquire() as conn:
+        async with _transaction(conn):
+            before_row = await conn.fetchrow(
+                """
+                SELECT d.*, NULL::text AS room
+                FROM device_bindings b
+                JOIN logical_devices d ON d.id=b.logical_device_id
+                WHERE b.module_id=$1
+                  AND b.channel=$2
+                FOR UPDATE
+                """,
+                module["module"]["id"],
+                normalized_channel,
+            )
+            if not before_row:
+                raise NotFoundError(f"{module['module']['hostname']} {normalized_channel}")
+            before = _logical_device(before_row)
+            row = await conn.fetchrow(
+                """
+                UPDATE logical_devices
+                SET metadata=jsonb_set(metadata, '{channel_name}', to_jsonb($2::text), true)
+                WHERE id=$1
+                RETURNING *, NULL::text AS room
+                """,
+                before_row["id"],
+                name.strip(),
+            )
+            after = _logical_device(row)
+            await audit_event(
+                conn,
+                actor=actor,
+                action="rcm_channel.name_update",
+                target_type="logical_device",
+                target_id=str(row["id"]),
+                before_state=before,
+                after_state=after,
+                details={"module": module["module"]["hostname"], "channel": normalized_channel},
+            )
+    return await get_rcm_channels(module["module"]["hostname"])
 
 
 async def list_logical_devices() -> list[dict[str, Any]]:

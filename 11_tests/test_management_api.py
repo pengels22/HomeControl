@@ -354,3 +354,158 @@ async def test_logical_device_create_api_calls_management(monkeypatch):
     )
 
     assert result == {'id': 1, 'logical_name': 'Kitchen Light'}
+
+
+class FakeDeviceAdminConn:
+    def __init__(self):
+        self.audit_events = []
+        self.transaction_depth = 0
+        self.module = {
+            'id': 7,
+            'device_id': '2ccf675d3414',
+            'module_uuid': None,
+            'identity_interface': 'eth0',
+            'module_type': 'RCM',
+            'hostname': 'LAB1',
+            'ip_address': '192.168.20.36',
+            'heartbeat_ip': None,
+            'online': True,
+            'control_session_online': True,
+            'supervision_state': 'unknown',
+            'supervision_last_seen': None,
+            'supervision_fresh_until': None,
+            'last_health': {},
+            'hardware_revision': None,
+            'software_version': '0.1.0',
+            'config_version': 1,
+            'last_seen': None,
+            'last_state': {
+                'state': {
+                    'lab_role': 'UNASSIGNED',
+                    'simulation': True,
+                    'physical_outputs_enabled': False,
+                    'relays': {'A1': {'on': False}},
+                }
+            },
+            'commissioned_at': None,
+        }
+        self.capabilities = [{'capability': 'relay-32', 'details': {}, 'first_seen_at': None, 'updated_at': None}]
+        self.logical = {
+            'id': 22,
+            'logical_name': 'RCM2 Channel 1',
+            'room_id': None,
+            'room': None,
+            'device_class': 'relay',
+            'enabled': True,
+            'maintenance_locked': False,
+            'metadata': {'channel_name': 'Pump Enable'},
+        }
+        self.binding = {
+            'binding_id': 33,
+            'channel': 'A1',
+            'binding_enabled': True,
+            'logical_device_id': 22,
+            'logical_name': 'RCM2 Channel 1',
+            'logical_enabled': True,
+            'maintenance_locked': False,
+            'logical_metadata': {'channel_name': 'Pump Enable'},
+        }
+
+    def transaction(self):
+        return FakeTransaction(self)
+
+    async def fetchrow(self, query, *args):
+        if 'SELECT *' in query and 'FROM modules' in query:
+            identifier, device_id = args
+            if identifier in {'LAB1', '7'} or device_id == self.module['device_id']:
+                return self.module
+            return None
+        if 'SELECT d.*, NULL::text AS room' in query:
+            module_id, channel = args
+            if module_id == self.module['id'] and channel == self.binding['channel']:
+                return {**self.logical, 'room': None}
+            return None
+        if 'UPDATE logical_devices' in query and 'jsonb_set' in query:
+            _, name = args
+            self.logical['metadata'] = {'channel_name': name}
+            self.binding['logical_metadata'] = {'channel_name': name}
+            return {**self.logical, 'room': None}
+        raise AssertionError(f'unexpected fetchrow: {query}')
+
+    async def fetch(self, query, *args):
+        if 'FROM module_capabilities' in query:
+            return self.capabilities
+        if 'FROM device_bindings b' in query and 'JOIN logical_devices d' in query:
+            module_id, channels = args
+            if module_id == self.module['id'] and self.binding['channel'] in channels:
+                return [self.binding]
+            return []
+        raise AssertionError(f'unexpected fetch: {query}')
+
+    async def execute(self, query, *args):
+        if 'INSERT INTO device_management_events' in query:
+            self.audit_events.append(args)
+            return
+        raise AssertionError(f'unexpected execute: {query}')
+
+
+@pytest.mark.asyncio
+async def test_device_admin_uses_reported_lab1_role_not_hostname(monkeypatch):
+    conn = FakeDeviceAdminConn()
+    monkeypatch.setattr(management.db, 'acquire', lambda: FakeAcquire(conn))
+
+    result = await management.get_device_admin('LAB1')
+
+    assert result['module']['hostname'] == 'LAB1'
+    assert result['module']['device_id'] == '2ccf675d3414'
+    assert result['effective_role'] == 'UNASSIGNED'
+    assert result['simulation'] is True
+    assert result['physical_outputs_enabled'] is False
+
+
+@pytest.mark.asyncio
+async def test_rcm_channels_use_real_bindings_and_disable_inhibited_outputs(monkeypatch):
+    conn = FakeDeviceAdminConn()
+    conn.module['last_state']['state']['lab_role'] = 'RCM'
+    monkeypatch.setattr(management.db, 'acquire', lambda: FakeAcquire(conn))
+
+    result = await management.get_rcm_channels('LAB1')
+    first = result['channels'][0]
+    second = result['channels'][1]
+
+    assert len(result['channels']) == 32
+    assert first['channel'] == 'A1'
+    assert first['logical_name'] == 'RCM2 Channel 1'
+    assert first['name'] == 'Pump Enable'
+    assert first['value'] is False
+    assert first['control_enabled'] is False
+    assert first['disabled_reason'] == 'Physical outputs disabled'
+    assert second['bound'] is False
+    assert second['disabled_reason'] == 'No logical binding'
+
+
+@pytest.mark.asyncio
+async def test_rcm_channel_name_update_persists_metadata_without_renaming_logical(monkeypatch):
+    conn = FakeDeviceAdminConn()
+    conn.module['last_state']['state']['lab_role'] = 'RCM'
+    monkeypatch.setattr(management.db, 'acquire', lambda: FakeAcquire(conn))
+
+    result = await management.update_rcm_channel_name('LAB1', 'A1', name='Well Pump', actor='patrick')
+
+    assert conn.logical['logical_name'] == 'RCM2 Channel 1'
+    assert conn.logical['metadata']['channel_name'] == 'Well Pump'
+    assert result['channels'][0]['name'] == 'Well Pump'
+    assert conn.audit_events[-1][1] == 'rcm_channel.name_update'
+
+
+@pytest.mark.asyncio
+async def test_rcm_channel_name_api_requires_admin():
+    with pytest.raises(HTTPException) as exc:
+        await api.device_admin_rcm_channel_name(
+            'LAB1',
+            'A1',
+            api.RcmChannelNameIn(name='Well Pump'),
+            {'user': 'viewer', 'role': 'READONLY'},
+        )
+
+    assert exc.value.status_code == 403

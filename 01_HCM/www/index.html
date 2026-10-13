@@ -7,124 +7,48 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <main class="shell">
-    <section class="topbar">
-      <div>
-        <h1>HomeControl</h1>
-        <p>HCM control interface</p>
-      </div>
-      <button id="logout" class="secondary" hidden>Log out</button>
-    </section>
-
-    <section id="login-view" class="panel narrow">
-      <h2>Sign In</h2>
-      <label>Username <input id="username" autocomplete="username"></label>
-      <label>Password <input id="password" type="password" autocomplete="current-password"></label>
-      <button id="login">Sign in</button>
-      <p id="login-error" class="error"></p>
-    </section>
-
-    <section id="app-view" hidden>
-      <div class="grid">
-        <section class="panel">
-          <h2>HVAC</h2>
-          <div class="metric"><span>Mode</span><strong id="hvac-mode">-</strong></div>
-          <div class="metric"><span>Setpoint</span><strong id="hvac-setpoint">-</strong></div>
-          <div class="metric"><span>Average</span><strong id="hvac-average">-</strong></div>
-          <div class="row">
-            <select id="mode">
-              <option>OFF</option>
-              <option>HEAT</option>
-              <option>COOL</option>
-              <option>FAN</option>
-            </select>
-            <input id="setpoint" type="number" min="45" max="90" value="70">
-            <button id="apply-hvac">Apply</button>
-          </div>
-        </section>
-
-        <section class="panel">
-          <h2>Pairing Keys</h2>
-          <div class="row">
-            <input id="pair-label" placeholder="Label">
-            <select id="pair-type">
-              <option>HCM_SCREEN</option>
-              <option>PNL</option>
-              <option>RCM</option>
-              <option>LCM</option>
-              <option>SIM</option>
-              <option>RMC</option>
-              <option>OTHER</option>
-            </select>
-            <button id="create-pairing">Generate</button>
-          </div>
-          <div id="pairing-output" class="pairing-key" hidden></div>
-          <table>
-            <thead><tr><th>Label</th><th>Type</th><th>Expires</th><th>Used</th></tr></thead>
-            <tbody id="pairing-list"></tbody>
-          </table>
-        </section>
-      </div>
-
-      <section class="panel wide">
-        <div class="panel-head">
-          <h2>Devices</h2>
-          <button id="refresh-registry" class="secondary">Refresh</button>
+  <main class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">HC</span>
+        <div>
+          <h1>HomeControl</h1>
+          <p>HCM admin</p>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Module</th><th>Identity</th><th>Address</th><th>Status</th><th>Capabilities</th></tr></thead>
-            <tbody id="module-list"></tbody>
-          </table>
+      </div>
+      <nav class="nav" aria-label="Main navigation">
+        <a href="/dashboard" data-route="dashboard">Dashboard</a>
+        <a href="/devices" data-route="devices">Devices</a>
+        <a href="/service" data-route="service">Service</a>
+        <a href="/settings" data-route="settings">Settings</a>
+        <a href="/users" data-route="users">Users</a>
+      </nav>
+      <button id="logout" class="ghost" hidden>Log out</button>
+    </aside>
+
+    <section class="workspace">
+      <section id="login-view" class="login-card">
+        <div>
+          <h2>Sign In</h2>
+          <p>Use an HCM account to continue.</p>
         </div>
+        <label>Username <input id="username" autocomplete="username"></label>
+        <label>Password <input id="password" type="password" autocomplete="current-password"></label>
+        <button id="login">Sign in</button>
+        <p id="login-error" class="error"></p>
       </section>
 
-      <section class="panel wide">
-        <div class="panel-head">
-          <h2>Role Management</h2>
-          <button id="refresh-roles" class="secondary">Refresh</button>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Device</th><th>Registered</th><th>Operational</th><th>Pending</th><th>Safety</th><th>Last Result</th><th>Request</th></tr></thead>
-            <tbody id="role-list"></tbody>
-          </table>
-        </div>
+      <section id="app-view" hidden>
+        <header class="page-head">
+          <div>
+            <p id="page-kicker">HCM</p>
+            <h2 id="page-title">Dashboard</h2>
+          </div>
+          <button id="refresh-page" class="secondary">Refresh</button>
+        </header>
+        <p id="app-error" class="error"></p>
+        <section id="content" class="content" aria-live="polite"></section>
       </section>
-
-      <div class="grid">
-        <section class="panel">
-          <h2>Logical Devices</h2>
-          <div class="row">
-            <input id="logical-name" placeholder="Logical name">
-            <input id="device-class" placeholder="Class">
-            <button id="create-logical">Add</button>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>Name</th><th>Class</th><th>Enabled</th><th>Lock</th></tr></thead>
-              <tbody id="logical-list"></tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="panel">
-          <h2>Bindings</h2>
-          <div class="row">
-            <select id="binding-logical"></select>
-            <select id="binding-module"></select>
-            <input id="binding-channel" placeholder="Channel">
-            <button id="create-binding">Bind</button>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>Logical</th><th>Module</th><th>Channel</th><th>Type</th></tr></thead>
-              <tbody id="binding-list"></tbody>
-            </table>
-          </div>
-        </section>
-      </div>
-      <p id="app-error" class="error"></p>
     </section>
   </main>
   <script src="/static/app.js"></script>

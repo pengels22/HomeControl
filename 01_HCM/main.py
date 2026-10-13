@@ -72,6 +72,15 @@ app.mount('/static', StaticFiles(directory=WEB_ROOT), name='static')
 async def web_index():
     return FileResponse(WEB_ROOT / 'index.html')
 
+@app.get('/dashboard')
+@app.get('/devices')
+@app.get('/devices/{path:path}')
+@app.get('/service')
+@app.get('/settings')
+@app.get('/users')
+async def web_app_routes():
+    return FileResponse(WEB_ROOT / 'index.html')
+
 if __name__ == '__main__':
     if '-dev' in sys.argv or '--dev' in sys.argv:
         settings.dev_mode = True

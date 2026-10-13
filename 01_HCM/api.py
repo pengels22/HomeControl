@@ -19,6 +19,7 @@ from .models import (
     PairingKeyCreateIn,
     PairingKeyVerifyIn,
     PasswordLoginIn,
+    RcmChannelNameIn,
     RmcFirmwareUpdateIn,
     RoomStateIn,
     SafetyRelayPulseIn,
@@ -127,6 +128,45 @@ async def module_capabilities(identifier: str, user=Depends(require_user)):
     except management.ValidationError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {'module': module['hostname'], 'capabilities': module['capabilities']}
+
+@router.get('/device-admin/{identifier}')
+async def device_admin(identifier: str, user=Depends(require_user)):
+    try:
+        return await management.get_device_admin(identifier)
+    except management.NotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except management.ValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+@router.get('/device-admin/{identifier}/rcm-channels')
+async def device_admin_rcm_channels(identifier: str, user=Depends(require_user)):
+    try:
+        return await management.get_rcm_channels(identifier)
+    except management.NotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except management.ValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+@router.patch('/device-admin/{identifier}/rcm-channels/{channel}/name')
+async def device_admin_rcm_channel_name(
+    identifier: str,
+    channel: str,
+    body: RcmChannelNameIn,
+    user=Depends(require_user),
+):
+    if user['role'] != 'ADMIN':
+        raise HTTPException(403)
+    try:
+        return await management.update_rcm_channel_name(
+            identifier,
+            channel,
+            name=body.name,
+            actor=user['user'],
+        )
+    except management.NotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except management.ValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 @router.get('/module-roles')
 async def module_roles(user=Depends(require_user)):
