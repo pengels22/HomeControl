@@ -152,7 +152,22 @@ def test_sim_frontend_uses_dashboard_and_no_output_controls(client):
     assert "Room Clusters" in js
     assert "Analog Inputs" in js
     assert "data-sim-rmc-settings" in js
+    assert "rmc-grid" in js
+    assert "rmc-details" not in js
     assert "set_hexa" not in js
+
+
+def test_sim_frontend_rmc_cards_are_compact_and_dialog_contains_diagnostics(client):
+    js = client.get("/static/app.js").text
+    css = client.get("/static/app.css").text
+
+    assert "cog-button" in js
+    assert "Permanent ID" in js
+    assert "Last heartbeat" in js
+    assert "Health flags" in js
+    assert "This RMC is not bound to a logical device" in js
+    assert ".rmc-grid" in css
+    assert "grid-template-columns: repeat(3, minmax(0, 1fr))" in css
 
 
 def test_lcm_preview_loads_lights_and_dimmers(client):

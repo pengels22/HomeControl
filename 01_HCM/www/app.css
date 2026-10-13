@@ -511,55 +511,49 @@ th {
   padding: 14px;
 }
 
-.room-clusters {
+.rmc-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 8px;
 }
 
-.room-card {
-  min-width: 0;
-  padding: 10px;
-  border: 1px solid #2b343b;
-  border-radius: 8px;
-  background: #12171b;
-}
-
-.room-card-head,
 .rmc-head {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
 }
 
-.room-card-head {
-  margin-bottom: 8px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #263139;
-}
-
-.room-card-head h4 {
-  margin: 0;
-  font-size: 0.98rem;
-}
-
-.room-card-head span {
-  color: #98a5ad;
-  font-size: 0.78rem;
-  white-space: nowrap;
-}
-
-.rmc-list {
+.rmc-title-block {
   display: grid;
-  gap: 8px;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rmc-title-block strong {
+  overflow-wrap: anywhere;
+  color: #8bd8c3;
+  font-size: 0.92rem;
+  line-height: 1.15;
+}
+
+.rmc-title-block span {
+  color: #98a5ad;
+  font-size: 0.72rem;
+}
+
+.rmc-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
 }
 
 .rmc-card,
 .ai-card {
   display: grid;
-  gap: 8px;
-  padding: 8px;
+  gap: 7px;
+  padding: 7px;
   border: 1px solid #2b343b;
   border-radius: 8px;
   background: #171c21;
@@ -582,6 +576,18 @@ th {
   font-weight: 800;
 }
 
+.cog-button {
+  min-width: 28px;
+  width: 28px;
+  min-height: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #3c454d;
+  background: #2b3137;
+  color: #dbe3df;
+  font-size: 0.9rem;
+}
+
 .status-chip.fault {
   background: #392d20;
   color: #ffc976;
@@ -595,13 +601,13 @@ th {
 
 .rmc-readings {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
 }
 
 .reading {
   min-width: 0;
-  padding: 7px;
+  padding: 6px;
   border: 1px solid #263139;
   border-radius: 6px;
   background: #11161a;
@@ -623,7 +629,7 @@ th {
   display: block;
   margin-top: 2px;
   overflow-wrap: anywhere;
-  font-size: 0.86rem;
+  font-size: 0.82rem;
 }
 
 .reading.stale strong,
@@ -631,7 +637,6 @@ th {
   color: #ffc976;
 }
 
-.rmc-details summary,
 .sim-panel summary {
   cursor: pointer;
   color: #8bd8c3;
@@ -877,7 +882,7 @@ th {
   }
 
   .lcm-columns,
-  .room-clusters,
+  .rmc-grid,
   .sim-ai-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -919,7 +924,7 @@ th {
     flex-direction: column;
   }
 
-  .identity-grid, .rcm-grid, .summary-grid, .lcm-columns, .room-clusters, .sim-ai-grid {
+  .identity-grid, .rcm-grid, .summary-grid, .lcm-columns, .rmc-grid, .sim-ai-grid {
     grid-template-columns: 1fr;
   }
 

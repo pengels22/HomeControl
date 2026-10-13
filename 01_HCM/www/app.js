@@ -307,7 +307,7 @@ async function renderSim(device) {
         <h3>Room Clusters</h3>
         <span class="muted">${data.rmcs.length} RMC nodes</span>
       </div>
-      <div class="room-clusters">${data.room_clusters.length ? data.room_clusters.map(roomClusterCard).join("") : `<div class="empty">No RMC telemetry reported for this SIM.</div>`}</div>
+      <div class="rmc-grid">${data.rmcs.length ? data.rmcs.map(rmcCard).join("") : `<div class="empty">No RMC telemetry reported for this SIM.</div>`}</div>
     </section>
     <section class="panel sim-panel">
       <div class="panel-head">
@@ -341,21 +341,17 @@ function simStatusClass(status) {
   return "unknown";
 }
 
-function roomClusterCard(group) {
-  return `<article class="room-card">
-    <div class="room-card-head">
-      <h4>${esc(group.room || "Unassigned")}</h4>
-      <span>${group.rmcs.length} RMC${group.rmcs.length === 1 ? "" : "s"}</span>
-    </div>
-    <div class="rmc-list">${group.rmcs.map(rmcCard).join("")}</div>
-  </article>`;
-}
-
 function rmcCard(rmc) {
   return `<article class="rmc-card ${simStatusClass(rmc.status)}">
     <div class="rmc-head">
-      <button class="channel-title" type="button" data-sim-rmc-settings="${esc(rmc.id)}" ${rmc.bound ? "" : "disabled"}>${esc(rmc.name || rmc.id)}</button>
-      <span class="status-chip ${simStatusClass(rmc.status)}">${esc(rmc.status || "Unknown")}</span>
+      <div class="rmc-title-block">
+        <strong>${esc(rmc.name || rmc.id)}</strong>
+        <span>${esc(rmc.id)} / ${esc(rmc.can_interface || "Unknown")}</span>
+      </div>
+      <div class="rmc-actions">
+        <span class="status-chip ${simStatusClass(rmc.status)}">${esc(rmc.status || "Unknown")}</span>
+        <button class="icon-button cog-button" type="button" data-sim-rmc-settings="${esc(rmc.id)}" aria-label="Open ${esc(rmc.name || rmc.id)} settings">⚙</button>
+      </div>
     </div>
     <div class="rmc-readings">
       ${readingCell("Temp", rmc.readings.temperature_f, (value) => `${value} F`)}
@@ -364,19 +360,6 @@ function rmcCard(rmc) {
       ${readingCell("AQI", rmc.readings.aqi, (value) => `${value}`)}
       ${readingCell("Presence", rmc.readings.presence, (value) => value ? "Detected" : "Clear")}
     </div>
-    <details class="rmc-details">
-      <summary>Diagnostics</summary>
-      <div class="diagnostic-grid">
-        ${kv("Logical ID", rmc.logical_identifier)}
-        ${kv("CAN node", rmc.can_node_address)}
-        ${kv("CAN loop", rmc.can_interface)}
-        ${kv("Last heartbeat", rmc.last_heartbeat)}
-        ${kv("Firmware", rmc.firmware_version)}
-        ${kv("Hardware", rmc.hardware_revision)}
-        ${kv("Health flags", rmc.health_flags)}
-        ${kv("Faults", rmc.faults?.length ? rmc.faults.join(", ") : "None")}
-      </div>
-    </details>
   </article>`;
 }
 
@@ -522,22 +505,35 @@ function openDimmerDialog(channelId) {
 
 function openSimRmcDialog(rmcId) {
   const rmc = simRmc(rmcId);
-  if (!rmc || !rmc.bound) return;
+  if (!rmc) return;
+  const nameField = rmc.bound
+    ? `<label>RMC name <input value="${esc(rmc.name || "")}" data-sim-name></label>`
+    : `<div class="notice warn">This RMC is not bound to a logical device. Diagnostics are read-only until HCM has a valid binding.</div>`;
+  const actions = rmc.bound
+    ? `<button type="button" class="secondary" data-close-dialog>Cancel</button><button type="button" data-save-sim-rmc="${esc(rmc.id)}">Save</button>`
+    : `<button type="button" data-close-dialog>Close</button>`;
   modal(`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="sim-rmc-title">
     <div class="modal-head">
       <h3 id="sim-rmc-title">${esc(rmc.name || rmc.id)}</h3>
       <button type="button" class="secondary icon-button" data-close-dialog aria-label="Close">x</button>
     </div>
-    <label>RMC name <input value="${esc(rmc.name || "")}" data-sim-name></label>
+    ${nameField}
     <div class="diagnostic-grid">
+      ${kv("Logical ID", rmc.logical_identifier)}
       ${kv("Permanent ID", rmc.id)}
       ${kv("CAN loop", rmc.can_interface)}
       ${kv("CAN node", rmc.can_node_address)}
       ${kv("Room", rmc.room)}
+      ${kv("Last heartbeat", rmc.last_heartbeat)}
+      ${kv("Last seen", rmc.last_seen)}
+      ${kv("Firmware", rmc.firmware_version)}
+      ${kv("Hardware", rmc.hardware_revision)}
+      ${kv("Health flags", rmc.health_flags)}
+      ${kv("Faults", rmc.faults?.length ? rmc.faults.join(", ") : "None")}
+      ${kv("Binding", rmc.bound ? "Bound" : "Unbound")}
     </div>
     <div class="modal-actions">
-      <button type="button" class="secondary" data-close-dialog>Cancel</button>
-      <button type="button" data-save-sim-rmc="${esc(rmc.id)}">Save</button>
+      ${actions}
     </div>
   </section>`);
 }
