@@ -26,6 +26,36 @@ physical-output changes.
 - Pairing-key administration, pairing-code screens and iOS companion-app flows
   are removed from the active production web UI.
 
+## Standalone Development Preview
+
+Run the local UI preview on a Mac:
+
+```sh
+.venv/bin/python 10_scripts/preview_homecontrol_ui.py
+```
+
+Open `http://127.0.0.1:8081`. The preview binds to `127.0.0.1`, serves the
+actual assets from `01_HCM/www/`, and implements only preview fixtures for the
+API endpoints used by the frontend. It does not require PostgreSQL or Docker and
+does not contact production HCM, Jetson, Conflict, LAB1 or physical modules.
+
+Preview fixtures:
+
+| Device | Role | Status |
+| --- | --- | --- |
+| LAB1 | UNASSIGNED | Online |
+| RCM1 | RCM | Online |
+| RCM2 | RCM | Online |
+| LCM1 | LCM | Online |
+| SIM1 | SIM | Online |
+| RCM3 | RCM | Offline |
+
+The preview RCM pages simulate ON/OFF, maintenance lockout and channel-name
+edits through in-memory preview API state. Maintenance lockout forces a channel
+OFF, rejects energizing commands while locked, and leaves the channel OFF when
+cleared. This simulation is for visual review and page-by-page frontend
+development only.
+
 ## Explicitly Not Complete
 
 - HCM-hosted CSV files such as `RCM_2.csv` are not implemented by this UI

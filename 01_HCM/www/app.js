@@ -75,6 +75,15 @@ async function loadRegistry() {
   return lastModules;
 }
 
+async function detectPreviewMode() {
+  try {
+    const data = await api("/preview-mode");
+    $("preview-banner").hidden = !data.preview;
+  } catch {
+    $("preview-banner").hidden = true;
+  }
+}
+
 function deviceLink(module) {
   return `/devices/${encodeURIComponent(module.hostname)}`;
 }
@@ -388,6 +397,7 @@ $("login").onclick = async () => {
     token = data.token;
     localStorage.setItem("homecontrol_token", token);
     currentUser = await api("/auth/session");
+    await detectPreviewMode();
     await renderRoute();
   } catch (error) {
     $("login-error").textContent = error.message;
@@ -411,6 +421,7 @@ window.onpopstate = () => renderRoute();
   }
   try {
     currentUser = await api("/auth/session");
+    await detectPreviewMode();
     await renderRoute();
   } catch {
     token = "";

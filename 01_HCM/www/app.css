@@ -185,6 +185,16 @@ code {
   font-size: 1.65rem;
 }
 
+.preview-banner {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid #7a5f22;
+  border-radius: 8px;
+  background: #2f2815;
+  color: #ffe6a8;
+  font-weight: 700;
+}
+
 .content {
   display: grid;
   gap: 16px;
