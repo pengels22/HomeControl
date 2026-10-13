@@ -366,6 +366,11 @@ th {
   font-weight: 800;
 }
 
+.channel-title:disabled {
+  color: #6f7a80;
+  cursor: not-allowed;
+}
+
 .channel-title:focus-visible,
 .dimmer-button:focus-visible,
 .icon-button:focus-visible {

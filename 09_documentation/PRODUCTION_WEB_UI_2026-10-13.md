@@ -25,10 +25,12 @@ physical-output changes.
 - LCM, SIM and UNASSIGNED pages show real identity/status information only.
 - Pairing-key administration, pairing-code screens and iOS companion-app flows
   are removed from the active production web UI.
-- LCM pages render bound channel data in two frontend sections only: Lights and
-  Dimmers. Output commands use HCM logical-device routing; settings update
-  logical-device metadata and maintenance lockout continues through the existing
-  safety lockout endpoint.
+- LCM pages render the corrected 22-output physical inventory in two frontend
+  sections only: eight Relay outputs in Lights, and fourteen dimmers in Dimmers
+  (`10-1` through `10-10` for 0-10 V, `HV-1` through `HV-4` for 110 V). Output
+  commands use HCM logical-device routing; settings update logical-device
+  metadata and maintenance lockout continues through the existing safety lockout
+  endpoint. Unbound physical channels are visible but disabled.
 
 ## Standalone Development Preview
 
@@ -63,6 +65,14 @@ Maintenance lockout forces a channel OFF, rejects energizing commands while
 locked, and leaves the channel OFF when cleared. This simulation is for visual
 review and page-by-page frontend development only.
 
+LCM preview and HCM UI enumeration use this physical mapping:
+
+| Position | Channel | Type |
+| --- | --- | --- |
+| 1-8 | `A1`-`A8` | Relay |
+| 9-18 | `10-1`-`10-10` | 0-10 V |
+| 19-22 | `HV-1`-`HV-4` | 110 V |
+
 ## Explicitly Not Complete
 
 - HCM-hosted CSV files such as `RCM_2.csv` are not implemented by this UI
@@ -79,6 +89,12 @@ review and page-by-page frontend development only.
 - Detailed SIM controls are intentionally deferred. LCM production backend
   integration beyond existing logical command routing and metadata writes is
   intentionally deferred.
+- The checked-in LCM firmware/config documentation still describes the older
+  local module layout of twelve relay labels and eight 0-10 V labels
+  (`06_config/03_LCM/Pinout.md`, `06_config/03_LCM/lcm.yaml`,
+  `03_LCM/main.py`). This UI correction preserves the established `A*`, `10-*`
+  and `HV-*` identifier families but does not implement firmware, pinout, CSV or
+  module-local persistence changes for the corrected 8 + 10 + 4 hardware layout.
 - Production LCM hardware fade execution, live in-progress fade telemetry,
   module-local persistence of dimmer settings, CSV generation such as
   `LCM_1.csv`, authenticated TCP mirroring, and offline reconciliation are not

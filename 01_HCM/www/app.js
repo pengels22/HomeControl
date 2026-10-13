@@ -231,16 +231,16 @@ async function renderLcm(device) {
     <section class="panel">
       <div class="panel-head">
         <h3>Lights</h3>
-        <span class="muted">${lights.length} bound channels</span>
+        <span class="muted">${lights.length} physical relay outputs</span>
       </div>
-      <div class="lcm-list">${lights.length ? lights.map(lightRow).join("") : `<div class="empty">No bound light channels for this LCM.</div>`}</div>
+      <div class="lcm-list">${lights.length ? lights.map(lightRow).join("") : `<div class="empty">No light channels reported for this LCM.</div>`}</div>
     </section>
     <section class="panel">
       <div class="panel-head">
         <h3>Dimmers</h3>
-        <span class="muted">${dimmers.length} bound channels</span>
+        <span class="muted">${dimmers.length} physical dimmer outputs</span>
       </div>
-      <div class="dimmer-grid">${dimmers.length ? dimmers.map(dimmerTile).join("") : `<div class="empty">No bound dimmer channels for this LCM.</div>`}</div>
+      <div class="dimmer-grid">${dimmers.length ? dimmers.map(dimmerTile).join("") : `<div class="empty">No dimmer channels reported for this LCM.</div>`}</div>
     </section>`;
 }
 
@@ -249,12 +249,13 @@ function lightRow(channel) {
   const locked = channel.maintenance_locked;
   const value = channel.value === true;
   const canControl = channel.control_enabled && !isPending;
+  const canConfigure = Boolean(channel.bound) && !isPending;
   return `<article class="lcm-row ${locked ? "locked" : ""}" data-channel="${esc(channel.channel)}">
-    <button class="channel-title" type="button" data-settings-channel="${esc(channel.channel)}">${esc(channel.name)}</button>
-    <span class="channel-meta">${esc(channel.channel)}${channel.emergency_lighting ? " / eLight" : ""}</span>
+    <button class="channel-title" type="button" data-settings-channel="${esc(channel.channel)}" ${canConfigure ? "" : "disabled"}>${esc(channel.name || "Unbound")}</button>
+    <span class="channel-meta">${channel.number}. ${esc(channel.channel)} / ${esc(channel.type_label || channel.type || "Relay")}${channel.emergency_lighting ? " / eLight" : ""}</span>
     <label class="toggle-control ${locked ? "relay-locked" : ""}">
       <span class="toggle-label">On</span>
-      <input class="toggle-input" type="checkbox" data-lcm-light-channel="${esc(channel.channel)}" aria-label="${esc(channel.name)} light output" ${value ? "checked" : ""} ${canControl ? "" : "disabled"}>
+      <input class="toggle-input" type="checkbox" data-lcm-light-channel="${esc(channel.channel)}" aria-label="${esc(channel.name || channel.channel)} light output" ${value ? "checked" : ""} ${canControl ? "" : "disabled"}>
       <span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
     </label>
     <p class="channel-state">${isPending ? "Pending backend acknowledgement" : esc(channel.disabled_reason || (channel.value == null ? "State unknown" : value ? "Acknowledged on" : "Acknowledged off"))}</p>
@@ -265,8 +266,10 @@ function dimmerTile(channel) {
   const percent = Math.round(Number(channel.percent || 0));
   const locked = channel.maintenance_locked;
   const isPending = pending.has(channel.logical_name);
+  const canConfigure = Boolean(channel.bound) && !isPending;
   return `<article class="dimmer-tile ${locked ? "locked" : ""}" data-channel="${esc(channel.channel)}">
-    <button class="channel-title" type="button" data-settings-channel="${esc(channel.channel)}">${esc(channel.name)}</button>
+    <button class="channel-title" type="button" data-settings-channel="${esc(channel.channel)}" ${canConfigure ? "" : "disabled"}>${esc(channel.name || "Unbound")}</button>
+    <span class="channel-meta">${channel.number}. ${esc(channel.channel)} / ${esc(channel.type_label || channel.type || "Dimmer")}</span>
     <button class="dimmer-button" type="button" data-dimmer-channel="${esc(channel.channel)}" ${channel.control_enabled && !isPending ? "" : "disabled"} aria-label="Adjust ${esc(channel.name)} brightness">
       <strong>${percent}%</strong>
       <span>${isPending ? "Pending acknowledgement" : esc(channel.disabled_reason || `Max ${channel.max_intensity}% / Fade ${channel.fade_seconds}s`)}</span>
@@ -374,7 +377,7 @@ function openDimmerDialog(channelId) {
 
 function openSettingsDialog(channelId) {
   const channel = lcmChannel(channelId);
-  if (!channel) return;
+  if (!channel || !channel.bound) return;
   const dimmerFields = channel.kind === "dimmer" ? `
     <label>Maximum intensity <input type="number" min="0" max="100" value="${esc(channel.max_intensity)}" data-settings-max></label>
     <label>Default fade seconds <input type="number" min="0" max="60" step="0.1" value="${esc(channel.fade_seconds)}" data-settings-fade></label>
@@ -624,6 +627,7 @@ async function setLcmDimmer(channel, percent) {
 async function saveLcmSettings(channel) {
   try {
     const existing = lcmChannel(channel);
+    if (!existing?.logical_name) throw new Error("Channel has no logical binding");
     const name = activeDialog.querySelector("[data-settings-name]").value;
     const emergencyLighting = activeDialog.querySelector("[data-settings-elight]").checked;
     const maintenanceLocked = activeDialog.querySelector("[data-settings-lock]").checked;

@@ -183,6 +183,22 @@ class FakeManagementConn:
         raise AssertionError(f'unexpected execute: {query}')
 
 
+def test_lcm_physical_channel_inventory_is_8_relays_10_lv_and_4_hv():
+    assert management._lcm_light_channels() == [f'A{i}' for i in range(1, 9)]
+    assert management._lcm_dimmer_channels() == [f'10-{i}' for i in range(1, 11)] + [f'HV-{i}' for i in range(1, 5)]
+    assert len(management._lcm_channel_ids()) == 22
+
+
+def test_lcm_channel_support_accepts_corrected_inventory_without_direct_hardware_route():
+    capabilities = {'lighting'}
+
+    assert management._module_supports_channel('LCM', 'A8', capabilities) is True
+    assert management._module_supports_channel('LCM', 'B1', capabilities) is False
+    assert management._module_supports_channel('LCM', '10-10', capabilities) is True
+    assert management._module_supports_channel('LCM', '10-11', capabilities) is False
+    assert management._module_supports_channel('LCM', 'HV-4', capabilities) is True
+
+
 @pytest.mark.asyncio
 async def test_create_logical_device_records_audit_event(monkeypatch):
     conn = FakeManagementConn()

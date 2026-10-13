@@ -17,6 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB_ROOT = ROOT / "01_HCM" / "www"
 PREVIEW_TOKEN = "homecontrol-preview-token"
 CHANNELS = [f"{bank}{channel}" for bank in ("A", "B", "C", "D") for channel in range(1, 9)]
+LCM_LIGHT_CHANNELS = [f"A{channel}" for channel in range(1, 9)]
+LCM_DIMMER_CHANNELS = [f"10-{channel}" for channel in range(1, 11)] + [f"HV-{channel}" for channel in range(1, 5)]
+LCM_CHANNELS = LCM_LIGHT_CHANNELS + LCM_DIMMER_CHANNELS
 
 
 def _now() -> str:
@@ -67,7 +70,7 @@ def _module(
 def _capabilities(role: str) -> list[dict[str, Any]]:
     mapping = {
         "RCM": ["relay-32"],
-        "LCM": ["lighting", "analog-out-8"],
+        "LCM": ["lighting", "relay-8", "analog-out-10", "high-voltage-dimmer"],
         "SIM": ["hexa-aio", "hexa-dio"],
         "UNASSIGNED": [],
     }
@@ -119,6 +122,7 @@ class PreviewState:
             dimmer_fixtures = [
                 ("10-1", 35, 100, 3.0),
                 ("10-2", 0, 75, 2.5),
+                ("10-9", 15, 90, 3.5),
                 ("HV-1", 60, 85, 4.0),
             ]
             for channel, percent, maximum, fade in dimmer_fixtures:
@@ -230,30 +234,43 @@ class PreviewState:
             raise HTTPException(400, f"{hostname} is not an LCM preview fixture")
         control_session_online = bool(device["module"]["control_session_online"])
         channels = []
-        for channel, channel_state in self.lcm[hostname].items():
+        for index, channel in enumerate(LCM_CHANNELS, start=1):
+            channel_state = self.lcm[hostname].get(channel)
+            is_bound = channel_state is not None
             reason = None
-            if channel_state["maintenance_locked"]:
+            if not is_bound:
+                reason = "No logical binding"
+            elif channel_state["maintenance_locked"]:
                 reason = "Maintenance lockout"
             elif not control_session_online:
                 reason = "No authenticated control session"
-            is_dimmer = channel_state["kind"] == "dimmer"
-            percent = float(channel_state.get("percent", 100 if channel_state.get("value") else 0))
+            is_dimmer = channel in LCM_DIMMER_CHANNELS
+            channel_type = "Relay"
+            if channel.startswith("10-"):
+                channel_type = "0-10V"
+            elif channel.startswith("HV-"):
+                channel_type = "110V"
+            percent = float(channel_state.get("percent", 100 if channel_state.get("value") else 0)) if channel_state else None
             channels.append({
+                "number": index,
                 "channel": channel,
-                "kind": channel_state["kind"],
-                "binding_id": len(channels) + 1,
-                "logical_device_id": len(channels) + 1,
-                "logical_name": f"{hostname} {channel}",
-                "name": channel_state["name"],
-                "enabled": True,
-                "maintenance_locked": channel_state["maintenance_locked"],
-                "emergency_lighting": channel_state["emergency_lighting"],
-                "max_intensity": int(channel_state.get("max_intensity", 100)),
-                "fade_seconds": float(channel_state.get("fade_seconds", 3)),
-                "last_nonzero_percent": float(channel_state.get("last_nonzero_percent", channel_state.get("max_intensity", 100))),
+                "kind": "dimmer" if is_dimmer else "light",
+                "type": channel_type,
+                "type_label": channel_type,
+                "binding_id": index if is_bound else None,
+                "logical_device_id": index if is_bound else None,
+                "logical_name": f"{hostname} {channel}" if is_bound else None,
+                "name": channel_state["name"] if is_bound else "",
+                "bound": is_bound,
+                "enabled": is_bound,
+                "maintenance_locked": bool(channel_state["maintenance_locked"]) if is_bound else False,
+                "emergency_lighting": bool(channel_state["emergency_lighting"]) if is_bound else False,
+                "max_intensity": int(channel_state.get("max_intensity", 100)) if is_bound else 100,
+                "fade_seconds": float(channel_state.get("fade_seconds", 3)) if is_bound else 3,
+                "last_nonzero_percent": float(channel_state.get("last_nonzero_percent", channel_state.get("max_intensity", 100))) if is_bound else 100.0,
                 "online": bool(device["module"]["online"]),
                 "control_session_online": control_session_online,
-                "value": (percent > 0) if is_dimmer else bool(channel_state["value"]),
+                "value": (percent or 0) > 0 if is_dimmer else (bool(channel_state["value"]) if is_bound else None),
                 "percent": percent if is_dimmer else None,
                 "control_enabled": reason is None,
                 "disabled_reason": reason,

@@ -79,8 +79,41 @@ def test_lcm_preview_loads_lights_and_dimmers(client):
 
     assert data["device"]["effective_role"] == "LCM"
     assert {channel["kind"] for channel in data["channels"]} == {"light", "dimmer"}
+    assert [channel["channel"] for channel in data["channels"][:8]] == [f"A{i}" for i in range(1, 9)]
+    assert [channel["channel"] for channel in data["channels"][8:18]] == [f"10-{i}" for i in range(1, 11)]
+    assert [channel["channel"] for channel in data["channels"][18:]] == [f"HV-{i}" for i in range(1, 5)]
+    assert len(data["channels"]) == 22
+    assert len([channel for channel in data["channels"] if channel["kind"] == "light"]) == 8
+    assert len([channel for channel in data["channels"] if channel["kind"] == "dimmer"]) == 14
+    assert next(channel for channel in data["channels"] if channel["channel"] == "A8")["type_label"] == "Relay"
+    assert next(channel for channel in data["channels"] if channel["channel"] == "10-10")["type_label"] == "0-10V"
+    assert next(channel for channel in data["channels"] if channel["channel"] == "HV-4")["type_label"] == "110V"
     assert any(channel["emergency_lighting"] for channel in data["channels"])
     assert any(channel["maintenance_locked"] for channel in data["channels"])
+
+
+def test_lcm_unbound_channels_are_visible_but_disabled(client):
+    data = client.get("/api/v1/device-admin/LCM1/lcm-channels", headers=headers()).json()
+    channel = next(item for item in data["channels"] if item["channel"] == "10-10")
+
+    assert channel["bound"] is False
+    assert channel["logical_name"] is None
+    assert channel["control_enabled"] is False
+    assert channel["disabled_reason"] == "No logical binding"
+
+    command = client.post(
+        "/api/v1/device/command",
+        headers=headers(),
+        json={"logical_name": "LCM1 10-10", "command": {"op": "set_dimmer", "percent": 50}},
+    )
+    settings = client.patch(
+        "/api/v1/device-admin/LCM1/lcm-channels/10-10/settings",
+        headers=headers(),
+        json={"name": "Should Not Save", "emergency_lighting": False, "max_intensity": 50, "fade_seconds": 3},
+    )
+
+    assert command.status_code == 404
+    assert settings.status_code == 404
 
 
 def test_lcm_light_command_is_scoped_to_selected_module(client):

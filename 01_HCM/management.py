@@ -126,11 +126,11 @@ def _rcm_channel_ids() -> list[str]:
 
 
 def _lcm_light_channels() -> list[str]:
-    return [f"A{channel}" for channel in range(1, 9)] + [f"B{channel}" for channel in range(1, 5)]
+    return [f"A{channel}" for channel in range(1, 9)]
 
 
 def _lcm_dimmer_channels() -> list[str]:
-    return [f"HV-{channel}" for channel in range(1, 5)] + [f"10-{channel}" for channel in range(1, 9)]
+    return [f"10-{channel}" for channel in range(1, 11)] + [f"HV-{channel}" for channel in range(1, 5)]
 
 
 def _lcm_channel_ids() -> list[str]:
@@ -224,10 +224,12 @@ def _module_supports_channel(module_type: str, channel: str | None, capabilities
     if module_type == "RCM":
         return bool(re.fullmatch(r"[ABCD][1-8]", channel)) and "relay-32" in capabilities
     if module_type == "LCM":
-        if re.fullmatch(r"[AB][1-8]", channel):
-            return "relay-32" in capabilities or "lighting" in capabilities
+        if re.fullmatch(r"A[1-8]", channel):
+            return "relay-8" in capabilities or "relay-32" in capabilities or "lighting" in capabilities
         if re.fullmatch(r"10-[1-8]", channel):
-            return "analog-out-8" in capabilities
+            return "analog-out-8" in capabilities or "analog-out-10" in capabilities or "lighting" in capabilities
+        if re.fullmatch(r"10-(?:9|10)", channel):
+            return "analog-out-10" in capabilities or "lighting" in capabilities
         if re.fullmatch(r"HV-[1-4]", channel):
             return "high-voltage-dimmer" in capabilities or "lighting" in capabilities
         return False
@@ -569,15 +571,24 @@ async def get_lcm_channels(identifier: str | int) -> dict[str, Any]:
     online = bool(module["module"]["online"] or module["module"]["control_session_online"])
     control_online = bool(module["module"]["control_session_online"])
     last_state = _state_payload(module["module"])
+    by_channel = {row["channel"]: row for row in rows}
     channels = []
-    for row in rows:
-        channel = row["channel"]
-        metadata = _wire_value(row["logical_metadata"] or {})
+    for index, channel in enumerate(_lcm_channel_ids(), start=1):
+        row = by_channel.get(channel)
+        channel_type = "Relay"
+        if channel.startswith("10-"):
+            channel_type = "0-10V"
+        elif channel.startswith("HV-"):
+            channel_type = "110V"
+        position = index
+        metadata = _wire_value(row["logical_metadata"] or {}) if row else {}
         if not isinstance(metadata, dict):
             metadata = {}
         is_dimmer = channel in _lcm_dimmer_channels()
         disabled_reason = None
-        if not row["logical_enabled"] or not row["binding_enabled"]:
+        if not row:
+            disabled_reason = "No logical binding"
+        elif not row["logical_enabled"] or not row["binding_enabled"]:
             disabled_reason = "Binding disabled"
         elif row["maintenance_locked"]:
             disabled_reason = "Maintenance lockout"
@@ -585,14 +596,18 @@ async def get_lcm_channels(identifier: str | int) -> dict[str, Any]:
             disabled_reason = "No authenticated control session"
         percent = _dimmer_percent(last_state, channel) if is_dimmer else None
         channels.append({
+            "number": position,
             "channel": channel,
             "kind": "dimmer" if is_dimmer else "light",
-            "binding_id": int(row["binding_id"]),
-            "logical_device_id": int(row["logical_device_id"]),
-            "logical_name": row["logical_name"],
-            "name": _channel_display_name(row),
-            "enabled": bool(row["logical_enabled"] and row["binding_enabled"]),
-            "maintenance_locked": bool(row["maintenance_locked"]),
+            "type": channel_type,
+            "type_label": channel_type,
+            "binding_id": int(row["binding_id"]) if row else None,
+            "logical_device_id": int(row["logical_device_id"]) if row else None,
+            "logical_name": row["logical_name"] if row else None,
+            "name": _channel_display_name(row) if row else "",
+            "bound": row is not None,
+            "enabled": bool(row and row["logical_enabled"] and row["binding_enabled"]),
+            "maintenance_locked": bool(row["maintenance_locked"]) if row else False,
             "emergency_lighting": bool(metadata.get("emergency_lighting")),
             "max_intensity": int(metadata.get("max_intensity", 100)),
             "fade_seconds": float(metadata.get("fade_seconds", 3)),
