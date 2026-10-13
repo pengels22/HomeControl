@@ -335,17 +335,54 @@ th {
   gap: 10px;
 }
 
+.lcm-panel {
+  padding: 14px;
+}
+
+.lcm-columns {
+  display: grid;
+  grid-template-columns: minmax(210px, 0.9fr) minmax(230px, 1fr) minmax(210px, 0.9fr);
+  gap: 12px;
+}
+
+.lcm-column {
+  min-width: 0;
+}
+
+.lcm-column-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #263139;
+}
+
+.lcm-column-head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.lcm-column-head span {
+  color: #98a5ad;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
 .lcm-list {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .lcm-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) minmax(90px, auto) minmax(120px, auto) minmax(150px, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
   align-items: center;
-  padding: 12px;
+  min-height: 66px;
+  padding: 8px;
   border: 1px solid #2b343b;
   border-radius: 8px;
   background: #12171b;
@@ -357,13 +394,17 @@ th {
 }
 
 .channel-title {
-  min-height: 36px;
+  max-width: 100%;
+  min-height: 28px;
   padding: 0;
   border: 0;
   background: transparent;
   color: #8bd8c3;
   text-align: left;
+  overflow-wrap: anywhere;
   font-weight: 800;
+  font-size: 0.9rem;
+  line-height: 1.15;
 }
 
 .channel-title:disabled {
@@ -380,20 +421,22 @@ th {
 
 .channel-meta {
   color: #98a5ad;
-  font-size: 0.84rem;
+  font-size: 0.78rem;
 }
 
-.dimmer-grid {
+.lcm-channel-main {
   display: grid;
-  grid-template-columns: repeat(3, minmax(190px, 1fr));
-  gap: 10px;
+  gap: 2px;
+  min-width: 0;
 }
 
 .dimmer-tile {
   display: grid;
-  gap: 10px;
-  min-height: 150px;
-  padding: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(82px, auto);
+  gap: 8px;
+  align-items: center;
+  min-height: 66px;
+  padding: 8px;
   border: 1px solid #2b343b;
   border-radius: 8px;
   background: #12171b;
@@ -401,21 +444,24 @@ th {
 
 .dimmer-button {
   display: grid;
-  gap: 6px;
+  gap: 2px;
   align-content: center;
-  min-height: 82px;
+  min-width: 82px;
+  min-height: 44px;
+  padding: 6px 8px;
   border: 1px solid #2f5149;
   background: #172822;
   text-align: left;
 }
 
 .dimmer-button strong {
-  font-size: 1.65rem;
+  font-size: 1rem;
 }
 
 .dimmer-button span {
   color: #b9c8c3;
-  font-size: 0.84rem;
+  font-size: 0.72rem;
+  line-height: 1.15;
 }
 
 .dimmer-button:disabled {
@@ -544,9 +590,12 @@ th {
 }
 
 .channel-state {
-  min-height: 34px;
+  grid-column: 1 / -1;
+  min-height: 16px;
+  margin: 0;
   color: #98a5ad;
-  font-size: 0.82rem;
+  font-size: 0.76rem;
+  line-height: 1.2;
 }
 
 .modal-backdrop {
@@ -626,16 +675,8 @@ th {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .dimmer-grid {
+  .lcm-columns {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .lcm-row {
-    grid-template-columns: 1fr auto;
-  }
-
-  .lcm-row .channel-state {
-    grid-column: 1 / -1;
   }
 }
 
@@ -669,12 +710,13 @@ th {
     flex-direction: column;
   }
 
-  .identity-grid, .rcm-grid, .summary-grid, .dimmer-grid {
+  .identity-grid, .rcm-grid, .summary-grid, .lcm-columns {
     grid-template-columns: 1fr;
   }
 
-  .lcm-row {
-    grid-template-columns: 1fr;
+  .lcm-row,
+  .dimmer-tile {
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: stretch;
   }
 }

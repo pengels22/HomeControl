@@ -218,8 +218,9 @@ async function renderRcm(device) {
 async function renderLcm(device) {
   const data = await api(`/device-admin/${encodeURIComponent(device.module.hostname)}/lcm-channels`);
   window.__lastLcmChannels = data.channels;
-  const lights = data.channels.filter((channel) => channel.kind === "light");
-  const dimmers = data.channels.filter((channel) => channel.kind === "dimmer");
+  const relays = data.channels.filter((channel) => channel.kind === "light");
+  const lvDimmers = data.channels.filter((channel) => channel.kind === "dimmer" && channel.channel.startsWith("10-"));
+  const hvDimmers = data.channels.filter((channel) => channel.kind === "dimmer" && channel.channel.startsWith("HV-"));
   $("content").innerHTML = `
     <section class="panel">
       <div class="panel-head">
@@ -228,20 +229,23 @@ async function renderLcm(device) {
       </div>
       ${identityBlock(data.device)}
     </section>
-    <section class="panel">
-      <div class="panel-head">
-        <h3>Lights</h3>
-        <span class="muted">${lights.length} physical relay outputs</span>
+    <section class="panel lcm-panel">
+      <div class="lcm-columns">
+        ${lcmColumn("Relays", `${relays.length} outputs`, relays.map(lightRow).join(""))}
+        ${lcmColumn("0-10V Dimmers", `${lvDimmers.length} outputs`, lvDimmers.map(dimmerTile).join(""))}
+        ${lcmColumn("110V Dimmers", `${hvDimmers.length} outputs`, hvDimmers.map(dimmerTile).join(""))}
       </div>
-      <div class="lcm-list">${lights.length ? lights.map(lightRow).join("") : `<div class="empty">No light channels reported for this LCM.</div>`}</div>
-    </section>
-    <section class="panel">
-      <div class="panel-head">
-        <h3>Dimmers</h3>
-        <span class="muted">${dimmers.length} physical dimmer outputs</span>
-      </div>
-      <div class="dimmer-grid">${dimmers.length ? dimmers.map(dimmerTile).join("") : `<div class="empty">No dimmer channels reported for this LCM.</div>`}</div>
     </section>`;
+}
+
+function lcmColumn(title, count, body) {
+  return `<section class="lcm-column">
+    <div class="lcm-column-head">
+      <h3>${esc(title)}</h3>
+      <span>${esc(count)}</span>
+    </div>
+    <div class="lcm-list">${body || `<div class="empty">No channels reported.</div>`}</div>
+  </section>`;
 }
 
 function lightRow(channel) {
@@ -250,29 +254,36 @@ function lightRow(channel) {
   const value = channel.value === true;
   const canControl = channel.control_enabled && !isPending;
   const canConfigure = Boolean(channel.bound) && !isPending;
+  const stateText = isPending ? "Pending backend acknowledgement" : channel.disabled_reason || (channel.value == null ? "Unknown" : value ? "On" : "Off");
   return `<article class="lcm-row ${locked ? "locked" : ""}" data-channel="${esc(channel.channel)}">
-    <button class="channel-title" type="button" data-settings-channel="${esc(channel.channel)}" ${canConfigure ? "" : "disabled"}>${esc(channel.name || "Unbound")}</button>
-    <span class="channel-meta">${channel.number}. ${esc(channel.channel)} / ${esc(channel.type_label || channel.type || "Relay")}${channel.emergency_lighting ? " / eLight" : ""}</span>
+    <div class="lcm-channel-main">
+      <button class="channel-title" type="button" data-settings-channel="${esc(channel.channel)}" ${canConfigure ? "" : "disabled"}>${esc(channel.name || "Unbound")}</button>
+      <span class="channel-meta">${esc(channel.channel)}${channel.emergency_lighting ? " / eLight" : ""}</span>
+    </div>
     <label class="toggle-control ${locked ? "relay-locked" : ""}">
       <span class="toggle-label">On</span>
       <input class="toggle-input" type="checkbox" data-lcm-light-channel="${esc(channel.channel)}" aria-label="${esc(channel.name || channel.channel)} light output" ${value ? "checked" : ""} ${canControl ? "" : "disabled"}>
       <span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
     </label>
-    <p class="channel-state">${isPending ? "Pending backend acknowledgement" : esc(channel.disabled_reason || (channel.value == null ? "State unknown" : value ? "Acknowledged on" : "Acknowledged off"))}</p>
+    <p class="channel-state">${esc(stateText)}</p>
   </article>`;
 }
 
 function dimmerTile(channel) {
-  const percent = Math.round(Number(channel.percent || 0));
+  const knownPercent = channel.percent !== null && channel.percent !== undefined;
+  const percent = knownPercent ? Math.round(Number(channel.percent)) : null;
   const locked = channel.maintenance_locked;
   const isPending = pending.has(channel.logical_name);
   const canConfigure = Boolean(channel.bound) && !isPending;
+  const stateText = isPending ? "Pending backend acknowledgement" : channel.disabled_reason || `Max ${channel.max_intensity}% / Fade ${channel.fade_seconds}s`;
   return `<article class="dimmer-tile ${locked ? "locked" : ""}" data-channel="${esc(channel.channel)}">
-    <button class="channel-title" type="button" data-settings-channel="${esc(channel.channel)}" ${canConfigure ? "" : "disabled"}>${esc(channel.name || "Unbound")}</button>
-    <span class="channel-meta">${channel.number}. ${esc(channel.channel)} / ${esc(channel.type_label || channel.type || "Dimmer")}</span>
-    <button class="dimmer-button" type="button" data-dimmer-channel="${esc(channel.channel)}" ${channel.control_enabled && !isPending ? "" : "disabled"} aria-label="Adjust ${esc(channel.name)} brightness">
-      <strong>${percent}%</strong>
-      <span>${isPending ? "Pending acknowledgement" : esc(channel.disabled_reason || `Max ${channel.max_intensity}% / Fade ${channel.fade_seconds}s`)}</span>
+    <div class="lcm-channel-main">
+      <button class="channel-title" type="button" data-settings-channel="${esc(channel.channel)}" ${canConfigure ? "" : "disabled"}>${esc(channel.name || "Unbound")}</button>
+      <span class="channel-meta">${esc(channel.channel)}${channel.emergency_lighting ? " / eLight" : ""}</span>
+    </div>
+    <button class="dimmer-button" type="button" data-dimmer-channel="${esc(channel.channel)}" ${channel.control_enabled && !isPending ? "" : "disabled"} aria-label="Adjust ${esc(channel.name || channel.channel)} brightness">
+      <strong>${knownPercent ? `${percent}%` : "Unknown"}</strong>
+      <span>${esc(stateText)}</span>
     </button>
   </article>`;
 }
@@ -357,15 +368,17 @@ function lcmChannel(channelId) {
 function openDimmerDialog(channelId) {
   const channel = lcmChannel(channelId);
   if (!channel) return;
-  const percent = Math.round(Number(channel.percent || 0));
+  const knownPercent = channel.percent !== null && channel.percent !== undefined;
+  const percent = knownPercent ? Math.round(Number(channel.percent)) : 0;
+  const acknowledged = knownPercent ? `${percent}%` : "Unknown";
   const max = Number(channel.max_intensity || 100);
   modal(`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="dimmer-title">
     <div class="modal-head">
       <h3 id="dimmer-title">${esc(channel.name)}</h3>
       <button type="button" class="secondary icon-button" data-close-dialog aria-label="Close">x</button>
     </div>
-    <p class="muted">${esc(channel.channel)} / acknowledged ${percent}% / maximum ${max}%</p>
-    <div class="slider-readout"><strong data-dimmer-readout>${percent}%</strong></div>
+    <p class="muted">${esc(channel.channel)} / acknowledged ${acknowledged} / maximum ${max}%</p>
+    <div class="slider-readout"><strong data-dimmer-readout>${acknowledged}</strong></div>
     <input class="brightness-slider" type="range" min="0" max="${esc(max)}" step="1" value="${percent}" data-dimmer-slider="${esc(channel.channel)}" aria-label="${esc(channel.name)} brightness">
     <div class="modal-actions">
       <button type="button" class="secondary" data-dimmer-off="${esc(channel.channel)}">Off</button>

@@ -228,6 +228,18 @@ def test_lcm_frontend_slider_commits_on_change_not_input(client):
     assert "data-dimmer-slider" in js
 
 
+def test_lcm_frontend_uses_compact_three_column_layout_and_unknown_telemetry(client):
+    js = client.get("/static/app.js").text
+    css = client.get("/static/app.css").text
+
+    assert 'lcmColumn("Relays"' in js
+    assert 'lcmColumn("0-10V Dimmers"' in js
+    assert 'lcmColumn("110V Dimmers"' in js
+    assert "Unknown" in js
+    assert ".lcm-columns" in css
+    assert "grid-template-columns: minmax(210px, 0.9fr) minmax(230px, 1fr) minmax(210px, 0.9fr)" in css
+
+
 def test_rcm1_and_rcm2_state_is_isolated(client):
     rename = client.patch(
         "/api/v1/device-admin/RCM1/rcm-channels/A1/name",
