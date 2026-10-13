@@ -52,6 +52,12 @@ class DeviceBindingUpdateIn(BaseModel):
 class RcmChannelNameIn(BaseModel):
     name: str = Field(max_length=120)
 
+class LcmChannelSettingsIn(BaseModel):
+    name: str = Field(max_length=120)
+    emergency_lighting: bool = False
+    max_intensity: int | None = Field(default=None, ge=0, le=100)
+    fade_seconds: float | None = Field(default=None, ge=0, le=60)
+
 class ModuleRoleChangeIn(BaseModel):
     requested_role: Literal['UNASSIGNED','RCM','SIM','LCM']
     confirm: bool = False

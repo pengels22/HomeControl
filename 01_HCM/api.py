@@ -12,6 +12,7 @@ from .models import (
     FireStateIn,
     HvacModeIn,
     HvacSetpointIn,
+    LcmChannelSettingsIn,
     LogicalDeviceCreateIn,
     LogicalDeviceUpdateIn,
     MaintenanceLockoutIn,
@@ -161,6 +162,39 @@ async def device_admin_rcm_channel_name(
             identifier,
             channel,
             name=body.name,
+            actor=user['user'],
+        )
+    except management.NotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except management.ValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+@router.get('/device-admin/{identifier}/lcm-channels')
+async def device_admin_lcm_channels(identifier: str, user=Depends(require_user)):
+    try:
+        return await management.get_lcm_channels(identifier)
+    except management.NotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except management.ValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+@router.patch('/device-admin/{identifier}/lcm-channels/{channel}/settings')
+async def device_admin_lcm_channel_settings(
+    identifier: str,
+    channel: str,
+    body: LcmChannelSettingsIn,
+    user=Depends(require_user),
+):
+    if user['role'] != 'ADMIN':
+        raise HTTPException(403)
+    try:
+        return await management.update_lcm_channel_settings(
+            identifier,
+            channel,
+            name=body.name,
+            emergency_lighting=body.emergency_lighting,
+            max_intensity=body.max_intensity,
+            fade_seconds=body.fade_seconds,
             actor=user['user'],
         )
     except management.NotFoundError as exc:

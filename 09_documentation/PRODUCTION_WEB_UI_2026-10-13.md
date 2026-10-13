@@ -25,6 +25,10 @@ physical-output changes.
 - LCM, SIM and UNASSIGNED pages show real identity/status information only.
 - Pairing-key administration, pairing-code screens and iOS companion-app flows
   are removed from the active production web UI.
+- LCM pages render bound channel data in two frontend sections only: Lights and
+  Dimmers. Output commands use HCM logical-device routing; settings update
+  logical-device metadata and maintenance lockout continues through the existing
+  safety lockout endpoint.
 
 ## Standalone Development Preview
 
@@ -47,14 +51,17 @@ Preview fixtures:
 | RCM1 | RCM | Online |
 | RCM2 | RCM | Online |
 | LCM1 | LCM | Online |
+| LCM2 | LCM | Online |
 | SIM1 | SIM | Online |
 | RCM3 | RCM | Offline |
 
 The preview RCM pages simulate ON/OFF, maintenance lockout and channel-name
-edits through in-memory preview API state. Maintenance lockout forces a channel
-OFF, rejects energizing commands while locked, and leaves the channel OFF when
-cleared. This simulation is for visual review and page-by-page frontend
-development only.
+edits through in-memory preview API state. The preview LCM pages simulate light
+switching, dimmer brightness, maximum-intensity clamping, fade-setting metadata,
+channel settings, emergency-lighting classification and maintenance lockout.
+Maintenance lockout forces a channel OFF, rejects energizing commands while
+locked, and leaves the channel OFF when cleared. This simulation is for visual
+review and page-by-page frontend development only.
 
 ## Explicitly Not Complete
 
@@ -69,7 +76,13 @@ development only.
 - Hardware replacement/reassignment remains manual and unimplemented. The UI is
   shaped to preserve logical identities separately from MAC-derived device IDs,
   but it does not perform reassignment.
-- LCM and SIM controls are intentionally deferred.
+- Detailed SIM controls are intentionally deferred. LCM production backend
+  integration beyond existing logical command routing and metadata writes is
+  intentionally deferred.
+- Production LCM hardware fade execution, live in-progress fade telemetry,
+  module-local persistence of dimmer settings, CSV generation such as
+  `LCM_1.csv`, authenticated TCP mirroring, and offline reconciliation are not
+  implemented or claimed by the UI preview.
 
 ## Safety Notes
 

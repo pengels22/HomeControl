@@ -55,7 +55,7 @@ def test_preview_devices_include_all_requested_fixtures(client):
     data = client.get("/api/v1/modules", headers=headers()).json()
     modules = {module["hostname"]: module for module in data["modules"]}
 
-    assert set(modules) == {"LAB1", "RCM1", "RCM2", "LCM1", "SIM1", "RCM3"}
+    assert set(modules) == {"LAB1", "RCM1", "RCM2", "LCM1", "LCM2", "SIM1", "RCM3"}
     assert modules["LAB1"]["last_state"]["state"]["lab_role"] == "UNASSIGNED"
     assert modules["LAB1"]["last_state"]["state"]["simulation"] is True
     assert modules["LAB1"]["last_state"]["state"]["physical_outputs_enabled"] is False
@@ -72,6 +72,127 @@ def test_role_based_device_interface_selection_uses_fixture_role(client):
     assert rcm["effective_role"] == "RCM"
     assert lcm["effective_role"] == "LCM"
     assert sim["effective_role"] == "SIM"
+
+
+def test_lcm_preview_loads_lights_and_dimmers(client):
+    data = client.get("/api/v1/device-admin/LCM1/lcm-channels", headers=headers()).json()
+
+    assert data["device"]["effective_role"] == "LCM"
+    assert {channel["kind"] for channel in data["channels"]} == {"light", "dimmer"}
+    assert any(channel["emergency_lighting"] for channel in data["channels"])
+    assert any(channel["maintenance_locked"] for channel in data["channels"])
+
+
+def test_lcm_light_command_is_scoped_to_selected_module(client):
+    result = client.post(
+        "/api/v1/device/command",
+        headers=headers(),
+        json={"logical_name": "LCM1 A1", "command": {"op": "set_relay", "value": True}},
+    )
+
+    assert result.status_code == 200
+    lcm1 = client.get("/api/v1/device-admin/LCM1/lcm-channels", headers=headers()).json()
+    lcm2 = client.get("/api/v1/device-admin/LCM2/lcm-channels", headers=headers()).json()
+
+    assert next(item for item in lcm1["channels"] if item["channel"] == "A1")["value"] is True
+    assert next(item for item in lcm2["channels"] if item["channel"] == "A1")["value"] is False
+
+
+def test_lcm_dimmer_clamps_to_max_without_error_and_preserves_requested_effective(client):
+    result = client.post(
+        "/api/v1/device/command",
+        headers=headers(),
+        json={"logical_name": "LCM1 10-2", "command": {"op": "set_dimmer", "percent": 100}},
+    )
+
+    assert result.status_code == 423
+
+    client.post(
+        "/api/v1/safety/maintenance-lockout",
+        headers=headers(),
+        json={"logical_name": "LCM1 10-2", "active": False},
+    )
+    result = client.post(
+        "/api/v1/device/command",
+        headers=headers(),
+        json={"logical_name": "LCM1 10-2", "command": {"op": "set_dimmer", "percent": 100}},
+    )
+
+    assert result.status_code == 200
+    assert result.json()["requested"]["percent"] == 100
+    assert result.json()["effective"]["percent"] == 75.0
+
+
+def test_lcm_off_and_restore_behavior_in_preview(client):
+    client.post(
+        "/api/v1/device/command",
+        headers=headers(),
+        json={"logical_name": "LCM1 HV-1", "command": {"op": "set_dimmer", "percent": 42}},
+    )
+    client.post(
+        "/api/v1/device/command",
+        headers=headers(),
+        json={"logical_name": "LCM1 HV-1", "command": {"op": "set_dimmer", "percent": 0}},
+    )
+    off = client.get("/api/v1/device-admin/LCM1/lcm-channels", headers=headers()).json()
+    hv = next(item for item in off["channels"] if item["channel"] == "HV-1")
+
+    assert hv["percent"] == 0.0
+    assert hv["last_nonzero_percent"] == 42.0
+
+
+def test_lcm_maintenance_lockout_forces_off_and_prevents_activation(client):
+    client.post(
+        "/api/v1/device/command",
+        headers=headers(),
+        json={"logical_name": "LCM2 10-1", "command": {"op": "set_dimmer", "percent": 55}},
+    )
+    lock = client.post(
+        "/api/v1/safety/maintenance-lockout",
+        headers=headers(),
+        json={"logical_name": "LCM2 10-1", "active": True},
+    )
+    rejected = client.post(
+        "/api/v1/device/command",
+        headers=headers(),
+        json={"logical_name": "LCM2 10-1", "command": {"op": "set_dimmer", "percent": 20}},
+    )
+    data = client.get("/api/v1/device-admin/LCM2/lcm-channels", headers=headers()).json()
+    channel = next(item for item in data["channels"] if item["channel"] == "10-1")
+
+    assert lock.status_code == 200
+    assert channel["maintenance_locked"] is True
+    assert channel["percent"] == 0.0
+    assert rejected.status_code == 423
+
+
+def test_lcm_settings_validation_names_and_elight(client):
+    invalid = client.patch(
+        "/api/v1/device-admin/LCM1/lcm-channels/10-1/settings",
+        headers=headers(),
+        json={"name": "", "emergency_lighting": False, "max_intensity": 50, "fade_seconds": 3},
+    )
+    valid = client.patch(
+        "/api/v1/device-admin/LCM1/lcm-channels/10-1/settings",
+        headers=headers(),
+        json={"name": "Island Pendant", "emergency_lighting": True, "max_intensity": 62, "fade_seconds": 1.5},
+    )
+
+    assert invalid.status_code == 400
+    assert valid.status_code == 200
+    channel = next(item for item in valid.json()["channels"] if item["channel"] == "10-1")
+    assert channel["name"] == "Island Pendant"
+    assert channel["emergency_lighting"] is True
+    assert channel["max_intensity"] == 62
+    assert channel["fade_seconds"] == 1.5
+
+
+def test_lcm_frontend_slider_commits_on_change_not_input(client):
+    js = client.get("/static/app.js").text
+
+    assert 'document.addEventListener("input"' in js
+    assert 'document.addEventListener("change"' in js
+    assert "data-dimmer-slider" in js
 
 
 def test_rcm1_and_rcm2_state_is_isolated(client):

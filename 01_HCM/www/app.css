@@ -335,6 +335,89 @@ th {
   gap: 10px;
 }
 
+.lcm-list {
+  display: grid;
+  gap: 8px;
+}
+
+.lcm-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(90px, auto) minmax(120px, auto) minmax(150px, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid #2b343b;
+  border-radius: 8px;
+  background: #12171b;
+}
+
+.lcm-row.locked,
+.dimmer-tile.locked {
+  border-color: #725938;
+}
+
+.channel-title {
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #8bd8c3;
+  text-align: left;
+  font-weight: 800;
+}
+
+.channel-title:focus-visible,
+.dimmer-button:focus-visible,
+.icon-button:focus-visible {
+  outline: 3px solid #8bd8c3;
+  outline-offset: 3px;
+}
+
+.channel-meta {
+  color: #98a5ad;
+  font-size: 0.84rem;
+}
+
+.dimmer-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.dimmer-tile {
+  display: grid;
+  gap: 10px;
+  min-height: 150px;
+  padding: 12px;
+  border: 1px solid #2b343b;
+  border-radius: 8px;
+  background: #12171b;
+}
+
+.dimmer-button {
+  display: grid;
+  gap: 6px;
+  align-content: center;
+  min-height: 82px;
+  border: 1px solid #2f5149;
+  background: #172822;
+  text-align: left;
+}
+
+.dimmer-button strong {
+  font-size: 1.65rem;
+}
+
+.dimmer-button span {
+  color: #b9c8c3;
+  font-size: 0.84rem;
+}
+
+.dimmer-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .channel-card {
   display: grid;
   gap: 10px;
@@ -461,6 +544,61 @@ th {
   font-size: 0.82rem;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0,0,0,0.62);
+}
+
+.modal {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #36424a;
+  border-radius: 8px;
+  background: #171c21;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+}
+
+.modal-head,
+.modal-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.icon-button {
+  min-width: 40px;
+  width: 40px;
+  padding: 0;
+}
+
+.brightness-slider {
+  width: 100%;
+  accent-color: #28a982;
+}
+
+.slider-readout strong {
+  font-size: 2rem;
+}
+
+.settings-check {
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-check input {
+  width: auto;
+}
+
 .loading, .empty {
   padding: 18px;
   border: 1px solid #2b343b;
@@ -481,6 +619,18 @@ th {
 @media (max-width: 1080px) {
   .identity-grid, .rcm-grid, .summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dimmer-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lcm-row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .lcm-row .channel-state {
+    grid-column: 1 / -1;
   }
 }
 
@@ -514,8 +664,13 @@ th {
     flex-direction: column;
   }
 
-  .identity-grid, .rcm-grid, .summary-grid {
+  .identity-grid, .rcm-grid, .summary-grid, .dimmer-grid {
     grid-template-columns: 1fr;
+  }
+
+  .lcm-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 }
 

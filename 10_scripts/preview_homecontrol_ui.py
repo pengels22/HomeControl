@@ -91,6 +91,7 @@ class PreviewState:
             "RCM1": _module("RCM1", "RCM", "48b02d87db10"),
             "RCM2": _module("RCM2", "RCM", "48b02d87db20"),
             "LCM1": _module("LCM1", "LCM", "48b02d87dc10"),
+            "LCM2": _module("LCM2", "LCM", "48b02d87dc20"),
             "SIM1": _module("SIM1", "SIM", "48b02d87dd10"),
             "RCM3": _module("RCM3", "RCM", "48b02d87db30", online=False),
         }
@@ -104,6 +105,33 @@ class PreviewState:
                 }
                 for index, channel in enumerate(CHANNELS, start=1)
             }
+        self.lcm: dict[str, dict[str, dict[str, Any]]] = {}
+        for hostname in ("LCM1", "LCM2"):
+            self.lcm[hostname] = {}
+            for index, channel in enumerate(["A1", "A2", "A3", "A4"], start=1):
+                self.lcm[hostname][channel] = {
+                    "kind": "light",
+                    "name": f"{hostname} Light {index}",
+                    "value": False,
+                    "maintenance_locked": channel == "A4" and hostname == "LCM1",
+                    "emergency_lighting": channel == "A1",
+                }
+            dimmer_fixtures = [
+                ("10-1", 35, 100, 3.0),
+                ("10-2", 0, 75, 2.5),
+                ("HV-1", 60, 85, 4.0),
+            ]
+            for channel, percent, maximum, fade in dimmer_fixtures:
+                self.lcm[hostname][channel] = {
+                    "kind": "dimmer",
+                    "name": f"{hostname} Dimmer {channel}",
+                    "percent": float(percent),
+                    "last_nonzero_percent": float(percent or maximum),
+                    "max_intensity": int(maximum),
+                    "fade_seconds": float(fade),
+                    "maintenance_locked": channel == "10-2" and hostname == "LCM1",
+                    "emergency_lighting": channel == "10-1",
+                }
         self._sync_relays()
 
     def _sync_relays(self) -> None:
@@ -113,6 +141,20 @@ class PreviewState:
                 for channel, state in channels.items()
             }
             self.modules[hostname]["last_state"]["state"]["relays"] = relays
+        for hostname, channels in self.lcm.items():
+            relays = {}
+            lv_dimmers = {}
+            hv_dimmers = {}
+            for channel, channel_state in channels.items():
+                if channel_state["kind"] == "light":
+                    relays[channel] = {"on": bool(channel_state["value"])}
+                elif channel.startswith("10-"):
+                    lv_dimmers[channel] = {"percent": float(channel_state["percent"])}
+                else:
+                    hv_dimmers[channel] = {"percent": float(channel_state["percent"])}
+            self.modules[hostname]["last_state"]["state"]["relays"] = relays
+            self.modules[hostname]["last_state"]["state"]["lv_dimmers"] = lv_dimmers
+            self.modules[hostname]["last_state"]["state"]["hv_dimmers"] = hv_dimmers
 
     def module(self, identifier: str) -> dict[str, Any]:
         clean = identifier.upper()
@@ -181,21 +223,106 @@ class PreviewState:
         self.rcm[hostname][channel]["name"] = name.strip()
         return self.rcm_channels(hostname)
 
+    def lcm_channels(self, identifier: str) -> dict[str, Any]:
+        device = self.device_admin(identifier)
+        hostname = device["module"]["hostname"]
+        if device["effective_role"] != "LCM":
+            raise HTTPException(400, f"{hostname} is not an LCM preview fixture")
+        control_session_online = bool(device["module"]["control_session_online"])
+        channels = []
+        for channel, channel_state in self.lcm[hostname].items():
+            reason = None
+            if channel_state["maintenance_locked"]:
+                reason = "Maintenance lockout"
+            elif not control_session_online:
+                reason = "No authenticated control session"
+            is_dimmer = channel_state["kind"] == "dimmer"
+            percent = float(channel_state.get("percent", 100 if channel_state.get("value") else 0))
+            channels.append({
+                "channel": channel,
+                "kind": channel_state["kind"],
+                "binding_id": len(channels) + 1,
+                "logical_device_id": len(channels) + 1,
+                "logical_name": f"{hostname} {channel}",
+                "name": channel_state["name"],
+                "enabled": True,
+                "maintenance_locked": channel_state["maintenance_locked"],
+                "emergency_lighting": channel_state["emergency_lighting"],
+                "max_intensity": int(channel_state.get("max_intensity", 100)),
+                "fade_seconds": float(channel_state.get("fade_seconds", 3)),
+                "last_nonzero_percent": float(channel_state.get("last_nonzero_percent", channel_state.get("max_intensity", 100))),
+                "online": bool(device["module"]["online"]),
+                "control_session_online": control_session_online,
+                "value": (percent > 0) if is_dimmer else bool(channel_state["value"]),
+                "percent": percent if is_dimmer else None,
+                "control_enabled": reason is None,
+                "disabled_reason": reason,
+            })
+        return {"device": device, "channels": channels}
+
+    def lcm_settings(self, identifier: str, channel: str, body: dict[str, Any]) -> dict[str, Any]:
+        hostname = self.device_admin(identifier)["module"]["hostname"]
+        channel = channel.upper()
+        if channel not in self.lcm[hostname]:
+            raise HTTPException(404, channel)
+        state = self.lcm[hostname][channel]
+        name = str(body.get("name", "")).strip()
+        if not name:
+            raise HTTPException(400, "channel name is required")
+        state["name"] = name
+        state["emergency_lighting"] = bool(body.get("emergency_lighting"))
+        if state["kind"] == "dimmer":
+            max_intensity = int(body.get("max_intensity", state.get("max_intensity", 100)))
+            fade_seconds = float(body.get("fade_seconds", state.get("fade_seconds", 3)))
+            if max_intensity < 0 or max_intensity > 100 or fade_seconds < 0 or fade_seconds > 60:
+                raise HTTPException(400, "invalid dimmer settings")
+            state["max_intensity"] = max_intensity
+            state["fade_seconds"] = fade_seconds
+            if state["percent"] > max_intensity:
+                state["percent"] = float(max_intensity)
+        self._sync_relays()
+        return self.lcm_channels(hostname)
+
     def command_logical(self, logical_name: str, command: dict[str, Any]) -> dict[str, Any]:
         hostname, channel = self._split_logical(logical_name)
-        state = self.rcm[hostname][channel]
-        if state["maintenance_locked"] and command.get("value") is True:
-            raise HTTPException(423, "maintenance lockout active")
-        state["value"] = bool(command.get("value"))
+        if hostname in self.rcm:
+            state = self.rcm[hostname][channel]
+            if state["maintenance_locked"] and command.get("value") is True:
+                raise HTTPException(423, "maintenance lockout active")
+            state["value"] = bool(command.get("value"))
+        else:
+            state = self.lcm[hostname][channel]
+            if state["maintenance_locked"]:
+                activating = command.get("value") is True or float(command.get("percent", 0) or 0) > 0
+                if activating:
+                    raise HTTPException(423, "maintenance lockout active")
+            if state["kind"] == "light":
+                state["value"] = bool(command.get("value"))
+            else:
+                requested = float(command.get("percent", command.get("value", 100)) or 0)
+                effective = max(0.0, min(float(state["max_intensity"]), requested))
+                state["percent"] = effective
+                if effective > 0:
+                    state["last_nonzero_percent"] = effective
         self._sync_relays()
-        return {"ok": True, "logical_name": logical_name, "acknowledged": True, "preview": True}
+        return {
+            "ok": True,
+            "logical_name": logical_name,
+            "acknowledged": True,
+            "requested": command,
+            "effective": copy.deepcopy(state),
+            "preview": True,
+        }
 
     def set_lockout(self, logical_name: str, active: bool) -> dict[str, Any]:
         hostname, channel = self._split_logical(logical_name)
-        state = self.rcm[hostname][channel]
+        state = self.rcm[hostname][channel] if hostname in self.rcm else self.lcm[hostname][channel]
         state["maintenance_locked"] = bool(active)
         if active:
-            state["value"] = False
+            if state.get("kind") == "dimmer":
+                state["percent"] = 0.0
+            else:
+                state["value"] = False
         self._sync_relays()
         return {"ok": True, "logical_name": logical_name, "maintenance_locked": bool(active), "preview": True}
 
@@ -204,7 +331,8 @@ class PreviewState:
         if len(parts) != 2:
             raise HTTPException(404, logical_name)
         hostname, channel = parts[0].upper(), parts[1].upper()
-        if hostname not in self.rcm or channel not in self.rcm[hostname]:
+        module_channels = self.rcm.get(hostname) or self.lcm.get(hostname)
+        if not module_channels or channel not in module_channels:
             raise HTTPException(404, logical_name)
         if not self.modules[hostname]["control_session_online"]:
             raise HTTPException(503, f"{hostname} offline")
@@ -272,6 +400,18 @@ async def rcm_channels(identifier: str, authorization: str | None = Header(defau
 async def rename_channel(identifier: str, channel: str, body: dict[str, Any], authorization: str | None = Header(default=None)):
     _require_preview_auth(authorization)
     return state.rename_channel(identifier, channel, str(body.get("name", "")))
+
+
+@app.get("/api/v1/device-admin/{identifier}/lcm-channels")
+async def lcm_channels(identifier: str, authorization: str | None = Header(default=None)):
+    _require_preview_auth(authorization)
+    return state.lcm_channels(identifier)
+
+
+@app.patch("/api/v1/device-admin/{identifier}/lcm-channels/{channel}/settings")
+async def lcm_settings(identifier: str, channel: str, body: dict[str, Any], authorization: str | None = Header(default=None)):
+    _require_preview_auth(authorization)
+    return state.lcm_settings(identifier, channel, body)
 
 
 @app.post("/api/v1/device/command")

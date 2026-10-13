@@ -3,6 +3,7 @@ let token = localStorage.getItem("homecontrol_token") || "";
 let currentUser = null;
 let lastModules = [];
 const pending = new Set();
+let activeDialog = null;
 
 async function api(path, options = {}) {
   const headers = {"Content-Type": "application/json", ...(options.headers || {})};
@@ -170,7 +171,7 @@ async function renderDeviceDetail(identifier) {
   setTitle("Device", device.module.hostname);
   const role = roleLabel(device);
   if (role === "RCM") return renderRcm(device);
-  if (role === "LCM") return renderRoleShell(device, "Lighting Control Module");
+  if (role === "LCM") return renderLcm(device);
   if (role === "SIM") return renderRoleShell(device, "Sensor Interface Module");
   return renderRoleShell(device, "Unassigned Device");
 }
@@ -212,6 +213,65 @@ async function renderRcm(device) {
       </div>
       <div class="rcm-grid">${data.channels.map(channelCard).join("")}</div>
     </section>`;
+}
+
+async function renderLcm(device) {
+  const data = await api(`/device-admin/${encodeURIComponent(device.module.hostname)}/lcm-channels`);
+  window.__lastLcmChannels = data.channels;
+  const lights = data.channels.filter((channel) => channel.kind === "light");
+  const dimmers = data.channels.filter((channel) => channel.kind === "dimmer");
+  $("content").innerHTML = `
+    <section class="panel">
+      <div class="panel-head">
+        <h3>Lighting Control Module</h3>
+        ${statusPill(online(data.device.module))}
+      </div>
+      ${identityBlock(data.device)}
+    </section>
+    <section class="panel">
+      <div class="panel-head">
+        <h3>Lights</h3>
+        <span class="muted">${lights.length} bound channels</span>
+      </div>
+      <div class="lcm-list">${lights.length ? lights.map(lightRow).join("") : `<div class="empty">No bound light channels for this LCM.</div>`}</div>
+    </section>
+    <section class="panel">
+      <div class="panel-head">
+        <h3>Dimmers</h3>
+        <span class="muted">${dimmers.length} bound channels</span>
+      </div>
+      <div class="dimmer-grid">${dimmers.length ? dimmers.map(dimmerTile).join("") : `<div class="empty">No bound dimmer channels for this LCM.</div>`}</div>
+    </section>`;
+}
+
+function lightRow(channel) {
+  const isPending = pending.has(channel.logical_name);
+  const locked = channel.maintenance_locked;
+  const value = channel.value === true;
+  const canControl = channel.control_enabled && !isPending;
+  return `<article class="lcm-row ${locked ? "locked" : ""}" data-channel="${esc(channel.channel)}">
+    <button class="channel-title" type="button" data-settings-channel="${esc(channel.channel)}">${esc(channel.name)}</button>
+    <span class="channel-meta">${esc(channel.channel)}${channel.emergency_lighting ? " / eLight" : ""}</span>
+    <label class="toggle-control ${locked ? "relay-locked" : ""}">
+      <span class="toggle-label">On</span>
+      <input class="toggle-input" type="checkbox" data-lcm-light-channel="${esc(channel.channel)}" aria-label="${esc(channel.name)} light output" ${value ? "checked" : ""} ${canControl ? "" : "disabled"}>
+      <span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
+    </label>
+    <p class="channel-state">${isPending ? "Pending backend acknowledgement" : esc(channel.disabled_reason || (channel.value == null ? "State unknown" : value ? "Acknowledged on" : "Acknowledged off"))}</p>
+  </article>`;
+}
+
+function dimmerTile(channel) {
+  const percent = Math.round(Number(channel.percent || 0));
+  const locked = channel.maintenance_locked;
+  const isPending = pending.has(channel.logical_name);
+  return `<article class="dimmer-tile ${locked ? "locked" : ""}" data-channel="${esc(channel.channel)}">
+    <button class="channel-title" type="button" data-settings-channel="${esc(channel.channel)}">${esc(channel.name)}</button>
+    <button class="dimmer-button" type="button" data-dimmer-channel="${esc(channel.channel)}" ${channel.control_enabled && !isPending ? "" : "disabled"} aria-label="Adjust ${esc(channel.name)} brightness">
+      <strong>${percent}%</strong>
+      <span>${isPending ? "Pending acknowledgement" : esc(channel.disabled_reason || `Max ${channel.max_intensity}% / Fade ${channel.fade_seconds}s`)}</span>
+    </button>
+  </article>`;
 }
 
 function channelCard(channel) {
@@ -270,6 +330,71 @@ async function renderUsers() {
   $("content").innerHTML = `<section class="panel"><h3>User Management</h3><div class="identity-grid"><div><span>Signed in as</span><strong>${esc(session.user)}</strong></div><div><span>Role</span><strong>${esc(session.role)}</strong></div></div><p class="muted">Centralized user management remains tied to authenticated HCM APIs. Pairing-key administration has been removed from the production UI workflow.</p></section>`;
 }
 
+function modal(html) {
+  closeDialog();
+  activeDialog = document.createElement("div");
+  activeDialog.className = "modal-backdrop";
+  activeDialog.innerHTML = html;
+  document.body.appendChild(activeDialog);
+  const first = activeDialog.querySelector("input, button, select, textarea");
+  if (first) first.focus();
+}
+
+function closeDialog() {
+  if (activeDialog) {
+    activeDialog.remove();
+    activeDialog = null;
+  }
+}
+
+function lcmChannel(channelId) {
+  return (window.__lastLcmChannels || []).find((item) => item.channel === channelId);
+}
+
+function openDimmerDialog(channelId) {
+  const channel = lcmChannel(channelId);
+  if (!channel) return;
+  const percent = Math.round(Number(channel.percent || 0));
+  const max = Number(channel.max_intensity || 100);
+  modal(`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="dimmer-title">
+    <div class="modal-head">
+      <h3 id="dimmer-title">${esc(channel.name)}</h3>
+      <button type="button" class="secondary icon-button" data-close-dialog aria-label="Close">x</button>
+    </div>
+    <p class="muted">${esc(channel.channel)} / acknowledged ${percent}% / maximum ${max}%</p>
+    <div class="slider-readout"><strong data-dimmer-readout>${percent}%</strong></div>
+    <input class="brightness-slider" type="range" min="0" max="${esc(max)}" step="1" value="${percent}" data-dimmer-slider="${esc(channel.channel)}" aria-label="${esc(channel.name)} brightness">
+    <div class="modal-actions">
+      <button type="button" class="secondary" data-dimmer-off="${esc(channel.channel)}">Off</button>
+      <button type="button" data-dimmer-restore="${esc(channel.channel)}">Restore</button>
+    </div>
+    <p class="channel-state">Slider movement previews the target. One command is sent when the value is released or committed from the keyboard.</p>
+  </section>`);
+}
+
+function openSettingsDialog(channelId) {
+  const channel = lcmChannel(channelId);
+  if (!channel) return;
+  const dimmerFields = channel.kind === "dimmer" ? `
+    <label>Maximum intensity <input type="number" min="0" max="100" value="${esc(channel.max_intensity)}" data-settings-max></label>
+    <label>Default fade seconds <input type="number" min="0" max="60" step="0.1" value="${esc(channel.fade_seconds)}" data-settings-fade></label>
+  ` : "";
+  modal(`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="modal-head">
+      <h3 id="settings-title">${esc(channel.name)}</h3>
+      <button type="button" class="secondary icon-button" data-close-dialog aria-label="Close">x</button>
+    </div>
+    <label>Channel name <input value="${esc(channel.name)}" data-settings-name></label>
+    <label class="settings-check"><input type="checkbox" data-settings-elight ${channel.emergency_lighting ? "checked" : ""}> Emergency Lighting</label>
+    <label class="settings-check"><input type="checkbox" data-settings-lock ${channel.maintenance_locked ? "checked" : ""}> Maintenance lockout</label>
+    ${dimmerFields}
+    <div class="modal-actions">
+      <button type="button" class="secondary" data-close-dialog>Cancel</button>
+      <button type="button" data-save-lcm-settings="${esc(channel.channel)}">Save</button>
+    </div>
+  </section>`);
+}
+
 async function renderRoute() {
   if (!token) {
     showApp(false);
@@ -313,6 +438,48 @@ document.addEventListener("click", async (event) => {
   if (lock) {
     const channel = lock.dataset.lockChannel;
     await setLockout(channel, lock.checked);
+    return;
+  }
+  const light = event.target.closest("[data-lcm-light-channel]");
+  if (light) {
+    await setLcmLight(light.dataset.lcmLightChannel, light.checked);
+    return;
+  }
+  const dimmer = event.target.closest("[data-dimmer-channel]");
+  if (dimmer) {
+    openDimmerDialog(dimmer.dataset.dimmerChannel);
+    return;
+  }
+  const settings = event.target.closest("[data-settings-channel]");
+  if (settings) {
+    openSettingsDialog(settings.dataset.settingsChannel);
+    return;
+  }
+  const close = event.target.closest("[data-close-dialog]");
+  if (close) {
+    closeDialog();
+    return;
+  }
+  if (event.target.classList.contains("modal-backdrop")) {
+    closeDialog();
+    return;
+  }
+  const off = event.target.closest("[data-dimmer-off]");
+  if (off) {
+    await setLcmDimmer(off.dataset.dimmerOff, 0);
+    closeDialog();
+    return;
+  }
+  const restore = event.target.closest("[data-dimmer-restore]");
+  if (restore) {
+    const channel = lcmChannel(restore.dataset.dimmerRestore);
+    await setLcmDimmer(restore.dataset.dimmerRestore, Number(channel?.last_nonzero_percent || channel?.max_intensity || 100));
+    closeDialog();
+    return;
+  }
+  const save = event.target.closest("[data-save-lcm-settings]");
+  if (save) {
+    await saveLcmSettings(save.dataset.saveLcmSettings);
   }
 });
 
@@ -329,6 +496,24 @@ document.addEventListener("focusout", async (event) => {
   } catch (error) {
     setError(error.message);
   }
+});
+
+document.addEventListener("input", (event) => {
+  const slider = event.target.closest("[data-dimmer-slider]");
+  if (!slider) return;
+  const readout = activeDialog?.querySelector("[data-dimmer-readout]");
+  if (readout) readout.textContent = `${slider.value}%`;
+});
+
+document.addEventListener("change", async (event) => {
+  const slider = event.target.closest("[data-dimmer-slider]");
+  if (!slider) return;
+  await setLcmDimmer(slider.dataset.dimmerSlider, Number(slider.value));
+  closeDialog();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && activeDialog) closeDialog();
 });
 
 function channelById(channel) {
@@ -386,6 +571,84 @@ async function setLockout(channel, active) {
     pending.clear();
     setError(error.message);
     await renderDeviceDetail(selectedDeviceIdentifier());
+  }
+}
+
+async function currentLcmChannels() {
+  const identifier = selectedDeviceIdentifier();
+  const data = await api(`/device-admin/${encodeURIComponent(identifier)}/lcm-channels`);
+  window.__lastLcmChannels = data.channels;
+  return data.channels;
+}
+
+async function setLcmLight(channel, value) {
+  try {
+    const channels = await currentLcmChannels();
+    const item = channels.find((entry) => entry.channel === channel);
+    if (!item?.logical_name) throw new Error("Channel has no logical binding");
+    pending.add(item.logical_name);
+    await renderDeviceDetail(selectedDeviceIdentifier());
+    await api("/device/command", {
+      method: "POST",
+      body: JSON.stringify({logical_name: item.logical_name, command: {op: "set_relay", value}}),
+    });
+    pending.delete(item.logical_name);
+    await renderDeviceDetail(selectedDeviceIdentifier());
+  } catch (error) {
+    pending.clear();
+    setError(error.message);
+    await renderDeviceDetail(selectedDeviceIdentifier());
+  }
+}
+
+async function setLcmDimmer(channel, percent) {
+  try {
+    const channels = await currentLcmChannels();
+    const item = channels.find((entry) => entry.channel === channel);
+    if (!item?.logical_name) throw new Error("Channel has no logical binding");
+    pending.add(item.logical_name);
+    await renderDeviceDetail(selectedDeviceIdentifier());
+    await api("/device/command", {
+      method: "POST",
+      body: JSON.stringify({logical_name: item.logical_name, command: {op: "set_dimmer", percent}}),
+    });
+    pending.delete(item.logical_name);
+    await renderDeviceDetail(selectedDeviceIdentifier());
+  } catch (error) {
+    pending.clear();
+    setError(error.message);
+    await renderDeviceDetail(selectedDeviceIdentifier());
+  }
+}
+
+async function saveLcmSettings(channel) {
+  try {
+    const existing = lcmChannel(channel);
+    const name = activeDialog.querySelector("[data-settings-name]").value;
+    const emergencyLighting = activeDialog.querySelector("[data-settings-elight]").checked;
+    const maintenanceLocked = activeDialog.querySelector("[data-settings-lock]").checked;
+    const maxInput = activeDialog.querySelector("[data-settings-max]");
+    const fadeInput = activeDialog.querySelector("[data-settings-fade]");
+    if (!name.trim()) throw new Error("Channel name is required");
+    await api(`/device-admin/${encodeURIComponent(selectedDeviceIdentifier())}/lcm-channels/${encodeURIComponent(channel)}/settings`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        name,
+        emergency_lighting: emergencyLighting,
+        max_intensity: maxInput ? Number(maxInput.value) : null,
+        fade_seconds: fadeInput ? Number(fadeInput.value) : null,
+      }),
+    });
+    if (existing && maintenanceLocked !== existing.maintenance_locked) {
+      await api("/safety/maintenance-lockout", {
+        method: "POST",
+        body: JSON.stringify({logical_name: existing.logical_name, active: maintenanceLocked}),
+      });
+    }
+    closeDialog();
+    await renderDeviceDetail(selectedDeviceIdentifier());
+  } catch (error) {
+    setError(error.message);
   }
 }
 

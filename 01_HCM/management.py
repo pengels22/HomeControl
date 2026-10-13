@@ -125,6 +125,18 @@ def _rcm_channel_ids() -> list[str]:
     return [f"{bank}{channel}" for bank in ("A", "B", "C", "D") for channel in range(1, 9)]
 
 
+def _lcm_light_channels() -> list[str]:
+    return [f"A{channel}" for channel in range(1, 9)] + [f"B{channel}" for channel in range(1, 5)]
+
+
+def _lcm_dimmer_channels() -> list[str]:
+    return [f"HV-{channel}" for channel in range(1, 5)] + [f"10-{channel}" for channel in range(1, 9)]
+
+
+def _lcm_channel_ids() -> list[str]:
+    return _lcm_light_channels() + _lcm_dimmer_channels()
+
+
 def _relay_value(last_state: dict[str, Any], channel: str) -> bool | None:
     nested = last_state.get("state") if isinstance(last_state.get("state"), dict) else last_state
     relays = nested.get("relays") if isinstance(nested, dict) else None
@@ -140,6 +152,23 @@ def _relay_value(last_state: dict[str, Any], channel: str) -> bool | None:
                 if field in value:
                     return bool(value[field])
         return bool(value)
+    return None
+
+
+def _dimmer_percent(last_state: dict[str, Any], channel: str) -> float | None:
+    nested = last_state.get("state") if isinstance(last_state.get("state"), dict) else last_state
+    for group in ("hv_dimmers", "lv_dimmers", "dimmers"):
+        values = nested.get(group) if isinstance(nested, dict) else None
+        if not isinstance(values, dict) or channel not in values:
+            continue
+        value = values[channel]
+        if isinstance(value, dict):
+            raw = value.get("percent", value.get("value"))
+        else:
+            raw = value
+        if raw is None:
+            return None
+        return float(raw)
     return None
 
 
@@ -511,6 +540,137 @@ async def update_rcm_channel_name(
                 details={"module": module["module"]["hostname"], "channel": normalized_channel},
             )
     return await get_rcm_channels(module["module"]["hostname"])
+
+
+async def get_lcm_channels(identifier: str | int) -> dict[str, Any]:
+    module = await get_device_admin(identifier)
+    if module["effective_role"] != "LCM":
+        raise ValidationError(f"module {module['module']['hostname']} is not currently assigned the LCM role")
+    async with db.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT b.id AS binding_id,
+                   b.channel,
+                   b.enabled AS binding_enabled,
+                   d.id AS logical_device_id,
+                   d.logical_name,
+                   d.enabled AS logical_enabled,
+                   d.maintenance_locked,
+                   d.metadata AS logical_metadata
+            FROM device_bindings b
+            JOIN logical_devices d ON d.id=b.logical_device_id
+            WHERE b.module_id=$1
+              AND b.channel=ANY($2::text[])
+            ORDER BY b.channel, b.id
+            """,
+            module["module"]["id"],
+            _lcm_channel_ids(),
+        )
+    online = bool(module["module"]["online"] or module["module"]["control_session_online"])
+    control_online = bool(module["module"]["control_session_online"])
+    last_state = _state_payload(module["module"])
+    channels = []
+    for row in rows:
+        channel = row["channel"]
+        metadata = _wire_value(row["logical_metadata"] or {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        is_dimmer = channel in _lcm_dimmer_channels()
+        disabled_reason = None
+        if not row["logical_enabled"] or not row["binding_enabled"]:
+            disabled_reason = "Binding disabled"
+        elif row["maintenance_locked"]:
+            disabled_reason = "Maintenance lockout"
+        elif not control_online:
+            disabled_reason = "No authenticated control session"
+        percent = _dimmer_percent(last_state, channel) if is_dimmer else None
+        channels.append({
+            "channel": channel,
+            "kind": "dimmer" if is_dimmer else "light",
+            "binding_id": int(row["binding_id"]),
+            "logical_device_id": int(row["logical_device_id"]),
+            "logical_name": row["logical_name"],
+            "name": _channel_display_name(row),
+            "enabled": bool(row["logical_enabled"] and row["binding_enabled"]),
+            "maintenance_locked": bool(row["maintenance_locked"]),
+            "emergency_lighting": bool(metadata.get("emergency_lighting")),
+            "max_intensity": int(metadata.get("max_intensity", 100)),
+            "fade_seconds": float(metadata.get("fade_seconds", 3)),
+            "last_nonzero_percent": float(metadata.get("last_nonzero_percent", metadata.get("max_intensity", 100))),
+            "online": online,
+            "control_session_online": control_online,
+            "value": (percent or 0) > 0 if is_dimmer else _relay_value(last_state, channel),
+            "percent": percent,
+            "control_enabled": disabled_reason is None,
+            "disabled_reason": disabled_reason,
+        })
+    return {"device": module, "channels": channels}
+
+
+async def update_lcm_channel_settings(
+    identifier: str | int,
+    channel: str,
+    *,
+    name: str,
+    emergency_lighting: bool,
+    max_intensity: int | None,
+    fade_seconds: float | None,
+    actor: str,
+) -> dict[str, Any]:
+    normalized_channel = _normalize_channel(channel)
+    if normalized_channel not in _lcm_channel_ids():
+        raise ValidationError("invalid LCM channel")
+    module = await get_device_admin(identifier)
+    if module["effective_role"] != "LCM":
+        raise ValidationError(f"module {module['module']['hostname']} is not currently assigned the LCM role")
+    metadata_patch = {
+        "channel_name": name.strip(),
+        "emergency_lighting": bool(emergency_lighting),
+    }
+    if normalized_channel in _lcm_dimmer_channels():
+        metadata_patch["max_intensity"] = 100 if max_intensity is None else int(max_intensity)
+        metadata_patch["fade_seconds"] = 3 if fade_seconds is None else float(fade_seconds)
+    async with db.acquire() as conn:
+        async with _transaction(conn):
+            before_row = await conn.fetchrow(
+                """
+                SELECT d.*, NULL::text AS room
+                FROM device_bindings b
+                JOIN logical_devices d ON d.id=b.logical_device_id
+                WHERE b.module_id=$1
+                  AND b.channel=$2
+                FOR UPDATE
+                """,
+                module["module"]["id"],
+                normalized_channel,
+            )
+            if not before_row:
+                raise NotFoundError(f"{module['module']['hostname']} {normalized_channel}")
+            before = _logical_device(before_row)
+            before_metadata = before["metadata"] if isinstance(before["metadata"], dict) else {}
+            next_metadata = {**before_metadata, **metadata_patch}
+            row = await conn.fetchrow(
+                """
+                UPDATE logical_devices
+                SET metadata=$2::jsonb
+                WHERE id=$1
+                RETURNING *, NULL::text AS room
+                """,
+                before_row["id"],
+                _json_dumps(next_metadata),
+            )
+            after = _logical_device(row)
+            await audit_event(
+                conn,
+                actor=actor,
+                action="lcm_channel.settings_update",
+                target_type="logical_device",
+                target_id=str(row["id"]),
+                before_state=before,
+                after_state=after,
+                details={"module": module["module"]["hostname"], "channel": normalized_channel},
+            )
+    return await get_lcm_channels(module["module"]["hostname"])
 
 
 async def list_logical_devices() -> list[dict[str, Any]]:
