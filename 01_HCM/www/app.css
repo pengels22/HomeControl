@@ -366,11 +366,93 @@ th {
 }
 
 .switch-row {
-  min-height: 28px;
+  min-height: 44px;
+  cursor: pointer;
+  user-select: none;
 }
 
-.switch-row input {
-  width: auto;
+.toggle-label {
+  color: #dbe3df;
+  font-size: 0.9rem;
+}
+
+.toggle-control {
+  position: relative;
+}
+
+.toggle-input {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.toggle-track {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 54px;
+  height: 32px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid #46515a;
+  background: #2c343b;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
+  transition: background 160ms ease, border-color 160ms ease, opacity 160ms ease;
+}
+
+.toggle-thumb {
+  position: absolute;
+  left: 3px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #f4f7f5;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+  transition: transform 180ms ease, background 160ms ease;
+}
+
+.toggle-input:checked + .toggle-track {
+  border-color: #28a982;
+  background: #24a37c;
+}
+
+.toggle-input:checked + .toggle-track .toggle-thumb {
+  transform: translateX(22px);
+}
+
+.maintenance-toggle .toggle-input:checked + .toggle-track {
+  border-color: #d09b3e;
+  background: #b67624;
+}
+
+.toggle-input:focus-visible + .toggle-track {
+  outline: 3px solid #8bd8c3;
+  outline-offset: 3px;
+}
+
+.toggle-input:disabled + .toggle-track {
+  opacity: 0.42;
+  cursor: not-allowed;
+  background: #20262b;
+}
+
+.toggle-input:disabled + .toggle-track .toggle-thumb {
+  background: #a3adb4;
+}
+
+.toggle-control:has(.toggle-input:disabled) {
+  cursor: not-allowed;
+}
+
+.toggle-control.relay-locked .toggle-label {
+  color: #ffc976;
+}
+
+.toggle-control.relay-locked .toggle-track {
+  border-color: #725938;
+  background: #30281a;
 }
 
 .channel-state {

@@ -227,13 +227,15 @@ function channelCard(channel) {
       <code>${esc(channel.channel)}</code>
     </div>
     <input class="channel-name" data-name-channel="${esc(channel.channel)}" value="${esc(channel.name)}" placeholder="${channel.bound ? "Channel name" : "No binding"}" ${canName ? "" : "disabled"}>
-    <label class="switch-row">
-      <span>On</span>
-      <input type="checkbox" data-output-channel="${esc(channel.channel)}" ${value ? "checked" : ""} ${canControl ? "" : "disabled"}>
+    <label class="switch-row toggle-control ${locked ? "relay-locked" : ""}">
+      <span class="toggle-label">On</span>
+      <input class="toggle-input" type="checkbox" data-output-channel="${esc(channel.channel)}" aria-label="${esc(channel.channel)} relay output" ${value ? "checked" : ""} ${canControl ? "" : "disabled"}>
+      <span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
     </label>
-    <label class="switch-row">
-      <span>Maintenance</span>
-      <input type="checkbox" data-lock-channel="${esc(channel.channel)}" ${locked ? "checked" : ""} ${channel.bound && !isPending ? "" : "disabled"}>
+    <label class="switch-row toggle-control maintenance-toggle">
+      <span class="toggle-label">Maintenance</span>
+      <input class="toggle-input" type="checkbox" data-lock-channel="${esc(channel.channel)}" aria-label="${esc(channel.channel)} maintenance lockout" ${locked ? "checked" : ""} ${channel.bound && !isPending ? "" : "disabled"}>
+      <span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
     </label>
     <p class="channel-state">${isPending ? "Pending backend acknowledgement" : esc(channel.disabled_reason || (channel.value == null ? "State unknown" : value ? "Acknowledged on" : "Acknowledged off"))}</p>
   </article>`;

@@ -36,8 +36,12 @@ def test_preview_assets_load_from_real_www_directory(client):
     assert "preview-banner" in html.text
     assert css.status_code == 200
     assert ".preview-banner" in css.text
+    assert ".toggle-control" in css.text
+    assert ".toggle-thumb" in css.text
     assert js.status_code == 200
     assert "detectPreviewMode" in js.text
+    assert "data-output-channel" in js.text
+    assert "data-lock-channel" in js.text
 
 
 def test_browser_route_refresh_serves_spa_for_device_detail(client):
