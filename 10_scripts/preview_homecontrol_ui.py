@@ -33,7 +33,7 @@ def _module(
     physical_outputs_enabled: bool = True,
 ) -> dict[str, Any]:
     return {
-        "id": len(hostname) * 100 + len(device_id),
+        "id": sum(ord(char) for char in hostname),
         "device_id": device_id,
         "module_uuid": None,
         "identity_interface": "preview",
