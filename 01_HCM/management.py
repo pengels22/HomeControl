@@ -598,7 +598,7 @@ async def _probe_emergency_interface(module: dict[str, Any]) -> dict[str, Any]:
     return {
         "available": True,
         "status": "available",
-        "url": f"http://{address}:6010{capability['config_path']}",
+        "url": f"http://{address}:6010",
         "reason": "Verified module-advertised emergency service",
     }
 

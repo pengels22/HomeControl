@@ -97,7 +97,7 @@ async def test_emergency_probe_binds_health_identity_and_constructs_config_url(m
     assert result == {
         'available': True,
         'status': 'available',
-        'url': 'http://192.168.20.36:6010/config',
+        'url': 'http://192.168.20.36:6010',
         'reason': 'Verified module-advertised emergency service',
     }
 
@@ -182,7 +182,7 @@ async def test_emergency_probe_uses_authenticated_registry_receipt_for_freshness
     result = await management._probe_emergency_interface(module)
 
     assert result['available'] is True
-    assert result['url'] == 'http://192.168.20.36:6010/config'
+    assert result['url'] == 'http://192.168.20.36:6010'
 
 
 class FakeTransaction:
