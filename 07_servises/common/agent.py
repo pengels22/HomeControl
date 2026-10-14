@@ -17,10 +17,13 @@ from . import global_config
 from .module_infra import (
     I2C_COMPONENTS,
     LocalConfigStore,
+    LocalAuthStore,
     OfflineEventQueue,
     PeripheralRegistry,
     StructuredEventLogger,
     compute_led_state,
+    reconcile_lockouts,
+    verify_config_package,
 )
 from .protocol import read_frame, write_frame
 
@@ -55,6 +58,7 @@ class ModuleAgent:
         self.hcm_api_url = self.web.get('hcm_api_url', f'http://{self.hcm_host}:8080/api/v1').rstrip('/')
         self.hcm_connected = False
         self.last_valid_ack_ts: float | None = None
+        self.start_time = time.time()
         heartbeat_cfg = config.get('heartbeat_v3', {})
         self.heartbeat_socket_path = heartbeat_cfg.get(
             'socket_path',
@@ -72,6 +76,13 @@ class ModuleAgent:
         )
         self.event_queue = OfflineEventQueue(self.runtime_root / 'logs' / self.logical_id / 'pending-events.json')
         self.config_store = LocalConfigStore(self.runtime_root, self.module_type, self.logical_id)
+        self.local_auth = LocalAuthStore(self.runtime_root / 'config' / self.module_type / f'{self.logical_id}.auth.json')
+        self.config_sync: dict[str, Any] = {
+            'last_synchronized_revision': None,
+            'current_local_revision': None,
+            'state': 'unsynchronized',
+            'conflicts': [],
+        }
         self.running = True
 
     def _register_common_components(self) -> None:
@@ -120,6 +131,8 @@ class ModuleAgent:
             'config_version': 0,
         }
         device_id = self._identity_device_id()
+        if identity.get('module_type') != self.module_type:
+            identity['module_type'] = self.module_type
         if device_id:
             identity['device_id'] = device_id
         return identity
@@ -179,6 +192,7 @@ class ModuleAgent:
             'hcm_connected': self.hcm_connected,
             'software_version': self.config.get('software_version', '0.1.0'),
             'uptime_status': 'running' if self.running else 'stopped',
+            'uptime_seconds': round(time.time() - self.start_time, 3),
             'hcm_heartbeat_health': {
                 'connected': self.hcm_connected,
                 'last_valid_ack_ts': self.last_valid_ack_ts,
@@ -189,6 +203,8 @@ class ModuleAgent:
             'known_commanded_output_state': await self.collect_state(),
             'pending_hcm_log_delivery_count': self.event_queue.count(),
             'recent_logs': self.event_logger.recent(limit=20),
+            'config_sync': dict(self.config_sync),
+            'local_configuration_revision': self.config_sync.get('current_local_revision'),
             'led_state': compute_led_state(
                 initialized=True,
                 heartbeat_ack_current=heartbeat_ack_current,
@@ -307,7 +323,7 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
 </html>"""
 
     def _build_web_app(self):
-        from fastapi import Depends, FastAPI, Header, HTTPException
+        from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Response
         from fastapi.responses import HTMLResponse
 
         app = FastAPI(title=f'HomeControl {self.module_type}', version=self.config.get('software_version', '0.1.0'))
@@ -324,6 +340,12 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
                 raise HTTPException(401, 'invalid HCM token')
             return response.json()
 
+        async def require_local_admin(homecontrol_local_session: str | None = Cookie(default=None)) -> dict[str, Any]:
+            session = self.local_auth.session(homecontrol_local_session)
+            if not session:
+                raise HTTPException(401, 'local administrator login required')
+            return session
+
         @app.get('/', response_class=HTMLResponse)
         async def index():
             return self._module_web_html()
@@ -338,6 +360,30 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
             if response.status_code != 200:
                 raise HTTPException(response.status_code, response.text)
             return response.json()
+
+        @app.post('/login')
+        async def local_login(body: dict[str, Any], response: Response):
+            session = self.local_auth.authenticate(str(body.get('username', '')), str(body.get('password', '')))
+            if not session:
+                self._audit_local('login_failed', {'username': str(body.get('username', ''))})
+                raise HTTPException(401, 'invalid local credentials')
+            response.set_cookie(
+                'homecontrol_local_session',
+                session['token'],
+                max_age=self.local_auth.session_ttl_s,
+                httponly=True,
+                secure=bool(self.web.get('secure_cookies', False)),
+                samesite='strict',
+            )
+            self._audit_local('login', {'username': session['username']})
+            return {'ok': True, 'csrf': session['csrf'], 'expires_at': session['expires_at']}
+
+        @app.post('/logout')
+        async def local_logout(response: Response, homecontrol_local_session: str | None = Cookie(default=None)):
+            if homecontrol_local_session:
+                self.local_auth.sessions.pop(homecontrol_local_session, None)
+            response.delete_cookie('homecontrol_local_session')
+            return {'ok': True}
 
         @app.get('/api/module/session')
         async def session(user=Depends(require_hcm_user)):
@@ -359,6 +405,26 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
                 'pending_hcm_log_delivery_count': status['pending_hcm_log_delivery_count'],
             }
 
+        @app.get('/health')
+        async def offline_health():
+            status = await self.web_status()
+            return {
+                key: status[key]
+                for key in (
+                    'module_type',
+                    'identity',
+                    'software_version',
+                    'uptime_seconds',
+                    'hcm_heartbeat_health',
+                    'component_health',
+                    'active_faults',
+                    'local_configuration_revision',
+                    'config_sync',
+                    'pending_hcm_log_delivery_count',
+                    'recent_logs',
+                )
+            }
+
         @app.get('/api/module/config')
         async def config(user=Depends(require_hcm_user)):
             return {
@@ -368,7 +434,37 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
                 'mode': 'read_only_hcm_authorized',
             }
 
+        @app.get('/config')
+        async def offline_config(user=Depends(require_local_admin)):
+            return {
+                'identity': self.identity,
+                'module_type': self.module_type,
+                'persisted_config': self.config_store.load_json(),
+                'config_sync': dict(self.config_sync),
+                'mode': 'local_offline',
+                'user': {'username': user['username'], 'role': user['role']},
+            }
+
+        @app.patch('/config')
+        async def update_offline_config(body: dict[str, Any], x_csrf_token: str | None = Header(default=None), homecontrol_local_session: str | None = Cookie(default=None), user=Depends(require_local_admin)):
+            if not self.local_auth.require_csrf(homecontrol_local_session, x_csrf_token):
+                raise HTTPException(403, 'csrf validation failed')
+            result = await self.apply_local_config_edit(body, actor=user['username'])
+            return result
+
         return app
+
+    def _audit_local(self, action: str, metadata: dict[str, Any]) -> None:
+        record = self.event_logger.log(
+            component='local_emergency_auth',
+            category='auth',
+            severity='info',
+            code=action,
+            message=f'local emergency {action}',
+            metadata={k: v for k, v in metadata.items() if 'password' not in k.lower() and 'token' not in k.lower()},
+        )
+        if record:
+            self.event_queue.enqueue(record)
 
     async def _run_web(self) -> None:
         import uvicorn
@@ -380,14 +476,62 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
         await server.serve()
 
     async def apply_config(self, payload: dict[str, Any]) -> dict[str, Any]:
+        package = payload.get('package') if isinstance(payload.get('package'), dict) else payload if 'checksum' in payload else None
+        if package:
+            verify_config_package(package, module_type=self.module_type, logical_id=self.identity.get('hostname'))
+            current_revision = self.config_sync.get('current_local_revision')
+            if current_revision and payload.get('base_revision') and payload['base_revision'] != current_revision:
+                self.config_sync.update({'state': 'stale_rejected', 'pending_hcm_revision': package['revision']})
+                return {'ok': False, 'error': 'stale_configuration', 'current_local_revision': current_revision}
+            local_config = self.config_store.load_json().get('config', {})
+            merged_config, conflicts = reconcile_lockouts(package.get('config', {}), local_config)
+            package = {**package, 'config': merged_config}
+            saved = self.config_store.save_json(package)
+            self.config_sync.update({
+                'last_synchronized_revision': package['revision'],
+                'current_local_revision': saved['revision'],
+                'state': 'conflict' if conflicts else 'synchronized',
+                'conflicts': conflicts,
+            })
         self.identity['config_version'] = int(payload.get('version', self.identity.get('config_version', 0)))
         if 'heartbeat_supervisor' in payload:
             # Persist only the authenticated endpoint metadata from HCM. Private keys or
             # secret material are intentionally not provisioned through this channel.
             self.identity['heartbeat_supervisor'] = payload['heartbeat_supervisor']
+        if isinstance(payload.get('offline_admins'), list):
+            self.local_auth.provision_hashes(payload['offline_admins'])
         self.save_identity()
-        self.config_store.save_json({'identity': self.identity, 'payload': payload})
-        return {'ok': True, 'config_version': self.identity['config_version']}
+        if not package:
+            saved = self.config_store.save_json({'identity': self.identity, 'payload': payload})
+            self.config_sync.update({
+                'last_synchronized_revision': str(payload.get('version', saved['revision'])),
+                'current_local_revision': saved['revision'],
+                'state': 'synchronized',
+                'conflicts': [],
+            })
+            return {'ok': True, 'config_version': self.identity['config_version']}
+        return {'ok': True, 'config_version': self.identity['config_version'], 'config_sync': dict(self.config_sync)}
+
+    async def apply_local_config_edit(self, body: dict[str, Any], *, actor: str) -> dict[str, Any]:
+        current = self.config_store.load_json()
+        current_config = current.get('config') if isinstance(current.get('config'), dict) else current
+        next_config = {**current_config, **{k: v for k, v in body.items() if k not in {'revision', 'checksum'}}}
+        saved = self.config_store.save_json({'config': next_config, 'local_edit_by': actor})
+        self.config_sync.update({
+            'current_local_revision': saved['revision'],
+            'state': 'local_changes_pending_hcm_reconciliation',
+        })
+        record = self.event_logger.log(
+            component='local_emergency_config',
+            category='config',
+            severity='info',
+            code='local_config_edit',
+            message='local emergency configuration edited',
+            metadata={'actor': actor, 'revision': saved['revision']},
+        )
+        if record:
+            self.event_queue.enqueue(record)
+        return {'ok': True, 'revision': saved['revision'], 'config_sync': dict(self.config_sync)}
 
     async def apply_assignment(self, payload: dict[str, Any]) -> dict[str, Any]:
         # First pass: persist the desired identity. OS hostname/network changes are intentionally
@@ -461,8 +605,11 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
                         'ts': time.time(),
                         'state': state,
                         'faults': self.faults,
+                        'config_sync': dict(self.config_sync),
+                        'pending_log_events': self.event_queue.count(),
                     }
                 })
+                await self._deliver_log_events(writer)
                 await self.heartbeat_pulse()
                 await self.heartbeat_status(self.heartbeat_status_name, 'running')
 
@@ -473,6 +620,11 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
                 typ = msg.get('type')
                 if typ == 'heartbeat_ack':
                     self.last_valid_ack_ts = time.time()
+                    continue
+                if typ == 'log_ack':
+                    event_ids = payload.get('event_ids') or []
+                    if isinstance(event_ids, list):
+                        self.event_queue.mark_delivered([str(item) for item in event_ids])
                     continue
                 if typ == 'command':
                     result = await self.apply_command(msg.get('payload', {}))
@@ -487,6 +639,12 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
             hb.cancel()
             writer.close()
             await writer.wait_closed()
+
+    async def _deliver_log_events(self, writer) -> None:
+        batch = self.event_queue.batch(limit=100)
+        if not batch:
+            return
+        await write_frame(writer, {'type': 'log_events', 'payload': {'events': batch}})
 
     async def run(self) -> None:
         web_task = None

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
+import secrets
 import subprocess
 import time
 import uuid
@@ -54,6 +56,65 @@ def utc_ts() -> str:
 def stable_revision(value: Any) -> str:
     body = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(body).hexdigest()
+
+
+def config_checksum(value: Any) -> str:
+    return stable_revision(value)
+
+
+def build_config_package(module_type: str, logical_id: str, config: dict[str, Any], *, revision: str | None = None) -> dict[str, Any]:
+    body = {
+        "module_type": module_type.upper(),
+        "logical_id": logical_id,
+        "config": config,
+    }
+    revision = revision or stable_revision(body)
+    body.update({
+        "revision": revision,
+        "checksum": config_checksum({"revision": revision, "config": config}),
+        "generated_at": utc_ts(),
+    })
+    return body
+
+
+def verify_config_package(payload: dict[str, Any], *, module_type: str, logical_id: str | None = None) -> None:
+    if str(payload.get("module_type", "")).upper() != module_type.upper():
+        raise ValueError("configuration module type mismatch")
+    if logical_id and payload.get("logical_id") not in {logical_id, None}:
+        raise ValueError("configuration logical identity mismatch")
+    revision = payload.get("revision")
+    checksum = payload.get("checksum")
+    if not revision or not isinstance(revision, str):
+        raise ValueError("configuration revision is required")
+    if checksum != config_checksum({"revision": revision, "config": payload.get("config", {})}):
+        raise ValueError("configuration checksum mismatch")
+
+
+def reconcile_lockouts(authoritative: dict[str, Any], local: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    merged = json.loads(json.dumps(authoritative))
+    conflicts: list[dict[str, Any]] = []
+    local_lockouts = _lockout_map(local)
+    if not local_lockouts:
+        return merged, conflicts
+    for section in ("channels", "relays", "analog_dimmers", "hv_dimmers"):
+        items = merged.get(section)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            channel = item.get("channel")
+            if channel in local_lockouts and local_lockouts[channel] and not item.get("lockout"):
+                item["lockout"] = True
+                conflicts.append({"channel": channel, "resolution": "preserved_local_lockout"})
+    return merged, conflicts
+
+
+def _lockout_map(config: dict[str, Any]) -> dict[str, bool]:
+    result: dict[str, bool] = {}
+    for section in ("channels", "relays", "analog_dimmers", "hv_dimmers"):
+        for item in config.get(section) or []:
+            if isinstance(item, dict) and item.get("channel"):
+                result[str(item["channel"])] = bool(item.get("lockout"))
+    return result
 
 
 def atomic_write_text(path: Path, text: str, mode: int = 0o640) -> None:
@@ -246,6 +307,93 @@ class OfflineEventQueue:
 
     def count(self) -> int:
         return len(self._read())
+
+
+class LocalAuthStore:
+    def __init__(self, path: Path, *, session_ttl_s: int = 1800, max_failures: int = 5, lockout_s: int = 300) -> None:
+        self.path = Path(path)
+        self.session_ttl_s = session_ttl_s
+        self.max_failures = max_failures
+        self.lockout_s = lockout_s
+        self.sessions: dict[str, dict[str, Any]] = {}
+        self.failures: dict[str, dict[str, Any]] = {}
+
+    def provision_hashes(self, users: list[dict[str, Any]]) -> None:
+        safe_users = []
+        for user in users:
+            if not all(user.get(key) for key in ("username", "salt", "password_hash")):
+                continue
+            safe_users.append({
+                "username": str(user["username"]),
+                "role": str(user.get("role", "ADMIN")).upper(),
+                "salt": str(user["salt"]),
+                "password_hash": str(user["password_hash"]),
+                "iterations": int(user.get("iterations", 310000)),
+                "expires_at": user.get("expires_at"),
+            })
+        atomic_write_text(self.path, json.dumps({"users": safe_users, "updated_at": utc_ts()}, indent=2, sort_keys=True), mode=0o600)
+
+    def has_users(self) -> bool:
+        return bool(self._users())
+
+    def _users(self) -> dict[str, dict[str, Any]]:
+        if not self.path.exists():
+            return {}
+        try:
+            data = json.loads(self.path.read_text())
+        except json.JSONDecodeError:
+            return {}
+        return {item["username"]: item for item in data.get("users", []) if isinstance(item, dict) and item.get("username")}
+
+    @staticmethod
+    def hash_password(password: str, salt_hex: str | None = None, iterations: int = 310000) -> dict[str, Any]:
+        salt = bytes.fromhex(salt_hex) if salt_hex else secrets.token_bytes(16)
+        digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+        return {"salt": salt.hex(), "password_hash": digest.hex(), "iterations": iterations}
+
+    def authenticate(self, username: str, password: str, *, now: float | None = None) -> dict[str, Any] | None:
+        now = time.time() if now is None else now
+        failure = self.failures.get(username, {"count": 0, "locked_until": 0.0})
+        if failure.get("locked_until", 0.0) > now:
+            return None
+        user = self._users().get(username)
+        if not user:
+            self._record_failure(username, now)
+            return None
+        expected = bytes.fromhex(user["password_hash"])
+        digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(user["salt"]), int(user.get("iterations", 310000)))
+        if not hmac.compare_digest(expected, digest):
+            self._record_failure(username, now)
+            return None
+        self.failures.pop(username, None)
+        token = secrets.token_urlsafe(32)
+        csrf = secrets.token_urlsafe(32)
+        session = {"token": token, "csrf": csrf, "username": username, "role": user.get("role", "ADMIN"), "expires_at": now + self.session_ttl_s}
+        self.sessions[token] = session
+        return session
+
+    def _record_failure(self, username: str, now: float) -> None:
+        failure = self.failures.setdefault(username, {"count": 0, "locked_until": 0.0})
+        failure["count"] += 1
+        if failure["count"] >= self.max_failures:
+            failure["locked_until"] = now + self.lockout_s
+            failure["count"] = 0
+
+    def session(self, token: str | None, *, now: float | None = None) -> dict[str, Any] | None:
+        if not token:
+            return None
+        now = time.time() if now is None else now
+        session = self.sessions.get(token)
+        if not session:
+            return None
+        if session["expires_at"] <= now:
+            self.sessions.pop(token, None)
+            return None
+        return session
+
+    def require_csrf(self, token: str | None, csrf: str | None) -> bool:
+        session = self.session(token)
+        return bool(session and csrf and hmac.compare_digest(str(session["csrf"]), str(csrf)))
 
 
 class LocalConfigStore:

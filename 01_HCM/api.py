@@ -162,6 +162,15 @@ async def settings_git_update(body: dict, user=Depends(require_user)):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
+@router.post('/settings/github/connect')
+async def settings_github_connect(body: dict, user=Depends(require_user)):
+    if user['role'] != 'ADMIN':
+        raise HTTPException(403)
+    try:
+        return await storage.connect_github(body)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
 @router.delete('/settings/github')
 async def settings_github_disconnect(user=Depends(require_user)):
     if user['role'] != 'ADMIN':

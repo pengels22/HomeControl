@@ -14,6 +14,7 @@ from .safety import SafetyController
 from .safety_relays import HCMSafetyRelayController
 from .rules import RulesEngine
 from . import api
+from . import storage
 from .devices import command_logical
 
 log = logging.getLogger(__name__)
@@ -40,14 +41,17 @@ api.safety_relays = safety_relays
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.connect()
+    storage.ensure_storage_layout()
     await hvac.load_from_db()
     await registry.start()
+    storage.git_sync_manager.start()
     rule_task = asyncio.create_task(rules.run())
     hvac_task = asyncio.create_task(hvac_loop())
     alarm_task = asyncio.create_task(alarm_contact_loop())
     yield
     rules.running=False
     rule_task.cancel(); hvac_task.cancel(); alarm_task.cancel()
+    await storage.git_sync_manager.stop()
     await safety_relays.shutdown()
     await registry.stop(); await db.close()
 

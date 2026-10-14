@@ -12,11 +12,13 @@ from pathlib import Path
 from typing import Any
 from importlib import import_module
 from . import db
+from . import storage
 from . import role_switching
 from .settings import settings
 from homecontrol_identity import InvalidDeviceId, maybe_normalize_device_id
 
 protocol = import_module('07_servises.common.protocol')
+module_infra = import_module('07_servises.common.module_infra')
 log = logging.getLogger(__name__)
 
 MODULE_TYPES = ('RCM', 'LCM', 'SIM', 'PNL')
@@ -335,16 +337,23 @@ class ModuleRegistry:
         except InvalidDeviceId:
             return None
 
-    async def _base_config(self, module_type: str) -> dict[str, Any]:
+    async def _base_config(self, module_type: str, logical_id: str | None = None) -> dict[str, Any]:
         path = Path(settings.config_root) / {
             'RCM':'04_RCM','LCM':'03_LCM','SIM':'02_SIM','PNL':'05_PNL'
         }[module_type] / f'{module_type.lower()}.yaml'
         if not path.exists():
-            result = {'version': 1}
+            result = {'version': 1, 'config': {}}
         else:
             import yaml
             data = yaml.safe_load(path.read_text()) or {}
             result = {'version': int(data.get('config_version',1)), 'config': data}
+        logical_id = logical_id or module_type
+        result['package'] = module_infra.build_config_package(
+            module_type,
+            logical_id,
+            result.get('config') or {},
+            revision=str(result['version']),
+        )
         result['heartbeat_supervisor'] = {
             'enabled': bool(settings.conflict_heartbeat_enabled),
             'device_id': maybe_normalize_device_id(settings.conflict_heartbeat_device_id),
@@ -487,7 +496,11 @@ class ModuleRegistry:
             ):
                 await conn.send('assignment', assignment)
             else:
-                await conn.send('config', await self._base_config(ident['module_type']))
+                try:
+                    config_payload = await self._base_config(ident['module_type'], assignment['hostname'])
+                except TypeError:
+                    config_payload = await self._base_config(ident['module_type'])
+                await conn.send('config', config_payload)
 
             while True:
                 msg = await protocol.read_frame(reader)
@@ -520,6 +533,9 @@ class ModuleRegistry:
                 elif typ == 'fault':
                     async with db.acquire() as dbc:
                         await dbc.execute('''INSERT INTO faults(device_id,module_uuid,code,severity,details) VALUES($1,$2,$3,$4,$5::jsonb)''', conn.device_id, conn.module_uuid, payload.get('code','unknown'), payload.get('severity','warning'), json.dumps(payload))
+                elif typ == 'log_events':
+                    event_ids = await self._ingest_log_events(conn, payload)
+                    await conn.send('log_ack', {'event_ids': event_ids})
                 elif typ == 'command_ack':
                     rid = msg.get('request_id')
                     fut = conn.pending.get(rid)
@@ -547,5 +563,38 @@ class ModuleRegistry:
             mc = self.connections.get(key)
         if not mc: raise ConnectionError(f'{hostname} offline')
         return await mc.command(payload, timeout=timeout)
+
+    async def _ingest_log_events(self, conn: ModuleConnection, payload: dict[str, Any]) -> list[str]:
+        events = payload.get('events') or []
+        if not isinstance(events, list):
+            return []
+        root = storage.storage_root()
+        logical = conn.hostname or conn.device_id or conn.module_uuid or 'unknown-module'
+        log_dir = root / 'logs' / str(logical)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        index_path = log_dir / 'delivered-event-ids.json'
+        try:
+            delivered = set(json.loads(index_path.read_text()))
+        except (OSError, json.JSONDecodeError):
+            delivered = set()
+        accepted: list[str] = []
+        with (log_dir / 'events.jsonl').open('a', encoding='utf-8') as handle:
+            for event in events:
+                if not isinstance(event, dict):
+                    continue
+                event_id = str(event.get('event_id') or '')
+                if not event_id or event_id in delivered:
+                    accepted.append(event_id)
+                    continue
+                safe_event = {
+                    key: value
+                    for key, value in event.items()
+                    if not any(secret in key.lower() for secret in ('password', 'token', 'secret', 'credential'))
+                }
+                handle.write(json.dumps(safe_event, sort_keys=True) + '\n')
+                delivered.add(event_id)
+                accepted.append(event_id)
+        module_infra.atomic_write_text(index_path, json.dumps(sorted(delivered), indent=2))
+        return accepted
 
 registry = ModuleRegistry()

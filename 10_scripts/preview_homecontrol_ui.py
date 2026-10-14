@@ -1056,6 +1056,12 @@ async def settings_git_update(body: dict[str, Any], authorization: str | None = 
     return state.update_git_settings(body)
 
 
+@app.post("/api/v1/settings/github/connect")
+async def settings_github_connect(body: dict[str, Any], authorization: str | None = Header(default=None)):
+    _require_preview_admin(authorization)
+    return state.update_git_settings({**body, "github_enabled": True})
+
+
 @app.delete("/api/v1/settings/github")
 async def settings_github_disconnect(authorization: str | None = Header(default=None)):
     _require_preview_admin(authorization)

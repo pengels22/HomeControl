@@ -676,19 +676,21 @@ async function saveGitSettings() {
   const status = document.querySelector("[data-git-status]");
   if (status) status.textContent = "Saving repository settings...";
   try {
-    const result = await api("/settings/git", {
-      method: "PUT",
+    const pat = document.querySelector("[data-git-pat]")?.value || "";
+    const enabled = Boolean(document.querySelector("[data-git-enabled]")?.checked);
+    const result = await api(pat && enabled ? "/settings/github/connect" : "/settings/git", {
+      method: pat && enabled ? "POST" : "PUT",
       body: JSON.stringify({
         commit_name: document.querySelector("[data-git-name]")?.value || "",
         commit_email: document.querySelector("[data-git-email]")?.value || "",
         repo_url: document.querySelector("[data-git-repo]")?.value || "",
-        github_pat: document.querySelector("[data-git-pat]")?.value || "",
-        github_enabled: Boolean(document.querySelector("[data-git-enabled]")?.checked),
+        github_pat: pat,
+        github_enabled: enabled,
       }),
     });
     if (status) status.textContent = result.status?.display || "Git Repository: Not Synced";
-    const pat = document.querySelector("[data-git-pat]");
-    if (pat) pat.value = "";
+    const patInput = document.querySelector("[data-git-pat]");
+    if (patInput) patInput.value = "";
   } catch (error) {
     if (status) status.textContent = `Save failed: ${error.message}`;
   }

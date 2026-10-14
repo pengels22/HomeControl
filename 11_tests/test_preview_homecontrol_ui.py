@@ -206,6 +206,16 @@ def test_settings_preview_git_controls_are_admin_only_and_redact_pat(client):
             "github_enabled": True,
         },
     )
+    connected = client.post(
+        "/api/v1/settings/github/connect",
+        headers=headers(),
+        json={
+            "commit_name": "Preview Operator",
+            "commit_email": "operator@example.test",
+            "repo_url": "https://github.com/example/homecontrol-preview.git",
+            "github_pat": "ghp_preview_secret",
+        },
+    )
     rejected = client.put(
         "/api/v1/settings/git",
         headers=headers(),
@@ -217,6 +227,8 @@ def test_settings_preview_git_controls_are_admin_only_and_redact_pat(client):
     assert before.status_code == 200
     assert updated.status_code == 200
     assert updated.json()["github_token_configured"] is True
+    assert connected.status_code == 200
+    assert connected.json()["github_enabled"] is True
     assert "ghp_preview_secret" not in str(updated.json())
     assert rejected.status_code == 400
     assert disconnected.json()["github_enabled"] is False

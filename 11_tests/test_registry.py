@@ -211,6 +211,29 @@ async def test_base_config_includes_conflict_heartbeat_supervisor(monkeypatch, t
         'timeout_seconds': 15,
         'protocol': 'hcm-heartbeat-v3',
     }
+    assert payload['package']['module_type'] == 'SIM'
+    assert payload['package']['checksum']
+
+
+@pytest.mark.asyncio
+async def test_registry_ingests_module_logs_durably_and_deduplicates(monkeypatch, tmp_path):
+    monkeypatch.setattr(registry_mod.storage.settings, 'storage_root', tmp_path)
+    reg = registry_mod.ModuleRegistry()
+    conn = registry_mod.ModuleConnection(None, None)
+    conn.hostname = 'RCM1'
+
+    first = await reg._ingest_log_events(conn, {'events': [
+        {'event_id': 'evt-1', 'message': 'first', 'token': 'secret'},
+        {'event_id': 'evt-1', 'message': 'duplicate'},
+    ]})
+    second = await reg._ingest_log_events(conn, {'events': [{'event_id': 'evt-1', 'message': 'again'}]})
+
+    log_path = tmp_path / 'logs' / 'RCM1' / 'events.jsonl'
+    lines = log_path.read_text().splitlines()
+    assert first == ['evt-1', 'evt-1']
+    assert second == ['evt-1']
+    assert len(lines) == 1
+    assert 'secret' not in lines[0]
 
 
 @pytest.mark.asyncio
