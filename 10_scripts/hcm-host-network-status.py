@@ -79,7 +79,7 @@ def collect_status() -> Dict[str, Any]:
             "ipv4": ipv4,
             "ipv6": ipv6,
             "status": str(item.get("operstate") or "Unknown").title(),
-            "network": ipv4[0].split("/", 1)[1] if ipv4 and "/" in ipv4[0] else None,
+            "network": "/" + ipv4[0].split("/", 1)[1] if ipv4 and "/" in ipv4[0] else None,
             "default_route": route,
         })
     default_route = next(iter(defaults.values()), None)
