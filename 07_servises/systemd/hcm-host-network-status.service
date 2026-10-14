@@ -1,0 +1,16 @@
+[Unit]
+Description=HomeControl read-only host network status snapshot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hcm-host-network-status --output /srv/hcm-data/homecontrol/.state/host-network-status.json
+User=root
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/srv/hcm-data/homecontrol/.state
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_NETLINK

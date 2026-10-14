@@ -1135,13 +1135,14 @@ async function renderUsers() {
 function interfaceTable(interfaces) {
   if (!interfaces.length) return `<div class="empty">No HCM host interfaces reported.</div>`;
   return `<div class="table-wrap"><table>
-    <thead><tr><th>Interface</th><th>IPv4</th><th>IPv6</th><th>Status</th><th>Network</th></tr></thead>
+    <thead><tr><th>Interface</th><th>IPv4</th><th>IPv6</th><th>Status</th><th>Network</th><th>Default route</th></tr></thead>
     <tbody>${interfaces.map((item) => `<tr>
       <td><code>${esc(item.name)}</code></td>
       <td>${addressList(item.ipv4)}</td>
       <td>${addressList(item.ipv6)}</td>
       <td>${esc(item.status || "Unknown")}</td>
       <td>${esc(item.network || "Unknown")}</td>
+      <td>${item.default_route ? esc([item.default_route.gateway, item.default_route.interface].filter(Boolean).join(" via ")) : "Unknown"}</td>
     </tr>`).join("")}</tbody>
   </table></div>`;
 }

@@ -361,10 +361,14 @@ async def test_lab1_role_transition_persists_audits_and_confirms_from_heartbeat(
         assert accepted['status'] == 'ACCEPTED'
         assert confirmed['status'] == 'CONFIRMED'
         assert confirmed['module_id'] == module_id
+        assert await conn.fetchval(
+            "SELECT module_type FROM modules WHERE id=$1",
+            module_id,
+        ) == 'SIM'
         audit_count = await conn.fetchval(
             "SELECT count(*) FROM device_management_events WHERE action LIKE 'module_role.%'"
         )
-        assert audit_count == 4
+        assert audit_count == 5
 
 
 @pytest.mark.asyncio

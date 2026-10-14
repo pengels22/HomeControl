@@ -1,5 +1,6 @@
 from importlib import import_module
 import json
+import time
 
 import pytest
 from fastapi import HTTPException
@@ -17,6 +18,20 @@ class FakeAcquire:
 
     async def __aexit__(self, exc_type, exc, tb):
         return False
+
+
+def test_host_network_status_file_rejects_stale_provider_data(monkeypatch, tmp_path):
+    path = tmp_path / 'host-network-status.json'
+    path.write_text(json.dumps({
+        'updated_at': time.time() - 121,
+        'interfaces': [{'name': 'eth0', 'ipv4': ['192.168.20.27/24']}],
+    }))
+    monkeypatch.setattr(management.settings, 'host_network_status_file', path)
+
+    interfaces, reason = management._host_interfaces_from_status_file()
+
+    assert interfaces == []
+    assert reason == 'Configured host network status is stale'
 
 
 class FakeTransaction:

@@ -14,6 +14,7 @@ from .settings import settings
 
 
 ALLOWED_ROLES = ("UNASSIGNED", "RCM", "SIM", "LCM")
+REGISTERED_MODULE_ROLES = {"RCM", "SIM", "LCM"}
 TERMINAL_STATUSES = {"CONFIRMED", "REJECTED", "TIMED_OUT", "FAILED"}
 ACTIVE_STATUSES = {"PENDING", "SENT", "ACCEPTED", "APPLYING"}
 
@@ -454,4 +455,99 @@ async def confirm_from_state(device_id: str | None, state_payload: dict[str, Any
             )
             after = _transition(row)
             await audit_event(conn, actor="hcm", action="module_role.confirmed", target_type="module_role_transition", target_id=str(row["operation_id"]), before_state=_transition(before), after_state=after)
+            if row["requested_role"] in REGISTERED_MODULE_ROLES:
+                module = await conn.fetchrow(
+                    "SELECT id, module_type FROM modules WHERE id=$1 FOR UPDATE",
+                    row["module_id"],
+                )
+                if module and module["module_type"] != row["requested_role"]:
+                    await conn.execute(
+                        "UPDATE modules SET module_type=$2 WHERE id=$1",
+                        row["module_id"],
+                        row["requested_role"],
+                    )
+                    await audit_event(
+                        conn,
+                        actor="hcm",
+                        action="module.registration_reconciled",
+                        target_type="module",
+                        target_id=device_id,
+                        before_state={"module_type": module["module_type"]},
+                        after_state={"module_type": row["requested_role"]},
+                        details={"operation_id": str(row["operation_id"]), "source": "confirmed_role_transition"},
+                    )
             return after
+
+
+async def reconcile_confirmed_registration(device_id: str, actor: str) -> dict[str, Any]:
+    """Reconcile a previously confirmed safe role without sending a command."""
+    device_id = normalize_device_id(device_id)
+    async with db.acquire() as conn:
+        async with _transaction(conn):
+            module = await conn.fetchrow(
+                """
+                SELECT id, device_id, module_type, last_state
+                FROM modules
+                WHERE device_id=$1
+                FOR UPDATE
+                """,
+                device_id,
+            )
+            if not module:
+                raise RoleSwitchError("module is not registered")
+            state_payload = _json_value(module["last_state"] or {})
+            state = state_payload.get("state") if isinstance(state_payload, dict) and isinstance(state_payload.get("state"), dict) else state_payload
+            state = state if isinstance(state, dict) else {}
+            reported_role = normalize_role(state.get("lab_role") or state.get("operational_role") or "")
+            if reported_role not in REGISTERED_MODULE_ROLES:
+                raise RoleSwitchError("module has no reconciliable reported operational role")
+            if state.get("simulation") is not True or state.get("physical_outputs_enabled") is not False:
+                raise RoleSwitchError("module state is not safely simulation-only")
+            transition = await conn.fetchrow(
+                """
+                SELECT operation_id, previous_role, requested_role, status
+                FROM module_role_transitions
+                WHERE device_id=$1 AND status='CONFIRMED' AND requested_role=$2
+                ORDER BY completed_at DESC NULLS LAST, requested_at DESC
+                LIMIT 1
+                """,
+                device_id,
+                reported_role,
+            )
+            if not transition:
+                raise RoleSwitchError("no authenticated confirmed transition matches reported role")
+            binding = await conn.fetchrow(
+                """
+                SELECT id FROM device_bindings
+                WHERE module_id=$1 AND enabled=true
+                LIMIT 1
+                """,
+                module["id"],
+            )
+            if binding:
+                raise RoleSwitchError("active bindings must be reviewed before registration reconciliation")
+            if module["module_type"] != reported_role:
+                await conn.execute(
+                    "UPDATE modules SET module_type=$2 WHERE id=$1",
+                    module["id"],
+                    reported_role,
+                )
+                await audit_event(
+                    conn,
+                    actor=actor,
+                    action="module.registration_reconciled",
+                    target_type="module",
+                    target_id=device_id,
+                    before_state={"module_type": module["module_type"]},
+                    after_state={"module_type": reported_role},
+                    details={"operation_id": str(transition["operation_id"]), "source": "confirmed_transition_review"},
+                )
+            return {
+                "device_id": device_id,
+                "previous_module_type": module["module_type"],
+                "module_type": reported_role,
+                "reported_role": reported_role,
+                "operation_id": str(transition["operation_id"]),
+                "reconciled": module["module_type"] != reported_role,
+                "command_sent": False,
+            }

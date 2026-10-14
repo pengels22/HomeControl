@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 from datetime import date, datetime
 from contextlib import asynccontextmanager
@@ -535,6 +536,12 @@ def _host_interfaces_from_status_file() -> tuple[list[dict[str, Any]], str | Non
     interfaces = data.get("interfaces") if isinstance(data, dict) else None
     if not isinstance(interfaces, list):
         return [], "Configured host network status file has no interface list"
+    updated_at = data.get("updated_at") if isinstance(data, dict) else None
+    try:
+        if updated_at is None or time.time() - float(updated_at) > 120:
+            return [], "Configured host network status is stale"
+    except (TypeError, ValueError):
+        return [], "Configured host network status timestamp is invalid"
     normalized = []
     for item in interfaces:
         if not isinstance(item, dict):
@@ -545,6 +552,7 @@ def _host_interfaces_from_status_file() -> tuple[list[dict[str, Any]], str | Non
             "ipv6": item.get("ipv6") or [],
             "status": item.get("status") or "Unknown",
             "network": item.get("network") or item.get("prefix") or None,
+            "default_route": item.get("default_route") if isinstance(item.get("default_route"), dict) else None,
         })
     return normalized, None
 

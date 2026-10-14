@@ -355,6 +355,15 @@ async def module_role_change(device_id: str, body: ModuleRoleChangeIn, user=Depe
     except role_switching.RoleSwitchError as exc:
         raise HTTPException(400, str(exc)) from exc
 
+@router.post('/modules/{device_id}/role/reconcile')
+async def reconcile_module_role(device_id: str, user=Depends(require_user)):
+    if user['role'] != 'ADMIN':
+        raise HTTPException(403)
+    try:
+        return await role_switching.reconcile_confirmed_registration(device_id, user['user'])
+    except role_switching.RoleSwitchError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
 @router.get('/logical-devices')
 async def logical_devices(user=Depends(require_user)):
     return {'logical_devices': await management.list_logical_devices()}
