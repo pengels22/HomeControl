@@ -53,6 +53,11 @@ when cloning `hcm-test`, unless a `/var/lib/homecontrol` bind already exists.
 It still creates the replacement container on its primary Docker network first
 and connects additional networks before start.
 
+The runtime image must include `git` and `ca-certificates`. HCM initializes
+the persistent repository with the Git executable during application startup.
+The repository-root `Dockerfile` is the reproducible build recipe for this
+dependency.
+
 No new PostgreSQL migration is required for the storage mount itself.
 
 ## Verification Before Deployment
@@ -87,8 +92,23 @@ After an approved HCM-only deployment, verify:
 
 ## Remaining Deployment Blockers
 
-- The host storage directory has not yet been created or permissioned.
-- The running HCM container does not yet include the `/var/lib/homecontrol` bind mount.
+- The host storage directory is created and permissioned for UID/GID 10001.
+- The running HCM container includes the `/var/lib/homecontrol` bind mount.
 - Direct LAB1 state-file verification was blocked by SSH public-key access.
 - No private GitHub credential was available for live GitHub push validation;
   local bare-remote integration tests were used instead.
+
+## Deployment Record - 2026-10-14
+
+The HCM-only deployment of source release
+`6a800f7ad1d46f6391ac9e5b83ffe1644b5653b8` completed successfully after the
+runtime image was rebuilt with the required `git` dependency. The running
+container is `hcm-test`, tagged with that release, and retains the previous
+image as `hcm-rollback-hc-20261014T160711Z-6a800f7a-r2`.
+
+The PostgreSQL custom-format backup and container metadata are retained on the
+Jetson under `/home/jetson/hcm-final-hc-20261014T160711Z-6a800f7a/`. The HCM
+storage bind is active, HCM health and PostgreSQL readiness passed, and the
+Conflict heartbeat remained healthy. LAB1 was not modified; its authenticated
+HCM state remained simulation-only with physical outputs disabled, and no LAB1
+logical bindings or output-arbitration events were present.

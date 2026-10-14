@@ -1,0 +1,21 @@
+FROM python:3.13-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/opt/HomeControl
+
+WORKDIR /opt/HomeControl
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN python -m pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+USER 10001:10001
+EXPOSE 8080
+
+CMD ["python", "-m", "uvicorn", "01_HCM.main:app", "--host", "0.0.0.0", "--port", "8080"]
