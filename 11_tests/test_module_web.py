@@ -20,6 +20,19 @@ def test_module_web_html_prompts_for_hcm_login_and_status_only():
     assert '/device/command' not in html
 
 
+def test_lcm_emergency_page_is_compact_and_lists_safe_state_language():
+    agent = agent_mod.ModuleAgent('LCM', {'web': {'enabled': True}})
+
+    html = agent._module_web_html()
+
+    assert 'Local administrator sign in' in html
+    assert 'Simulated outputs only' in html
+    assert '0–10V dimmers' in html
+    assert '110V dimmers' in html
+    assert '/config' in html
+    assert '/device/command' not in html
+
+
 @pytest.mark.asyncio
 async def test_module_web_status_includes_identity_and_hcm_connection_flag():
     agent = agent_mod.ModuleAgent('LCM', {'web': {'enabled': True}, 'tls': {'key_file': '/secret/key.pem'}})
@@ -134,6 +147,23 @@ async def test_offline_local_auth_and_config_edit_without_hcm(tmp_path):
     assert result['config_sync']['state'] == 'local_changes_pending_hcm_reconciliation'
     assert health['pending_hcm_log_delivery_count'] >= 1
     assert 'password' not in json.dumps(health).lower()
+
+
+@pytest.mark.asyncio
+async def test_lcm_local_edit_persists_csv_and_keeps_output_state_empty(tmp_path):
+    agent = agent_mod.ModuleAgent('LCM', {'runtime_root': str(tmp_path), 'web': {'enabled': True}})
+    channels = infra.default_lcm_channels()
+    channels[0]['name'] = 'LAB relay'
+    channels[8]['name'] = 'LAB dimmer'
+    hashed = infra.LocalAuthStore.hash_password('offline-admin-password')
+    await agent.apply_config({'version': 1, 'offline_admins': [{**hashed, 'username': 'local-admin', 'role': 'ADMIN'}]})
+
+    result = await agent.apply_local_config_edit({'channels': channels}, actor='local-admin')
+
+    assert result['ok'] is True
+    assert agent.config_store.load_lcm_csv()[0]['name'] == 'LAB relay'
+    assert agent.config_store.load_lcm_csv()[8]['name'] == 'LAB dimmer'
+    assert agent.state == {}
 
 
 def test_local_auth_blocks_invalid_credentials_and_expires_sessions(tmp_path):

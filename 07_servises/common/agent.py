@@ -228,6 +228,8 @@ class ModuleAgent:
         return redacted
 
     def _module_web_html(self) -> str:
+        if self.module_type == 'LCM':
+            return self._lcm_emergency_web_html()
         title = f"HomeControl {self.module_type}"
         return f"""<!doctype html>
 <html lang="en">
@@ -321,6 +323,36 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
 </script>
 </body>
 </html>"""
+
+    def _lcm_emergency_web_html(self) -> str:
+        """Compact local-only LCM configuration view; hardware state is never inferred."""
+        return """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HomeControl LCM emergency configuration</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0f1113;color:#f4f2ec}
+body{margin:0;background:#0f1113}main{width:min(1180px,calc(100% - 28px));margin:auto;padding:22px 0 40px}
+header{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:18px}h1,h2,h3,p{margin:0}h1{font-size:1.35rem}h2{font-size:1rem}p,.muted{color:#a8b0ad;font-size:.86rem}button,input{font:inherit}button{border:0;border-radius:7px;padding:.65rem .9rem;background:#347d68;color:#fff;cursor:pointer;min-height:44px}button.secondary{background:#30363a}button:focus-visible,input:focus-visible{outline:3px solid #7dd3b0;outline-offset:2px}input{width:100%;box-sizing:border-box;border:1px solid #505a60;border-radius:6px;background:#16191c;color:#f4f2ec;padding:.65rem}label{display:grid;gap:5px;color:#cbd0cd;margin-bottom:12px}.error{color:#ffb7ad;min-height:1.25rem}
+section{border:1px solid #2b3236;background:#181c1f;border-radius:8px;padding:14px;margin-bottom:14px}.toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.toolbar-actions{display:flex;gap:8px;flex-wrap:wrap}
+.columns{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.column{min-width:0}.column h3{font-size:.9rem;padding-bottom:8px;border-bottom:1px solid #30383b}.count{color:#8e9995;font-weight:400}.channel{padding:10px 0;border-bottom:1px solid #293033}.channel:last-child{border-bottom:0}.channel-top{display:flex;justify-content:space-between;align-items:center;gap:8px}.channel-name{font-weight:600;overflow-wrap:anywhere}.channel-id{font-size:.75rem;color:#8e9995;margin-top:2px}.channel-meta{display:flex;gap:8px;flex-wrap:wrap;color:#a8b0ad;font-size:.74rem;margin-top:6px}.channel-meta .locked{color:#ffb7ad}.channel input[type=text]{margin-top:7px}.switch{position:relative;display:inline-flex;align-items:center;flex:0 0 auto}.switch input{position:absolute;opacity:0;width:1px;height:1px}.track{width:46px;height:27px;border-radius:999px;background:#485158;display:block;position:relative;transition:.15s}.track:after{content:"";position:absolute;width:21px;height:21px;left:3px;top:3px;border-radius:50%;background:#fff;transition:.15s;box-shadow:0 1px 3px #0008}.switch input:checked+.track{background:#35a77c}.switch input:checked+.track:after{transform:translateX(19px)}.switch input:disabled+.track{opacity:.42;cursor:not-allowed}.unknown{color:#a8b0ad}.hidden{display:none!important}.state{font-size:.75rem}.status-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.status-item{background:#121517;border-radius:6px;padding:9px}.status-item strong{display:block;font-size:.78rem}.status-item span{display:block;margin-top:3px;color:#a8b0ad;font-size:.78rem;overflow-wrap:anywhere}
+@media(max-width:900px){.columns{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:600px){main{width:min(100% - 20px,520px);padding-top:14px}.columns{grid-template-columns:1fr}.status-grid{grid-template-columns:repeat(2,minmax(0,1fr))}header{align-items:flex-start}.toolbar{align-items:flex-start;flex-direction:column}}
+</style></head><body><main>
+<header><div><h1>LCM emergency configuration</h1><p>Local administrator access. Simulated outputs only; no physical state is confirmed.</p></div><button id="logout" class="secondary hidden">Log out</button></header>
+<section id="login-view"><h2>Local administrator sign in</h2><p class="muted">This login remains available when HCM is offline.</p><form id="login-form"><label>Username<input id="username" autocomplete="username" required></label><label>Password<input id="password" type="password" autocomplete="current-password" required></label><button>Sign in</button></form><p id="login-error" class="error" role="alert"></p></section>
+<div id="app-view" class="hidden"><section><div class="toolbar"><div><h2>Module status</h2><p id="revision" class="muted"></p></div><div class="toolbar-actions"><button id="refresh" class="secondary">Refresh</button></div></div><div id="status-grid" class="status-grid"></div><p id="app-error" class="error" role="alert"></p></section>
+<section><div class="toolbar"><div><h2>Channel configuration</h2><p class="muted">Edits are local and queued for HCM reconciliation. Lockouts are preserved during sync.</p></div></div><div id="channels" class="columns"></div></section></div>
+</main><script>
+let csrf="", loggedIn=false; const $=id=>document.getElementById(id);
+async function api(path,options={}){const headers={'Content-Type':'application/json',...(options.headers||{})};if(csrf)headers['X-CSRF-Token']=csrf;const r=await fetch(path,{...options,headers});const data=await r.json();if(!r.ok)throw new Error(data.detail||'Request failed');return data}
+function showApp(show){loggedIn=show;$('login-view').classList.toggle('hidden',show);$('app-view').classList.toggle('hidden',!show);$('logout').classList.toggle('hidden',!show)}
+function channelCard(item,kind){const id=String(item.channel), name=String(item.name||'');const locked=Boolean(item.lockout);const isRelay=kind==='relay';const dimmer=!isRelay;return `<article class="channel" data-channel="${id}"><div class="channel-top"><div><div class="channel-name">${name||'<span class="unknown">Unnamed</span>'}</div><div class="channel-id">${id} · ${item.type||'Unknown'}</div></div><span class="state unknown">${isRelay?'Simulated state unavailable':'Brightness unknown'}</span></div><div class="channel-meta">${locked?'<span class="locked">Maintenance locked</span>':'<span>Available</span>'}<span>${item.eLight?'eLight':'Standard'}</span>${dimmer?'<span>Max '+(item.max_intensity??'Unknown')+'%</span>':''}</div><label class="muted">Name<input type="text" data-name="${id}" value="${name.replaceAll('"','&quot;')}" aria-label="Name for ${id}"></label><div class="channel-meta"><label><input type="checkbox" data-setting="lockout" data-channel="${id}" ${locked?'checked':''}> Maintenance lock</label><label><input type="checkbox" data-setting="emergency_lighting" data-channel="${id}" ${item.emergency_lighting?'checked':''}> eLight</label>${dimmer?'<label>Max brightness <input type="number" min="0" max="100" step="1" data-setting="max_intensity" data-channel="'+id+'" value="'+(item.max_intensity??'')+'"></label><label>Fade seconds <input type="number" min="0" max="3600" step="0.1" data-setting="fade_seconds" data-channel="'+id+'" value="'+(item.fade_seconds??'3')+'"></label>':''}</div></article>`}
+function render(config){const channels=config.channels||[];const groups=[['Relays','relay',channels.filter(x=>x.type==='Relay')],['0–10V dimmers','dimmer',channels.filter(x=>x.type==='0-10V')],['110V dimmers','dimmer',channels.filter(x=>x.type==='110V')]];$('channels').innerHTML=groups.map(([title,kind,items])=>`<div class="column"><h3>${title} <span class="count">${items.length}</span></h3>${items.map(x=>channelCard(x,kind)).join('')}</div>`).join('')||'<p class="unknown">No channel configuration available.</p>';$('channels').querySelectorAll('[data-name]').forEach(input=>input.addEventListener('blur',()=>save({channels:channels.map(x=>x.channel===input.dataset.name?{...x,name:input.value}:x)}).catch(showError)));$('channels').querySelectorAll('[data-setting]').forEach(input=>{const event=input.type==='checkbox'?'change':'blur';input.addEventListener(event,()=>{const channel=input.dataset.channel,field=input.dataset.setting;const value=input.type==='checkbox'?input.checked:Number(input.value);save({channels:channels.map(x=>x.channel===channel?{...x,[field]:value}:x)}).catch(showError)})})}
+async function save(body){await api('/config',{method:'PATCH',body:JSON.stringify(body)});await refresh()}
+function showError(error){$('app-error').textContent=error.message||String(error)}
+async function refresh(){const [health,config]=await Promise.all([fetch('/health').then(r=>r.json()),api('/config')]);const identity=health.identity||{};$('revision').textContent='Revision '+(config.config_sync?.current_local_revision||'Unknown')+' · '+(config.config_sync?.state||'Unknown');const items=[['Identity',identity.device_id||'Unknown'],['Role',identity.role||'LCM'],['Simulation',identity.simulation===true?'Enabled':'Unknown'],['Physical outputs',identity.physical_outputs_enabled===false?'Disabled':'Unknown'],['HCM heartbeat',health.hcm_heartbeat_health?.connected?'Connected':'Offline'],['Config sync',config.config_sync?.state||'Unknown'],['Faults',(health.active_faults||[]).length],['Pending logs',health.pending_hcm_log_delivery_count??'Unknown']];$('status-grid').innerHTML=items.map(([a,b])=>`<div class="status-item"><strong>${a}</strong><span>${b}</span></div>`).join('');const persisted=config.persisted_config||{};render({channels:persisted.config?.channels||persisted.channels||[]})}
+async function login(event){event.preventDefault();$('login-error').textContent='';try{const result=await api('/login',{method:'POST',body:JSON.stringify({username:$('username').value,password:$('password').value})});csrf=result.csrf;showApp(true);await refresh()}catch(error){$('login-error').textContent=error.message}}
+$('login-form').addEventListener('submit',login);$('refresh').addEventListener('click',()=>refresh().catch(showError));$('logout').addEventListener('click',async()=>{await fetch('/logout',{method:'POST'});csrf='';showApp(false)});showApp(false);
+</script></body></html>"""
 
     def _build_web_app(self):
         from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Response
@@ -436,10 +468,13 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
 
         @app.get('/config')
         async def offline_config(user=Depends(require_local_admin)):
+            persisted = self.config_store.load_json()
+            if self.module_type == 'LCM':
+                persisted = {**persisted, 'channels': self.config_store.load_lcm_csv()}
             return {
                 'identity': self.identity,
                 'module_type': self.module_type,
-                'persisted_config': self.config_store.load_json(),
+                'persisted_config': persisted,
                 'config_sync': dict(self.config_sync),
                 'mode': 'local_offline',
                 'user': {'username': user['username'], 'role': user['role']},
@@ -528,6 +563,8 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
         current = self.config_store.load_json()
         current_config = current.get('config') if isinstance(current.get('config'), dict) else current
         next_config = {**current_config, **{k: v for k, v in body.items() if k not in {'revision', 'checksum'}}}
+        if self.module_type == 'LCM' and isinstance(body.get('channels'), list):
+            self.config_store.save_lcm_csv(body['channels'])
         saved = self.config_store.save_json({'config': next_config, 'local_edit_by': actor})
         self.config_sync.update({
             'current_local_revision': saved['revision'],

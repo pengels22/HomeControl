@@ -481,9 +481,12 @@ class Lab1Adapter(BaseAdapter):
             AdapterStep("preflight_lab1_safety", self._lab_state_safety_command()),
             AdapterStep("backup_lab_agent_components", self._lab1_backup_command(backup_dir), changes_system=True),
             AdapterStep("install_role_helper", f"sudo install -m 0755 {release_dir}/10_scripts/lab1_role_agent.py /opt/homecontrol-lab/lab1_role_agent.py", changes_system=True),
+            AdapterStep("install_emergency_ui", self._lab1_emergency_install_command(release_dir), changes_system=True),
             AdapterStep("restart_lab_agent", "sudo systemctl restart homecontrol-lab.service", changes_system=True, timeout=60),
+            AdapterStep("restart_emergency_ui", "sudo systemctl daemon-reload && sudo systemctl enable --now homecontrol-lab-emergency.service", changes_system=True, timeout=60),
             AdapterStep("verify_lab_state_safety", self._lab_state_safety_command(backup_dir), timeout=60),
             AdapterStep("verify_lab_services", self._lab_services_command(), timeout=60),
+            AdapterStep("verify_emergency_ui", self._lab1_emergency_verify_command(), timeout=60),
             AdapterStep("verify_lab_heartbeat_client", self._lab_heartbeat_client_command(), timeout=60),
             AdapterStep("record_release", f"printf '%s\\n' {artifact.release} | sudo tee {self.release_marker()} >/dev/null", changes_system=True),
         ]
@@ -496,6 +499,7 @@ class Lab1Adapter(BaseAdapter):
             AdapterStep("lab1_agent_layout", "python3 - <<'PY'\nimport os,socket\nassert socket.gethostname().split('.')[0] == 'lab1'\nfor p in ('/opt/homecontrol-lab/lab_agent.py','/opt/homecontrol-lab/lab1_role_agent.py','/opt/homecontrol-lab/state/module.json'):\n assert os.path.isfile(p), p\nprint('lab1_layout=ok')\nPY"),
             AdapterStep("lab1_state_safety", self._lab_state_safety_command()),
             AdapterStep("lab1_services", self._lab_services_command()),
+            AdapterStep("emergency_ui_service", "sudo -n systemctl is-active homecontrol-lab-emergency.service && sudo -n ss -ltn '( sport = :6010 )' || true"),
             AdapterStep("lab1_heartbeat_client", self._lab_heartbeat_client_command()),
         ]
 
@@ -560,6 +564,8 @@ class Lab1Adapter(BaseAdapter):
             "[ ! -e \"$b\" ] || { echo backup_exists:$b >&2; exit 1; }; "
             "install -d -m 0755 \"$b\"; "
             "cp -a /opt/homecontrol-lab/lab1_role_agent.py \"$b/lab1_role_agent.py\"; "
+            "for f in /opt/homecontrol-lab/lab1_emergency.py /etc/systemd/system/homecontrol-lab-emergency.service; do if [ -e \"$f\" ]; then cp -a \"$f\" \"$b/$(basename \"$f\")\"; fi; done; "
+            "if [ -d /opt/homecontrol-lab/state/homecontrol ]; then cp -a /opt/homecontrol-lab/state/homecontrol \"$b/homecontrol\"; fi; "
             "cp -a /opt/homecontrol-lab/state/module.json \"$b/module.json\"; "
             "if [ -f \"$marker\" ]; then cp -a \"$marker\" \"$b/homecontrol-release\"; else : > \"$b/homecontrol-release.absent\"; fi; "
             "stat -c \"%U:%G %a %n\" /opt/homecontrol-lab/lab1_role_agent.py \"$b/lab1_role_agent.py\" /opt/homecontrol-lab/state/module.json \"$b/module.json\" > \"$b/manifest.txt\"; "
@@ -567,6 +573,51 @@ class Lab1Adapter(BaseAdapter):
             "cmp -s /opt/homecontrol-lab/state/module.json \"$b/module.json\"; "
             "ln -sfn \"$b\" /opt/homecontrol-lab/backups/homecontrol-deploy-rollback; "
             "echo lab1_backup=$b verified=true'"
+        )
+
+    def _lab1_emergency_install_command(self, release_dir: str) -> str:
+        return (
+            f"sudo install -m 0755 {release_dir}/10_scripts/lab1_emergency.py /opt/homecontrol-lab/lab1_emergency.py && "
+            f"sudo install -m 0644 {release_dir}/06_config/08_LAB/homecontrol-lab-emergency.service /etc/systemd/system/homecontrol-lab-emergency.service && "
+            f"sudo install -d -m 0755 /opt/homecontrol-lab/07_servises/common && sudo cp -a {release_dir}/07_servises/common/. /opt/homecontrol-lab/07_servises/common/ && "
+            f"sudo install -m 0644 {release_dir}/homecontrol_identity.py /opt/homecontrol-lab/homecontrol_identity.py && "
+            "sudo install -d -m 0750 -o root -g root /opt/homecontrol-lab/state/homecontrol/config/LCM && "
+            "sudo /opt/homecontrol-lab/.venv/bin/pip install --disable-pip-version-check --no-input 'fastapi>=0.115,<1' 'uvicorn[standard]>=0.30,<1' 'httpx>=0.27,<1' && "
+            "sudo /opt/homecontrol-lab/.venv/bin/python - <<'PY'\n"
+            "from pathlib import Path\nimport json, secrets, os, sys, importlib\n"
+            "sys.path.insert(0, '/opt/homecontrol-lab')\n"
+            "LocalAuthStore=importlib.import_module('07_servises.common.module_infra').LocalAuthStore\n"
+            "auth=Path('/opt/homecontrol-lab/state/homecontrol/config/LCM/lab1.auth.json')\n"
+            "bootstrap=Path('/opt/homecontrol-lab/state/homecontrol/local-admin-bootstrap.txt')\n"
+            "if not auth.exists():\n"
+            " password=secrets.token_urlsafe(24)\n"
+            " auth.parent.mkdir(parents=True, exist_ok=True)\n"
+            " auth.write_text(json.dumps({'users':[{'username':'admin','role':'ADMIN',**LocalAuthStore.hash_password(password)}]}, indent=2)+'\\n')\n"
+            " os.chmod(auth, 0o600)\n"
+            " bootstrap.write_text('username=admin\\npassword='+password+'\\n')\n"
+            " os.chmod(bootstrap, 0o600)\n"
+            " print('local_admin_provisioned=true credential_file='+str(bootstrap))\n"
+            "else:\n"
+            " print('local_admin_provisioned=false existing_credentials_preserved=true')\n"
+            "PY"
+        )
+
+    def _lab1_emergency_verify_command(self) -> str:
+        return (
+            "python3 - <<'PY'\n"
+            "import json, urllib.request\n"
+            "state=json.load(open('/opt/homecontrol-lab/state/module.json'))\n"
+            "assert state.get('device_id') == '2ccf675d3414'\n"
+            "assert state.get('simulation') is True\n"
+            "assert state.get('physical_outputs_enabled') is False\n"
+            "health=json.load(urllib.request.urlopen('http://127.0.0.1:6010/health', timeout=5))\n"
+            "identity=health.get('identity',{})\n"
+            "assert identity.get('device_id') == '2ccf675d3414'\n"
+            "assert identity.get('role') == state.get('role')\n"
+            "assert identity.get('simulation') is True\n"
+            "assert identity.get('physical_outputs_enabled') is False\n"
+            "print('emergency_ui=healthy port=6010 local_auth_required=true physical_outputs_enabled=false')\n"
+            "PY"
         )
 
     def _lab1_restore_command(self, backup_dir: str) -> str:
@@ -577,6 +628,9 @@ class Lab1Adapter(BaseAdapter):
             "[ -d \"$b\" ] || { echo missing_backup:$b >&2; exit 1; }; "
             "[ -f \"$b/lab1_role_agent.py\" ] || { echo missing_role_backup >&2; exit 1; }; "
             "cp -a \"$b/lab1_role_agent.py\" /opt/homecontrol-lab/lab1_role_agent.py; "
+            "if [ -f \"$b/lab1_emergency.py\" ]; then cp -a \"$b/lab1_emergency.py\" /opt/homecontrol-lab/lab1_emergency.py; else rm -f /opt/homecontrol-lab/lab1_emergency.py; fi; "
+            "if [ -f \"$b/homecontrol-lab-emergency.service\" ]; then cp -a \"$b/homecontrol-lab-emergency.service\" /etc/systemd/system/homecontrol-lab-emergency.service; else rm -f /etc/systemd/system/homecontrol-lab-emergency.service; fi; "
+            "sudo systemctl daemon-reload; sudo systemctl disable --now homecontrol-lab-emergency.service || true; "
             "if [ -f \"$b/homecontrol-release\" ]; then cp -a \"$b/homecontrol-release\" \"$marker\"; "
             "elif [ -f \"$b/homecontrol-release.absent\" ]; then rm -f \"$marker\"; "
             "else echo missing_marker_backup >&2; exit 1; fi; "

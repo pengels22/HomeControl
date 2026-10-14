@@ -1,0 +1,22 @@
+[Unit]
+Description=HomeControl LAB1 local emergency configuration UI
+After=network-online.target homecontrol-lab.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/homecontrol-lab
+ExecStart=/opt/homecontrol-lab/.venv/bin/python /opt/homecontrol-lab/lab1_emergency.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/homecontrol-lab/state
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

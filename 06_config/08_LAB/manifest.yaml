@@ -17,9 +17,11 @@ deployment:
   actions: [install, update, verify, rollback]
 services:
   - homecontrol-lab.service
+  - homecontrol-lab-emergency.service
   - hcm-heartbeat.service
 configuration_files:
   - manifest.yaml
+  - homecontrol-lab-emergency.service
 persistent_data:
   - /opt/homecontrol-lab/state
 authentication:
