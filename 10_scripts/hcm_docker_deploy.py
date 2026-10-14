@@ -12,6 +12,8 @@ from urllib.parse import quote
 
 
 SOCKET = "/var/run/docker.sock"
+HOMECONTROL_STORAGE_BIND = "/srv/hcm-data/homecontrol:/var/lib/homecontrol:rw"
+HOMECONTROL_STORAGE_DEST = "/var/lib/homecontrol"
 
 
 class DockerDeployError(RuntimeError):
@@ -131,6 +133,7 @@ def create_clone(source, image, name):
     primary_network = "hcm-control" if "hcm-control" in endpoints else sorted(endpoints)[0]
     additional_networks = [(network_name, endpoints[network_name]) for network_name in sorted(endpoints) if network_name != primary_network]
     config["Image"] = image
+    host_config["Binds"] = ensure_homecontrol_storage_bind(host_config.get("Binds") or [])
     body = {
         "Hostname": config.get("Hostname"),
         "Domainname": config.get("Domainname", ""),
@@ -161,6 +164,17 @@ def create_clone(source, image, name):
             connect_network(name, network_name, endpoint)
         except DockerDeployError as exc:
             raise DockerDeployError("failure connecting replacement container {} to network {}: {}".format(name, network_name, exc))
+
+
+def ensure_homecontrol_storage_bind(binds):
+    # type: (list) -> list
+    result = list(binds or [])
+    for bind in result:
+        parts = str(bind).split(":")
+        if len(parts) >= 2 and parts[1] == HOMECONTROL_STORAGE_DEST:
+            return result
+    result.append(HOMECONTROL_STORAGE_BIND)
+    return result
 
 
 def validate_clone_source(source):

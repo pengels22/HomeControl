@@ -739,6 +739,7 @@ async function renderDevices() {
 
 function identityBlock(device) {
   const module = device.module;
+  const sync = device.config_sync;
   return `<section class="identity-grid">
     <div><span>Hostname</span><strong>${esc(module.hostname)}</strong></div>
     <div><span>Registered Module Type</span><strong>${esc(module.module_type)}</strong></div>
@@ -749,7 +750,8 @@ function identityBlock(device) {
     <div><span>Control Session</span><strong>${module.control_session_online ? "Authenticated" : "Unavailable"}</strong></div>
     <div><span>Simulation</span><strong>${device.simulation === true ? "Enabled" : device.simulation === false ? "Disabled" : "Unknown"}</strong></div>
     <div><span>Physical Outputs</span><strong>${device.physical_outputs_enabled === true ? "Enabled" : device.physical_outputs_enabled === false ? "Disabled" : "Unknown"}</strong></div>
-  </section>`;
+  </section>
+  ${sync?.state && sync.state !== "synchronized" ? `<div class="notice warn">Configuration synchronization: ${esc(sync.state)}${sync.conflicts?.length ? ` (${sync.conflicts.length} conflict${sync.conflicts.length === 1 ? "" : "s"})` : ""}</div>` : ""}`;
 }
 
 async function renderDeviceDetail(identifier) {

@@ -12,7 +12,10 @@ import httpx
 from homecontrol_identity import InvalidDeviceId, maybe_normalize_device_id
 
 from . import db
+from . import storage
 from .settings import settings
+
+module_infra = __import__("importlib").import_module("07_servises.common.module_infra")
 
 
 UNSET = object()
@@ -139,6 +142,82 @@ def _lcm_dimmer_channels() -> list[str]:
 
 def _lcm_channel_ids() -> list[str]:
     return _lcm_light_channels() + _lcm_dimmer_channels()
+
+
+def rcm_config_from_channels(channels: list[dict[str, Any]]) -> dict[str, Any]:
+    by_channel = {item["channel"]: item for item in channels}
+    rows = []
+    for channel in _rcm_channel_ids():
+        item = by_channel.get(channel) or {}
+        rows.append({
+            "channel": channel,
+            "name": item.get("name", ""),
+            "on": bool(item.get("value") is True),
+            "lockout": bool(item.get("maintenance_locked")),
+        })
+    return {"channels": rows}
+
+
+def lcm_config_from_channels(channels: list[dict[str, Any]]) -> dict[str, Any]:
+    by_channel = {item["channel"]: item for item in channels}
+    rows = []
+    for channel in _lcm_channel_ids():
+        item = by_channel.get(channel) or {}
+        is_dimmer = channel in _lcm_dimmer_channels()
+        rows.append({
+            "channel": channel,
+            "name": item.get("name", ""),
+            "type": item.get("type_label") or item.get("type") or module_infra.lcm_channel_type(channel),
+            "lockout": bool(item.get("maintenance_locked")),
+            "emergency_lighting": bool(item.get("emergency_lighting")),
+            "max_intensity": int(item.get("max_intensity", 100)) if is_dimmer else None,
+            "fade_seconds": float(item.get("fade_seconds", 3.0)) if is_dimmer else None,
+            "hardware_id": item.get("hardware_id") or module_infra.lcm_hardware_id(channel),
+        })
+    return {"channels": rows}
+
+
+async def mirror_module_configuration(module_type: str, hostname: str, config: dict[str, Any]) -> dict[str, Any]:
+    logical_id = str(hostname)
+    store = module_infra.LocalConfigStore(storage.storage_root(), module_type, logical_id)
+    try:
+        if module_type == "RCM":
+            csv_meta = store.save_rcm_csv(config["channels"])
+        elif module_type == "LCM":
+            csv_meta = store.save_lcm_csv(config["channels"])
+        else:
+            csv_meta = {"channel_count": 0, "revision": module_infra.stable_revision(config)}
+        package = module_infra.build_config_package(module_type, logical_id, config, revision=csv_meta["revision"])
+        json_meta = store.save_json(package)
+    except OSError as exc:
+        return {
+            "state": "storage_unavailable",
+            "module_type": module_type,
+            "logical_id": logical_id,
+            "reason": str(exc),
+            "updated_at": module_infra.utc_ts(),
+        }
+    sync = {
+        "state": "stored",
+        "module_type": module_type,
+        "logical_id": logical_id,
+        "revision": package["revision"],
+        "checksum": package["checksum"],
+        "csv": csv_meta,
+        "json": {"path": str(store.path(".json")), "revision": json_meta["revision"]},
+        "updated_at": module_infra.utc_ts(),
+    }
+    try:
+        from .registry import registry
+        ack = await registry.config_by_hostname(logical_id, {"package": package, "base_revision": None})
+        sync["ack"] = ack
+        sync["state"] = "synchronized" if ack.get("ok") else "ack_failed"
+    except Exception as exc:
+        sync["state"] = "pending_retry"
+        sync["reason"] = str(exc)
+    state_path = storage.storage_root() / ".state" / "config-sync" / f"{logical_id}.json"
+    module_infra.atomic_write_text(state_path, json.dumps(sync, indent=2, sort_keys=True))
+    return sync
 
 
 def _sim_analog_channels() -> list[str]:
@@ -685,6 +764,7 @@ async def get_device_admin(identifier: str | int) -> dict[str, Any]:
         "role_source": "reported_state" if effective_role != module["module_type"] else "registered_module_type",
         "simulation": nested.get("simulation"),
         "physical_outputs_enabled": nested.get("physical_outputs_enabled"),
+        "config_sync": nested.get("config_sync") if isinstance(nested.get("config_sync"), dict) else None,
         "replacement_ready": {
             "supported": True,
             "automatic_reassignment_enabled": False,
@@ -808,7 +888,9 @@ async def update_rcm_channel_name(
                 after_state=after,
                 details={"module": module["module"]["hostname"], "channel": normalized_channel},
             )
-    return await get_rcm_channels(module["module"]["hostname"])
+    result = await get_rcm_channels(module["module"]["hostname"])
+    result["config_sync"] = await mirror_module_configuration("RCM", module["module"]["hostname"], rcm_config_from_channels(result["channels"]))
+    return result
 
 
 async def get_lcm_channels(identifier: str | int) -> dict[str, Any]:
@@ -952,7 +1034,9 @@ async def update_lcm_channel_settings(
                 after_state=after,
                 details={"module": module["module"]["hostname"], "channel": normalized_channel},
             )
-    return await get_lcm_channels(module["module"]["hostname"])
+    result = await get_lcm_channels(module["module"]["hostname"])
+    result["config_sync"] = await mirror_module_configuration("LCM", module["module"]["hostname"], lcm_config_from_channels(result["channels"]))
+    return result
 
 
 def _sim_state(module: dict[str, Any]) -> dict[str, Any]:

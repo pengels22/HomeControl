@@ -103,6 +103,23 @@ async def test_module_rejects_stale_config_and_preserves_local_lockouts(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_module_config_application_writes_role_specific_csv_without_energizing_outputs(tmp_path):
+    agent = agent_mod.ModuleAgent('LCM', {'runtime_root': str(tmp_path)})
+    agent.identity['hostname'] = 'LCM1'
+    channels = infra.default_lcm_channels()
+    channels[8]['name'] = 'Analog One'
+    package = infra.build_config_package('LCM', 'LCM1', {'channels': channels}, revision='lcm-rev')
+
+    result = await agent.apply_config({'package': package})
+    loaded = agent.config_store.load_lcm_csv()
+
+    assert result['ok'] is True
+    assert loaded[8]['channel'] == '10-1'
+    assert loaded[8]['name'] == 'Analog One'
+    assert agent.state == {}
+
+
+@pytest.mark.asyncio
 async def test_offline_local_auth_and_config_edit_without_hcm(tmp_path):
     agent = agent_mod.ModuleAgent('LCM', {'runtime_root': str(tmp_path), 'web': {'enabled': True}})
     hashed = infra.LocalAuthStore.hash_password('offline-admin-password')

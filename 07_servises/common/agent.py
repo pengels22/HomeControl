@@ -486,6 +486,7 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
             local_config = self.config_store.load_json().get('config', {})
             merged_config, conflicts = reconcile_lockouts(package.get('config', {}), local_config)
             package = {**package, 'config': merged_config}
+            self._persist_module_config_files(package)
             saved = self.config_store.save_json(package)
             self.config_sync.update({
                 'last_synchronized_revision': package['revision'],
@@ -511,6 +512,17 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
             })
             return {'ok': True, 'config_version': self.identity['config_version']}
         return {'ok': True, 'config_version': self.identity['config_version'], 'config_sync': dict(self.config_sync)}
+
+    def _persist_module_config_files(self, package: dict[str, Any]) -> None:
+        config = package.get('config') if isinstance(package.get('config'), dict) else {}
+        if self.module_type == 'RCM':
+            channels = config.get('channels')
+            if isinstance(channels, list):
+                self.config_store.save_rcm_csv(channels)
+        elif self.module_type == 'LCM':
+            channels = config.get('channels')
+            if isinstance(channels, list):
+                self.config_store.save_lcm_csv(channels)
 
     async def apply_local_config_edit(self, body: dict[str, Any], *, actor: str) -> dict[str, Any]:
         current = self.config_store.load_json()

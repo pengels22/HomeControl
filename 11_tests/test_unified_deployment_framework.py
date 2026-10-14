@@ -1254,7 +1254,10 @@ def test_hcm_docker_clone_preserves_mounts_networks_environment_and_command(monk
     assert body["Image"] == "homecontrol-hcm:new"
     assert body["Env"] == ["HCM_DATABASE_URL=postgres://redacted"]
     assert body["Cmd"] == ["python", "-m", "uvicorn", "01_HCM.main:app"]
-    assert body["HostConfig"]["Binds"] == ["/etc/hcm/postgres-password:/run/secrets/postgres_password:ro"]
+    assert body["HostConfig"]["Binds"] == [
+        "/etc/hcm/postgres-password:/run/secrets/postgres_password:ro",
+        "/srv/hcm-data/homecontrol:/var/lib/homecontrol:rw",
+    ]
     assert body["HostConfig"]["PortBindings"]["8080/tcp"][0]["HostIp"] == "192.168.20.27"
     assert set(body["NetworkingConfig"]["EndpointsConfig"]) == {"hcm-control"}
     assert body["NetworkingConfig"]["EndpointsConfig"]["hcm-control"]["Aliases"] == ["hcm-test"]
@@ -1262,6 +1265,32 @@ def test_hcm_docker_clone_preserves_mounts_networks_environment_and_command(monk
     assert connect[2]["Container"] == "hcm-test"
     assert connect[2]["EndpointConfig"]["Aliases"] == ["hcm-test"]
     assert connect[2]["EndpointConfig"]["IPAMConfig"] == {"IPv4Address": "172.18.0.9"}
+
+
+def test_hcm_docker_clone_preserves_existing_homecontrol_storage_mount(monkeypatch):
+    module = load_script_module("hcm_docker_deploy_mount_test", "10_scripts/hcm_docker_deploy.py")
+    calls = []
+
+    def fake_docker(method, path, body=None, ok=(200, 201, 204, 304)):
+        calls.append((method, path, body))
+        return {}
+
+    monkeypatch.setattr(module, "docker", fake_docker)
+    source = {
+        "Config": {"Image": "old", "Cmd": ["python"], "ExposedPorts": {"8080/tcp": {}}},
+        "HostConfig": {
+            "Binds": ["/custom/homecontrol:/var/lib/homecontrol:rw"],
+            "PortBindings": {"8080/tcp": [{"HostIp": "192.168.20.27", "HostPort": "8080"}]},
+        },
+        "NetworkSettings": {"Networks": {"hcm-control": {}, "hcm-internal": {}}},
+        "Mounts": [{"Destination": "/var/lib/homecontrol"}],
+    }
+
+    module.create_clone(source, image="new", name="hcm-test")
+
+    create = next(call for call in calls if call[1].startswith("/containers/create"))
+    assert create[2]["HostConfig"]["Binds"].count("/custom/homecontrol:/var/lib/homecontrol:rw") == 1
+    assert "/srv/hcm-data/homecontrol:/var/lib/homecontrol:rw" not in create[2]["HostConfig"]["Binds"]
 
 
 def test_hcm_docker_clone_reports_additional_network_connect_failure(monkeypatch):

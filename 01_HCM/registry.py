@@ -108,6 +108,16 @@ class ModuleConnection:
         finally:
             self.pending.pop(rid, None)
 
+    async def config(self, payload: dict[str, Any], timeout: float = 10.0, request_id: str | None = None) -> dict[str, Any]:
+        rid = request_id or str(uuid.uuid4())
+        fut = asyncio.get_running_loop().create_future()
+        self.pending[rid] = fut
+        await self.send('config', payload, rid)
+        try:
+            return await asyncio.wait_for(fut, timeout)
+        finally:
+            self.pending.pop(rid, None)
+
 class ModuleRegistry:
     def __init__(self):
         self.connections: dict[str, ModuleConnection] = {}
@@ -563,6 +573,18 @@ class ModuleRegistry:
             mc = self.connections.get(key)
         if not mc: raise ConnectionError(f'{hostname} offline')
         return await mc.command(payload, timeout=timeout)
+
+    async def config_by_hostname(self, hostname: str, payload: dict[str, Any], timeout: float = 10.0) -> dict[str, Any]:
+        async with db.acquire() as conn:
+            row = await conn.fetchrow('SELECT device_id, module_uuid::text AS module_uuid FROM modules WHERE hostname=$1', hostname)
+        if not row:
+            raise KeyError(hostname)
+        key = row['device_id'] or str(row['module_uuid'])
+        async with self._connections_lock:
+            mc = self.connections.get(key)
+        if not mc:
+            raise ConnectionError(f'{hostname} offline')
+        return await mc.config(payload, timeout=timeout)
 
     async def _ingest_log_events(self, conn: ModuleConnection, payload: dict[str, Any]) -> list[str]:
         events = payload.get('events') or []

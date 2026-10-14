@@ -147,12 +147,33 @@ async def apply_active_intent(logical_device_id: int) -> dict[str, Any]:
 async def set_maintenance_lockout(logical_name: str, active: bool) -> dict[str, Any]:
     async with db.acquire() as conn:
         row = await conn.fetchrow('''
-            UPDATE logical_devices SET maintenance_locked=$2
-            WHERE logical_name=$1 AND enabled=true
-            RETURNING id AS logical_device_id
+            UPDATE logical_devices d SET maintenance_locked=$2
+            WHERE d.logical_name=$1 AND d.enabled=true
+            RETURNING d.id AS logical_device_id
         ''', logical_name, active)
     if not row:
         raise KeyError(logical_name)
     if active:
-        return await apply_active_intent(int(row['logical_device_id']))
-    return {'ok': True, 'logical_name': logical_name, 'maintenance_locked': False}
+        result = await apply_active_intent(int(row['logical_device_id']))
+    else:
+        result = {'ok': True, 'logical_name': logical_name, 'maintenance_locked': False}
+    try:
+        from . import management
+        async with db.acquire() as conn:
+            binding = await conn.fetchrow('''
+                SELECT m.hostname, m.module_type
+                FROM device_bindings b
+                JOIN modules m ON m.id=b.module_id
+                WHERE b.logical_device_id=$1 AND b.enabled=true
+                ORDER BY b.id
+                LIMIT 1
+            ''', int(row['logical_device_id']))
+        if binding and binding['module_type'] == 'RCM':
+            snapshot = await management.get_rcm_channels(binding['hostname'])
+            result['config_sync'] = await management.mirror_module_configuration('RCM', binding['hostname'], management.rcm_config_from_channels(snapshot['channels']))
+        elif binding and binding['module_type'] == 'LCM':
+            snapshot = await management.get_lcm_channels(binding['hostname'])
+            result['config_sync'] = await management.mirror_module_configuration('LCM', binding['hostname'], management.lcm_config_from_channels(snapshot['channels']))
+    except Exception:
+        pass
+    return result

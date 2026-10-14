@@ -39,6 +39,41 @@ def test_rcm_csv_schema_and_channel_count_are_strict(tmp_path):
         store.save_rcm_csv(infra.default_rcm_config()[:-1])
 
 
+def test_rcm_csv_round_trip_preserves_32_channels(tmp_path):
+    store = infra.LocalConfigStore(tmp_path, 'RCM', 'RCM2')
+    channels = infra.default_rcm_config()
+    channels[0]['name'] = 'Kitchen'
+    channels[0]['on'] = True
+    channels[0]['lockout'] = True
+
+    store.save_rcm_csv(channels)
+    loaded = store.load_rcm_csv()
+
+    assert len(loaded) == 32
+    assert loaded[0] == {'channel': 'A1', 'name': 'Kitchen', 'on': True, 'lockout': True}
+    assert loaded[-1]['channel'] == 'D8'
+
+
+def test_lcm_csv_round_trip_preserves_22_channel_inventory(tmp_path):
+    store = infra.LocalConfigStore(tmp_path, 'LCM', 'LCM1')
+    channels = infra.default_lcm_channels()
+    channels[0]['name'] = 'Relay One'
+    dimmer = next(item for item in channels if item['channel'] == '10-10')
+    dimmer.update({'name': 'Cove', 'lockout': True, 'emergency_lighting': True, 'max_intensity': 72, 'fade_seconds': 4.5})
+    hv = next(item for item in channels if item['channel'] == 'HV-4')
+    hv['name'] = 'Pendant'
+
+    result = store.save_lcm_csv(channels)
+    loaded = store.load_lcm_csv()
+
+    assert result['channel_count'] == 22
+    assert [item['channel'] for item in loaded[:8]] == [f'A{i}' for i in range(1, 9)]
+    assert [item['channel'] for item in loaded[8:18]] == [f'10-{i}' for i in range(1, 11)]
+    assert [item['channel'] for item in loaded[18:]] == [f'HV-{i}' for i in range(1, 5)]
+    assert next(item for item in loaded if item['channel'] == '10-10')['max_intensity'] == 72
+    assert next(item for item in loaded if item['channel'] == '10-10')['lockout'] is True
+
+
 def test_structured_event_logger_suppresses_duplicates_until_recovery(tmp_path):
     logger = infra.StructuredEventLogger('RCM1', tmp_path)
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import csv
 import json
 import os
 import secrets
@@ -24,6 +25,7 @@ RCM_RELAY_CHANNELS = [f"{bank}{channel}" for bank in ("A", "B", "C", "D") for ch
 LCM_RELAY_CHANNELS = [f"A{channel}" for channel in range(1, 9)]
 LCM_ANALOG_DIMMER_CHANNELS = [f"10-{channel}" for channel in range(1, 11)]
 LCM_HV_DIMMER_CHANNELS = [f"HV-{channel}" for channel in range(1, 5)]
+LCM_CSV_HEADER = ["Channel ID", "Name", "Type", "Lockout", "eLight", "Max Brightness", "Fade Seconds", "Hardware ID"]
 
 RCM_RELAY_MAP = {
     **{f"A{i + 1}": ("relay_card_1", i) for i in range(8)},
@@ -115,6 +117,20 @@ def _lockout_map(config: dict[str, Any]) -> dict[str, bool]:
             if isinstance(item, dict) and item.get("channel"):
                 result[str(item["channel"])] = bool(item.get("lockout"))
     return result
+
+
+def lcm_channel_type(channel: str) -> str:
+    if channel in LCM_RELAY_CHANNELS:
+        return "Relay"
+    if channel in LCM_ANALOG_DIMMER_CHANNELS:
+        return "0-10V"
+    if channel in LCM_HV_DIMMER_CHANNELS:
+        return "110V"
+    raise ValueError(f"invalid LCM channel {channel}")
+
+
+def lcm_hardware_id(channel: str) -> str:
+    return channel
 
 
 def atomic_write_text(path: Path, text: str, mode: int = 0o640) -> None:
@@ -439,6 +455,85 @@ class LocalConfigStore:
         atomic_write_text(path, text)
         return {"path": str(path), "revision": stable_revision(rows), "channel_count": 32}
 
+    def load_rcm_csv(self) -> list[dict[str, Any]]:
+        path = self.path(".csv")
+        if not path.exists():
+            return default_rcm_config()
+        with path.open(newline="", encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+        if rows and list(rows[0].keys()) != ["Channel ID", "Name", "on", "Lockout"]:
+            raise ValueError("invalid RCM CSV header")
+        if len(rows) != 32:
+            raise ValueError("RCM CSV must contain exactly 32 channels")
+        channels = []
+        for expected, row in zip(RCM_RELAY_CHANNELS, rows):
+            if row.get("Channel ID") != expected:
+                raise ValueError(f"expected RCM channel {expected}")
+            channels.append({
+                "channel": expected,
+                "name": row.get("Name", ""),
+                "on": row.get("on", "").strip().lower() in {"true", "1", "yes", "on"},
+                "lockout": row.get("Lockout", "").strip().lower() in {"true", "1", "yes", "on"},
+            })
+        return channels
+
+    def save_lcm_csv(self, channels: list[dict[str, Any]]) -> dict[str, Any]:
+        expected_channels = [*LCM_RELAY_CHANNELS, *LCM_ANALOG_DIMMER_CHANNELS, *LCM_HV_DIMMER_CHANNELS]
+        if len(channels) != 22:
+            raise ValueError("LCM CSV must contain exactly 22 channels")
+        path = self.path(".csv")
+        rows = [LCM_CSV_HEADER]
+        for expected, item in zip(expected_channels, channels):
+            if item.get("channel") != expected:
+                raise ValueError(f"expected LCM channel {expected}")
+            expected_type = lcm_channel_type(expected)
+            if str(item.get("type") or expected_type) != expected_type:
+                raise ValueError(f"invalid type for LCM channel {expected}")
+            is_dimmer = expected not in LCM_RELAY_CHANNELS
+            rows.append([
+                expected,
+                str(item.get("name", "")),
+                expected_type,
+                "true" if item.get("lockout") else "false",
+                "true" if item.get("emergency_lighting") else "false",
+                "" if not is_dimmer else str(int(item.get("max_intensity", 100))),
+                "" if not is_dimmer else str(float(item.get("fade_seconds", 3.0))),
+                str(item.get("hardware_id") or lcm_hardware_id(expected)),
+            ])
+        text = "\n".join(",".join(csv_quote(cell) for cell in row) for row in rows) + "\n"
+        atomic_write_text(path, text)
+        return {"path": str(path), "revision": stable_revision(rows), "channel_count": 22}
+
+    def load_lcm_csv(self) -> list[dict[str, Any]]:
+        path = self.path(".csv")
+        if not path.exists():
+            return default_lcm_channels()
+        with path.open(newline="", encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+        if rows and list(rows[0].keys()) != LCM_CSV_HEADER:
+            raise ValueError("invalid LCM CSV header")
+        if len(rows) != 22:
+            raise ValueError("LCM CSV must contain exactly 22 channels")
+        expected_channels = [*LCM_RELAY_CHANNELS, *LCM_ANALOG_DIMMER_CHANNELS, *LCM_HV_DIMMER_CHANNELS]
+        channels = []
+        for expected, row in zip(expected_channels, rows):
+            if row.get("Channel ID") != expected:
+                raise ValueError(f"expected LCM channel {expected}")
+            if row.get("Type") != lcm_channel_type(expected):
+                raise ValueError(f"invalid type for LCM channel {expected}")
+            is_dimmer = expected not in LCM_RELAY_CHANNELS
+            channels.append({
+                "channel": expected,
+                "name": row.get("Name", ""),
+                "type": row.get("Type"),
+                "lockout": row.get("Lockout", "").strip().lower() in {"true", "1", "yes", "on"},
+                "emergency_lighting": row.get("eLight", "").strip().lower() in {"true", "1", "yes", "on"},
+                "max_intensity": int(float(row["Max Brightness"])) if is_dimmer and row.get("Max Brightness") else None,
+                "fade_seconds": float(row["Fade Seconds"]) if is_dimmer and row.get("Fade Seconds") else None,
+                "hardware_id": row.get("Hardware ID") or lcm_hardware_id(expected),
+            })
+        return channels
+
 
 def csv_quote(value: Any) -> str:
     text = str(value)
@@ -449,6 +544,23 @@ def csv_quote(value: Any) -> str:
 
 def default_rcm_config() -> list[dict[str, Any]]:
     return [{"channel": channel, "name": "", "on": False, "lockout": False} for channel in RCM_RELAY_CHANNELS]
+
+
+def default_lcm_channels() -> list[dict[str, Any]]:
+    channels: list[dict[str, Any]] = []
+    for channel in [*LCM_RELAY_CHANNELS, *LCM_ANALOG_DIMMER_CHANNELS, *LCM_HV_DIMMER_CHANNELS]:
+        is_dimmer = channel not in LCM_RELAY_CHANNELS
+        channels.append({
+            "channel": channel,
+            "name": "",
+            "type": lcm_channel_type(channel),
+            "lockout": False,
+            "emergency_lighting": False,
+            "max_intensity": 100 if is_dimmer else None,
+            "fade_seconds": 3.0 if is_dimmer else None,
+            "hardware_id": lcm_hardware_id(channel),
+        })
+    return channels
 
 
 def default_lcm_config() -> dict[str, Any]:

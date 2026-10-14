@@ -237,6 +237,30 @@ async def test_registry_ingests_module_logs_durably_and_deduplicates(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_config_by_hostname_uses_authenticated_module_session(monkeypatch):
+    conn = FakeRegistryConn()
+    conn.modules['rcm-a'] = {
+        'id': 1,
+        'device_id': '48b02d87db10',
+        'module_uuid': 'rcm-a',
+        'module_type': 'RCM',
+        'hostname': 'RCM1',
+        'ip_address': '192.168.20.31',
+    }
+    monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
+    reg = registry_mod.ModuleRegistry()
+
+    class FakeModuleConnection:
+        async def config(self, payload, timeout=10.0):
+            return {'ok': True, 'applied': payload['package']['revision']}
+
+    reg.connections['48b02d87db10'] = FakeModuleConnection()
+    result = await reg.config_by_hostname('RCM1', {'package': {'revision': 'rev-1'}})
+
+    assert result == {'ok': True, 'applied': 'rev-1'}
+
+
+@pytest.mark.asyncio
 async def test_assign_prefers_normalized_device_id(monkeypatch):
     conn = FakeRegistryConn()
     monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))

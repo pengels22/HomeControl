@@ -199,6 +199,44 @@ def test_lcm_channel_support_accepts_corrected_inventory_without_direct_hardware
     assert management._module_supports_channel('LCM', 'HV-4', capabilities) is True
 
 
+def test_rcm_config_from_channels_preserves_commanded_state_not_feedback():
+    channels = [
+        {'channel': channel, 'name': channel, 'value': None, 'maintenance_locked': False}
+        for channel in management._rcm_channel_ids()
+    ]
+    channels[0]['value'] = True
+    channels[0]['maintenance_locked'] = True
+
+    config = management.rcm_config_from_channels(channels)
+
+    assert len(config['channels']) == 32
+    assert config['channels'][0] == {'channel': 'A1', 'name': 'A1', 'on': True, 'lockout': True}
+    assert config['channels'][1]['on'] is False
+
+
+def test_lcm_config_from_channels_uses_correct_8_10_4_schema():
+    channels = []
+    for channel in management._lcm_channel_ids():
+        channels.append({
+            'channel': channel,
+            'name': channel,
+            'type_label': 'Relay' if channel.startswith('A') else '0-10V' if channel.startswith('10-') else '110V',
+            'maintenance_locked': channel == 'HV-4',
+            'emergency_lighting': channel == 'A1',
+            'max_intensity': 80,
+            'fade_seconds': 2.5,
+        })
+
+    config = management.lcm_config_from_channels(channels)
+
+    assert len(config['channels']) == 22
+    assert config['channels'][0]['channel'] == 'A1'
+    assert config['channels'][8]['channel'] == '10-1'
+    assert config['channels'][17]['channel'] == '10-10'
+    assert config['channels'][18]['channel'] == 'HV-1'
+    assert config['channels'][-1]['lockout'] is True
+
+
 def test_conflict_supervisor_status_reports_healthy_recent_ack(monkeypatch):
     monkeypatch.setattr(management.settings, 'hcm_heartbeat_device_id', '48b02d87db16')
     monkeypatch.setattr(management.settings, 'conflict_heartbeat_timeout_s', 15)

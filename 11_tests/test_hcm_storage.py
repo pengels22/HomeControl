@@ -80,6 +80,40 @@ def test_repository_status_local_only_and_dirty(tmp_path):
     assert dirty['dirty'] is True
 
 
+def test_git_sync_retries_after_remote_outage_and_survives_recreated_manager(tmp_path):
+    remote = tmp_path / 'remote.git'
+    root = tmp_path / 'hcm-storage'
+    subprocess.run(['git', 'init', '--bare', str(remote)], check=False, capture_output=True, text=True)
+    storage.ensure_storage_layout(root)
+    storage.update_git_settings(
+        {
+            'commit_name': 'Tester',
+            'commit_email': 'tester@example.test',
+            'github_enabled': True,
+        },
+        root=root,
+    )
+    subprocess.run(['git', 'remote', 'add', 'origin', str(remote)], cwd=root, check=False, capture_output=True, text=True)
+    (root / 'config' / 'system' / 'first.json').write_text('{"first": true}\n')
+
+    manager = storage.GitSyncManager(root)
+    first = manager._sync_once_blocking()
+    subprocess.run(['git', 'remote', 'set-url', 'origin', str(tmp_path / 'missing.git')], cwd=root, check=False, capture_output=True, text=True)
+    (root / 'config' / 'system' / 'second.json').write_text('{"second": true}\n')
+    failed = storage.GitSyncManager(root)._sync_once_blocking()
+    subprocess.run(['git', 'remote', 'set-url', 'origin', str(remote)], cwd=root, check=False, capture_output=True, text=True)
+    retried = storage.GitSyncManager(root)._sync_once_blocking()
+    remote_head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=remote, text=True, capture_output=True, check=False)
+
+    assert first['ok'] is True
+    assert first['pushed'] is True
+    assert failed['ok'] is False
+    assert failed['error'] == 'push_failed'
+    assert retried['ok'] is True
+    assert retried['pushed'] is True
+    assert remote_head.returncode == 0
+
+
 @pytest.mark.asyncio
 async def test_git_sync_manager_lock_prevents_overlapping_jobs(tmp_path):
     storage.ensure_storage_layout(tmp_path)
