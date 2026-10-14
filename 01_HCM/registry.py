@@ -347,7 +347,7 @@ class ModuleRegistry:
         except InvalidDeviceId:
             return None
 
-    async def _base_config(self, module_type: str, logical_id: str | None = None) -> dict[str, Any]:
+    async def _base_config(self, module_type: str, logical_id: str | None = None, device_id: str | None = None) -> dict[str, Any]:
         path = Path(settings.config_root) / {
             'RCM':'04_RCM','LCM':'03_LCM','SIM':'02_SIM','PNL':'05_PNL'
         }[module_type] / f'{module_type.lower()}.yaml'
@@ -373,6 +373,12 @@ class ModuleRegistry:
             'timeout_seconds': int(settings.conflict_heartbeat_timeout_s),
             'protocol': settings.conflict_heartbeat_protocol,
         }
+        if device_id:
+            try:
+                from .auth import build_user_snapshot
+                result['user_snapshot'] = await build_user_snapshot(device_id)
+            except Exception:
+                log.warning('could not build user snapshot for %s', device_id, exc_info=True)
         return result
 
     def _capability_rows(self, ident: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
@@ -507,7 +513,7 @@ class ModuleRegistry:
                 await conn.send('assignment', assignment)
             else:
                 try:
-                    config_payload = await self._base_config(ident['module_type'], assignment['hostname'])
+                    config_payload = await self._base_config(ident['module_type'], assignment['hostname'], conn.device_id)
                 except TypeError:
                     config_payload = await self._base_config(ident['module_type'])
                 await conn.send('config', config_payload)

@@ -372,11 +372,16 @@ $('login-form').addEventListener('submit',login);$('refresh').addEventListener('
                 raise HTTPException(401, 'invalid HCM token')
             return response.json()
 
-        async def require_local_admin(homecontrol_local_session: str | None = Cookie(default=None)) -> dict[str, Any]:
+        async def require_local_user(homecontrol_local_session: str | None = Cookie(default=None)) -> dict[str, Any]:
             session = self.local_auth.session(homecontrol_local_session)
             if not session:
-                raise HTTPException(401, 'local administrator login required')
+                raise HTTPException(401, 'local login required')
             return session
+
+        async def require_local_admin(user=Depends(require_local_user)) -> dict[str, Any]:
+            if user.get('role') != 'ADMIN':
+                raise HTTPException(403, 'administrator role required')
+            return user
 
         @app.get('/', response_class=HTMLResponse)
         async def index():
@@ -467,7 +472,7 @@ $('login-form').addEventListener('submit',login);$('refresh').addEventListener('
             }
 
         @app.get('/config')
-        async def offline_config(user=Depends(require_local_admin)):
+        async def offline_config(user=Depends(require_local_user)):
             persisted = self.config_store.load_json()
             if self.module_type == 'LCM':
                 persisted = {**persisted, 'channels': self.config_store.load_lcm_csv()}
@@ -511,6 +516,9 @@ $('login-form').addEventListener('submit',login);$('refresh').addEventListener('
         await server.serve()
 
     async def apply_config(self, payload: dict[str, Any]) -> dict[str, Any]:
+        snapshot = payload.get('user_snapshot')
+        if isinstance(snapshot, dict):
+            self.local_auth.provision_snapshot(snapshot, device_id=str(self.identity.get('device_id') or ''))
         package = payload.get('package') if isinstance(payload.get('package'), dict) else payload if 'checksum' in payload else None
         if package:
             verify_config_package(package, module_type=self.module_type, logical_id=self.identity.get('hostname'))

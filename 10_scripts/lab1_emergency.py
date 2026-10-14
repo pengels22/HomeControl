@@ -19,7 +19,6 @@ STORE = infra.LocalConfigStore(RUNTIME_ROOT, 'LCM', 'lab1')
 AUTH = infra.LocalAuthStore(RUNTIME_ROOT / 'config' / 'LCM' / 'lab1.auth.json')
 LOGGER = infra.StructuredEventLogger('lab1', RUNTIME_ROOT / 'logs' / 'lab1')
 QUEUE = infra.OfflineEventQueue(RUNTIME_ROOT / 'logs' / 'lab1' / 'pending-events.json')
-SESSIONS: dict[str, dict] = {}
 
 HTML = """<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>LAB1 emergency configuration</title>
 <style>body{margin:auto;max-width:1180px;padding:20px;background:#101214;color:#f4f2ec;font:15px system-ui}section{background:#181c1f;border:1px solid #30383b;border-radius:8px;padding:14px;margin:12px 0}.cols{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.channel{border-bottom:1px solid #30383b;padding:10px 0}.meta{color:#9da7a3;font-size:12px}input,button{font:inherit;padding:9px;border-radius:6px}input{background:#121517;color:#fff;border:1px solid #566168}button{background:#347d68;color:white;border:0;cursor:pointer;min-height:42px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.box{background:#121517;padding:8px;border-radius:6px}.muted{color:#9da7a3}.error{color:#ffb7ad}@media(max-width:850px){.cols{grid-template-columns:repeat(2,1fr)}}@media(max-width:560px){.cols,.grid{grid-template-columns:1fr}}</style>
@@ -49,9 +48,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         length=int(self.headers.get('Content-Length','0')); return json.loads(self.rfile.read(length) or b'{}')
     def token(self): return parse_qs(self.headers.get('Cookie','').replace('; ','&')).get('homecontrol_local_session',[None])[0]
     def user(self):
-        token=self.token(); user=SESSIONS.get(token)
-        if user and user['expires_at'] <= time.time(): SESSIONS.pop(token,None); return None
-        return user
+        return AUTH.session(self.token())
     def do_GET(self):
         path=urlparse(self.path).path
         if path=='/':
@@ -67,13 +64,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path=='/login':
             body=self.body(); user=AUTH.authenticate(str(body.get('username','')),str(body.get('password','')))
             if not user: self.send_json({'detail':'invalid local credentials'},401); return
-            token=secrets.token_urlsafe(32); csrf=secrets.token_urlsafe(32); SESSIONS[token]={**user,'token':token,'csrf':csrf,'expires_at':time.time()+1800}; raw=json.dumps({'ok':True,'csrf':csrf}).encode(); self.send_response(200); self.send_header('Set-Cookie',f'homecontrol_local_session={token}; HttpOnly; SameSite=Strict; Path=/'); self.send_header('Content-Type','application/json'); self.send_header('Content-Length',str(len(raw))); self.end_headers(); self.wfile.write(raw); return
-        if path=='/logout': self.send_response(204); self.end_headers(); return
+            token=user['token']; raw=json.dumps({'ok':True,'csrf':user['csrf'],'username':user['username'],'role':user['role']}).encode(); self.send_response(200); self.send_header('Set-Cookie',f'homecontrol_local_session={token}; HttpOnly; SameSite=Strict; Path=/'); self.send_header('Content-Type','application/json'); self.send_header('Content-Length',str(len(raw))); self.end_headers(); self.wfile.write(raw); return
+        if path=='/logout':
+            token=self.token()
+            if token: AUTH.sessions.pop(token, None)
+            self.send_response(204); self.send_header('Set-Cookie','homecontrol_local_session=; Max-Age=0; HttpOnly; SameSite=Strict; Path=/'); self.end_headers(); return
         self.send_json({'detail':'not found'},404)
     def do_PATCH(self):
         if urlparse(self.path).path!='/config': self.send_json({'detail':'not found'},404); return
         user=self.user(); body=self.body()
-        if not user: self.send_json({'detail':'local administrator login required'},401); return
+        if not user: self.send_json({'detail':'local login required'},401); return
+        if user.get('role') != 'ADMIN': self.send_json({'detail':'administrator role required'},403); return
         if not AUTH.require_csrf(self.token(),self.headers.get('X-CSRF-Token')): self.send_json({'detail':'csrf validation failed'},403); return
         channels=body.get('channels')
         if not isinstance(channels,list): self.send_json({'detail':'channels must be a list'},400); return

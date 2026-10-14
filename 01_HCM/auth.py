@@ -5,6 +5,7 @@ import json
 import re
 import secrets
 import time
+import asyncio
 from typing import Any
 from fastapi import Header, HTTPException
 from importlib import import_module
@@ -14,6 +15,7 @@ from .settings import settings
 # First pass local auth. Replace challenge verification with platform passkey/WebAuthn once RP ID is finalized.
 _sessions: dict[str, tuple[str,str,float]] = {}
 global_config = import_module('07_servises.common.global_config')
+module_infra = import_module('07_servises.common.module_infra')
 PASSWORD_ITERATIONS = int(global_config.load_global_config('HCM').Auth_Password_PBKDF2_Iterations)
 SUPPORTED_ROLES = {"ADMIN", "READONLY"}
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,64}$")
@@ -95,6 +97,51 @@ async def list_users() -> list[dict[str, Any]]:
         for row in rows
     ]
 
+
+async def build_user_snapshot(device_id: str) -> dict[str, Any]:
+    """Build the only user material permitted to cross an authenticated module link."""
+    async with db.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT username, role, password_hash, enabled
+            FROM users
+            ORDER BY username
+            """
+        )
+    users = [{
+        "username": str(row["username"]),
+        "role": str(row["role"]).upper(),
+        "enabled": bool(row["enabled"]),
+        "verifier": str(row["password_hash"] or ""),
+    } for row in rows]
+    if any(not item["verifier"] for item in users):
+        raise RuntimeError("user directory contains an account without a password verifier")
+    target = str(device_id).lower()
+    body = {"target_device_id": target, "issued_at": time.time_ns(), "users": users}
+    revision = module_infra.stable_revision(body)
+    signed_body = {**body, "revision": revision}
+    return {**signed_body, "checksum": module_infra.stable_revision(signed_body)}
+
+
+async def _sync_user_directory() -> list[dict[str, Any]]:
+    """Push a snapshot over each existing authenticated module control session."""
+    async with db.acquire() as conn:
+        modules = await conn.fetch("SELECT hostname, device_id FROM modules WHERE device_id IS NOT NULL")
+    snapshot_tasks = []
+    for row in modules:
+        snapshot_tasks.append(_sync_user_directory_module(str(row["hostname"]), str(row["device_id"])))
+    return await asyncio.gather(*snapshot_tasks) if snapshot_tasks else []
+
+
+async def _sync_user_directory_module(hostname: str, device_id: str) -> dict[str, Any]:
+    try:
+        snapshot = await build_user_snapshot(device_id)
+        from .registry import registry
+        ack = await registry.config_by_hostname(hostname, {"user_snapshot": snapshot}, timeout=5.0)
+        return {"hostname": hostname, "device_id": device_id, "status": "synchronized" if ack.get("ok") else "rejected"}
+    except Exception as exc:
+        return {"hostname": hostname, "device_id": device_id, "status": "pending", "reason": str(exc)}
+
 async def create_user(username: str, password: str, role: str) -> dict[str, Any]:
     username = _validate_username(username)
     role = _validate_role(role)
@@ -112,13 +159,21 @@ async def create_user(username: str, password: str, role: str) -> dict[str, Any]
             role,
             hash_password(password),
         )
-    return {
+    result = {
         "ok": True,
         "username": username,
         "role": role,
         "enabled": True,
         "created_at": None,
     }
+    return result
+
+
+async def _safe_sync_user_directory() -> list[dict[str, Any]]:
+    try:
+        return await _sync_user_directory()
+    except Exception as exc:
+        return [{"status": "pending", "reason": str(exc)}]
 
 async def update_user_role(username: str, role: str) -> dict[str, Any]:
     username = _validate_username(username)
@@ -130,6 +185,7 @@ async def update_user_role(username: str, role: str) -> dict[str, Any]:
         else:
             async with tx_factory():
                 row = await _update_user_role_locked(conn, username, role)
+    row["synchronization"] = await _safe_sync_user_directory()
     return row
 
 async def _update_user_role_locked(conn, username: str, role: str) -> dict[str, Any]:
@@ -151,7 +207,7 @@ async def _update_user_role_locked(conn, username: str, role: str) -> dict[str, 
         role,
     )
     await conn.execute("UPDATE user_sessions SET revoked_at=now() WHERE username=$1 AND revoked_at IS NULL", username)
-    return {
+    result = {
         "ok": True,
         "username": row["username"],
         "role": row["role"],
@@ -159,6 +215,8 @@ async def _update_user_role_locked(conn, username: str, role: str) -> dict[str, 
         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
         "sessions_revoked": True,
     }
+    result["synchronization"] = await _safe_sync_user_directory()
+    return result
 
 async def reset_user_password(username: str, password: str) -> dict[str, Any]:
     username = _validate_username(username)
@@ -177,7 +235,7 @@ async def reset_user_password(username: str, password: str) -> dict[str, Any]:
         if not row:
             raise HTTPException(404, "user not found")
         await conn.execute("UPDATE user_sessions SET revoked_at=now() WHERE username=$1 AND revoked_at IS NULL", username)
-    return {
+    result = {
         "ok": True,
         "username": row["username"],
         "role": row["role"],
@@ -185,6 +243,8 @@ async def reset_user_password(username: str, password: str) -> dict[str, Any]:
         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
         "sessions_revoked": True,
     }
+    result["synchronization"] = await _safe_sync_user_directory()
+    return result
 
 async def change_own_password(username: str, current_password: str, new_password: str) -> dict[str, Any]:
     username = _validate_username(username)
@@ -195,7 +255,7 @@ async def change_own_password(username: str, current_password: str, new_password
             raise HTTPException(401, "invalid current password")
         await conn.execute("UPDATE users SET password_hash=$2 WHERE username=$1", username, hash_password(new_password))
         await conn.execute("UPDATE user_sessions SET revoked_at=now() WHERE username=$1 AND revoked_at IS NULL", username)
-    return {"ok": True, "username": username, "sessions_revoked": True}
+    return {"ok": True, "username": username, "sessions_revoked": True, "synchronization": await _safe_sync_user_directory()}
 
 async def login_password(username: str, password: str) -> str:
     async with db.acquire() as conn:

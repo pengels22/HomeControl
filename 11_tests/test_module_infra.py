@@ -106,6 +106,40 @@ def test_offline_event_queue_is_idempotent(tmp_path):
     assert queue.count() == 0
 
 
+def test_user_snapshot_is_identity_bound_atomic_and_supports_offline_roles(tmp_path):
+    store = infra.LocalAuthStore(tmp_path / 'auth.json')
+    recovery = infra.LocalAuthStore.hash_password('recovery password')
+    store.provision_hashes([{**recovery, 'username': 'recovery', 'role': 'ADMIN'}])
+    verifier = 'pbkdf2_sha256$310000$' + 'ab' * 16 + '$' + 'cd' * 32
+    body = {
+        'target_device_id': '2ccf675d3414',
+        'issued_at': 10,
+        'users': [{'username': 'readonly', 'role': 'READONLY', 'enabled': True, 'verifier': verifier}],
+    }
+    snapshot = {**body, 'revision': infra.stable_revision(body)}
+    snapshot['checksum'] = infra.stable_revision(snapshot)
+
+    store.provision_snapshot(snapshot, device_id='2ccf675d3414')
+
+    assert store.authenticate('recovery', 'recovery password') is not None
+    assert store.authenticate('readonly', 'anything') is None
+    assert store._read_snapshot()['target_device_id'] == '2ccf675d3414'
+    with pytest.raises(ValueError, match='stale'):
+        store.provision_snapshot({**snapshot, 'issued_at': 9, 'revision': 'older', 'checksum': infra.stable_revision({**body, 'issued_at': 9, 'revision': 'older'})}, device_id='2ccf675d3414')
+
+
+def test_user_snapshot_rejects_wrong_identity_and_tampering(tmp_path):
+    store = infra.LocalAuthStore(tmp_path / 'auth.json')
+    body = {'target_device_id': '2ccf675d3414', 'issued_at': 1, 'users': []}
+    snapshot = {**body, 'revision': infra.stable_revision(body)}
+    snapshot['checksum'] = infra.stable_revision(snapshot)
+
+    with pytest.raises(ValueError, match='identity'):
+        store.provision_snapshot(snapshot, device_id='001122334455')
+    with pytest.raises(ValueError, match='integrity'):
+        store.provision_snapshot({**snapshot, 'users': [{'username': 'tampered'}]}, device_id='2ccf675d3414')
+
+
 def test_bank_selection_requires_exactly_one_mcp2_bit():
     assert infra.selected_bank_from_mcp2(0b0001) == 1
     assert infra.selected_bank_from_mcp2(0b1000) == 4

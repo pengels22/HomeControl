@@ -349,17 +349,67 @@ class LocalAuthStore:
             })
         atomic_write_text(self.path, json.dumps({"users": safe_users, "updated_at": utc_ts()}, indent=2, sort_keys=True), mode=0o600)
 
+    def provision_snapshot(self, snapshot: dict[str, Any], *, device_id: str) -> None:
+        """Atomically install an HCM-authenticated, identity-bound user snapshot."""
+        target = str(snapshot.get("target_device_id") or "").lower()
+        if target != str(device_id).lower():
+            raise ValueError("user snapshot device identity mismatch")
+        users = snapshot.get("users")
+        revision = snapshot.get("revision")
+        checksum = snapshot.get("checksum")
+        body = {"target_device_id": target, "revision": revision, "issued_at": snapshot.get("issued_at"), "users": users}
+        if not isinstance(revision, str) or not isinstance(users, list) or checksum != stable_revision(body):
+            raise ValueError("user snapshot integrity validation failed")
+        current = self._read_snapshot()
+        current_revision = current.get("revision")
+        if current_revision and current_revision == revision:
+            return
+        try:
+            issued_at = int(snapshot.get("issued_at"))
+        except (TypeError, ValueError):
+            raise ValueError("invalid user snapshot issue time") from None
+        if current.get("issued_at") is not None and issued_at < int(current["issued_at"]):
+            raise ValueError("stale user snapshot revision")
+        recovery_users = current.get("recovery_users") if isinstance(current.get("recovery_users"), list) else current.get("users", [])
+        safe_users = []
+        for user in users:
+            if not isinstance(user, dict) or not all(user.get(key) for key in ("username", "verifier")):
+                raise ValueError("malformed user snapshot")
+            role = str(user.get("role", "")).upper()
+            if role not in {"ADMIN", "READONLY"}:
+                raise ValueError("unsupported user role")
+            try:
+                scheme, iterations, salt, digest = str(user["verifier"]).split("$", 3)
+                if scheme != "pbkdf2_sha256" or int(iterations) < 100000:
+                    raise ValueError
+                bytes.fromhex(salt)
+                bytes.fromhex(digest)
+            except (TypeError, ValueError):
+                raise ValueError("unsupported password verifier format") from None
+            safe_users.append({
+                "username": str(user["username"]),
+                "role": role,
+                "enabled": bool(user.get("enabled", True)),
+                "verifier": str(user["verifier"]),
+            })
+        atomic_write_text(self.path, json.dumps({**body, "users": safe_users, "recovery_users": recovery_users, "updated_at": utc_ts()}, indent=2, sort_keys=True), mode=0o600)
+
     def has_users(self) -> bool:
         return bool(self._users())
 
-    def _users(self) -> dict[str, dict[str, Any]]:
+    def _read_snapshot(self) -> dict[str, Any]:
         if not self.path.exists():
             return {}
         try:
             data = json.loads(self.path.read_text())
-        except json.JSONDecodeError:
+        except (OSError, json.JSONDecodeError):
             return {}
-        return {item["username"]: item for item in data.get("users", []) if isinstance(item, dict) and item.get("username")}
+        return data if isinstance(data, dict) else {}
+
+    def _users(self) -> dict[str, dict[str, Any]]:
+        data = self._read_snapshot()
+        users = list(data.get("recovery_users", [])) + list(data.get("users", []))
+        return {item["username"]: item for item in users if isinstance(item, dict) and item.get("username")}
 
     @staticmethod
     def hash_password(password: str, salt_hex: str | None = None, iterations: int = 310000) -> dict[str, Any]:
@@ -376,9 +426,24 @@ class LocalAuthStore:
         if not user:
             self._record_failure(username, now)
             return None
-        expected = bytes.fromhex(user["password_hash"])
-        digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(user["salt"]), int(user.get("iterations", 310000)))
-        if not hmac.compare_digest(expected, digest):
+        if user.get("enabled", True) is not True:
+            self._record_failure(username, now)
+            return None
+        verifier = user.get("verifier")
+        if verifier:
+            try:
+                scheme, iterations_raw, salt, expected = str(verifier).split("$", 3)
+                if scheme != "pbkdf2_sha256":
+                    raise ValueError
+                digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("ascii"), int(iterations_raw))
+                valid = hmac.compare_digest(digest.hex(), expected)
+            except (TypeError, ValueError):
+                valid = False
+        else:
+            expected = bytes.fromhex(user["password_hash"])
+            digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(user["salt"]), int(user.get("iterations", 310000)))
+            valid = hmac.compare_digest(expected, digest)
+        if not valid:
             self._record_failure(username, now)
             return None
         self.failures.pop(username, None)
