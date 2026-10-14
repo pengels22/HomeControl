@@ -362,8 +362,6 @@ class LocalAuthStore:
             raise ValueError("user snapshot integrity validation failed")
         current = self._read_snapshot()
         current_revision = current.get("revision")
-        if current_revision and current_revision == revision:
-            return
         try:
             issued_at = int(snapshot.get("issued_at"))
         except (TypeError, ValueError):
@@ -371,6 +369,15 @@ class LocalAuthStore:
         if current.get("issued_at") is not None and issued_at < int(current["issued_at"]):
             raise ValueError("stale user snapshot revision")
         recovery_users = current.get("recovery_users") if isinstance(current.get("recovery_users"), list) else current.get("users", [])
+        central_names = {str(item.get("username")) for item in users if isinstance(item, dict)}
+        normalized_recovery = []
+        for item in recovery_users:
+            if not isinstance(item, dict):
+                continue
+            item = dict(item)
+            if item.get("username") in central_names:
+                item["username"] = f"recovery:{item['username']}"
+            normalized_recovery.append(item)
         safe_users = []
         for user in users:
             if not isinstance(user, dict) or not all(user.get(key) for key in ("username", "verifier")):
@@ -392,7 +399,7 @@ class LocalAuthStore:
                 "enabled": bool(user.get("enabled", True)),
                 "verifier": str(user["verifier"]),
             })
-        atomic_write_text(self.path, json.dumps({**body, "users": safe_users, "recovery_users": recovery_users, "updated_at": utc_ts()}, indent=2, sort_keys=True), mode=0o600)
+        atomic_write_text(self.path, json.dumps({**body, "users": safe_users, "recovery_users": normalized_recovery, "updated_at": utc_ts()}, indent=2, sort_keys=True), mode=0o600)
 
     def has_users(self) -> bool:
         return bool(self._users())
