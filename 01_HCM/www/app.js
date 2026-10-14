@@ -350,15 +350,15 @@ function lockoutGroup([module, items]) {
 }
 
 function lockoutItem(item) {
-  const detail = [
-    `Channel ${item.channel || "Unknown"}`,
-    item.locked ? "Locked" : "Not locked",
-    item.reason || null,
-    item.locked_at || null,
-  ].filter(Boolean).join(" / ");
   return `<a class="detail-item" href="/devices/${encodeURIComponent(item.module)}">
     <strong>${esc(item.channel_name || item.logical_name || item.channel || "Unnamed channel")}</strong>
-    <span>${esc(item.module || "Unknown module")} / ${esc(detail)}</span>
+    <div class="detail-fields">
+      ${detailField("Module", item.module || "Unknown module")}
+      ${detailField("Channel", item.channel || "Unknown")}
+      ${detailField("Status", item.locked ? "Locked" : "Not locked")}
+      ${item.reason ? detailField("Reason", item.reason) : ""}
+      ${item.locked_at ? detailField("Locked at", item.locked_at) : ""}
+    </div>
   </a>`;
 }
 
@@ -391,16 +391,21 @@ function faultGroup([module, items]) {
 
 function faultItem(item) {
   const title = item.description || item.code || "Fault";
-  const detail = [
-    item.severity || "unknown",
-    item.component || null,
-    item.code || null,
-    item.reported_at || null,
-    item.active === false ? "cleared" : "active",
-  ].filter(Boolean).join(" / ");
   const module = item.module ? `/devices/${encodeURIComponent(item.module)}` : null;
-  const body = `<strong>${esc(title)}</strong><span>${esc(detail)}</span>`;
+  const body = `<strong>${esc(title)}</strong>
+    <div class="detail-fields">
+      ${detailField("Severity", item.severity || "unknown")}
+      ${item.module ? detailField("Module", item.module) : ""}
+      ${item.component ? detailField("Component", item.component) : ""}
+      ${item.code ? detailField("Code", item.code) : ""}
+      ${item.reported_at ? detailField("Reported", item.reported_at) : ""}
+      ${detailField("State", item.active === false ? "Cleared" : "Active")}
+    </div>`;
   return module ? `<a class="detail-item ${esc(item.severity || "unknown")}" href="${module}">${body}</a>` : `<article class="detail-item ${esc(item.severity || "unknown")}">${body}</article>`;
+}
+
+function detailField(label, value) {
+  return `<span class="detail-field"><span>${esc(label)}</span><strong>${esc(value ?? "Unknown")}</strong></span>`;
 }
 
 function modalUnavailable(title, message) {

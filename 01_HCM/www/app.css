@@ -908,6 +908,69 @@ th {
   box-shadow: 0 20px 60px rgba(0,0,0,0.45);
 }
 
+.detail-modal {
+  width: min(680px, 100%);
+}
+
+.detail-groups,
+.detail-list {
+  display: grid;
+  gap: 8px;
+}
+
+.detail-group {
+  display: grid;
+  gap: 6px;
+}
+
+.detail-group h4 {
+  color: #c7d0d5;
+  font-size: 0.88rem;
+}
+
+.detail-item {
+  display: grid;
+  gap: 7px;
+  padding: 10px 0;
+  border-top: 1px solid #2b343b;
+  color: inherit;
+  text-decoration: none;
+}
+
+.detail-item:first-child {
+  border-top: 0;
+}
+
+.detail-item:hover,
+.detail-item:focus-visible {
+  outline: 2px solid rgba(40,169,130,0.28);
+  outline-offset: 2px;
+}
+
+.detail-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 10px;
+}
+
+.detail-field {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.detail-field span {
+  color: #98a5ad;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.detail-field strong {
+  overflow-wrap: anywhere;
+  color: #d6e2e7;
+  font-size: 0.82rem;
+}
+
 .modal-head,
 .modal-actions {
   display: flex;
@@ -1084,7 +1147,8 @@ th {
 
   .rmc-readings,
   .diagnostic-grid,
-  .sim-diagnostics {
+  .sim-diagnostics,
+  .detail-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1141,7 +1205,8 @@ th {
 
   .rmc-readings,
   .diagnostic-grid,
-  .sim-diagnostics {
+  .sim-diagnostics,
+  .detail-fields {
     grid-template-columns: 1fr;
   }
 }

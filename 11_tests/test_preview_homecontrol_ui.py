@@ -82,6 +82,7 @@ def test_role_based_device_interface_selection_uses_fixture_role(client):
 
 def test_dashboard_frontend_uses_health_overview_and_effective_roles(client):
     js = client.get("/static/app.js").text
+    css = client.get("/static/app.css").text
 
     assert "Attention Required" in js
     assert "moduleEffectiveRole" in js
@@ -90,6 +91,32 @@ def test_dashboard_frontend_uses_health_overview_and_effective_roles(client):
     assert "deviceTable(modules)" not in js[js.index("async function renderDashboard"):js.index("function settledValue")]
     assert "Conflict Supervisor" in js
     assert "Fire / Life Safety" in js
+    assert "data-open-lockouts" in js
+    assert "data-open-faults" in js
+    assert "detailField(\"Channel\"" in js
+    assert "detailField(\"Severity\"" in js
+    assert ".detail-fields" in css
+    assert ".detail-item" in css
+
+
+def test_dashboard_detail_popups_render_individual_field_rows(client):
+    js = client.get("/static/app.js").text
+    lockout_item = js[js.index("function lockoutItem"):js.index("async function openFaultsDialog")]
+    fault_item = js[js.index("function faultItem"):js.index("function detailField")]
+    status = client.get("/api/v1/dashboard/status", headers=headers()).json()
+
+    assert ".join(\" / \")" not in lockout_item
+    assert ".join(\" / \")" not in fault_item
+    assert ".join(\",\")" not in lockout_item
+    assert ".join(\",\")" not in fault_item
+    assert "detail-fields" in lockout_item
+    assert "detail-fields" in fault_item
+    assert len(status["maintenance_lockouts"]["items"]) == status["maintenance_lockouts"]["count"]
+    assert len(status["active_faults"]["items"]) == status["active_faults"]["count"]
+    lcm_lockouts = [item for item in status["maintenance_lockouts"]["items"] if item["module"] == "LCM1"]
+    sim_faults = [item for item in status["active_faults"]["items"] if item["module"] == "SIM1"]
+    assert len(lcm_lockouts) >= 2
+    assert sim_faults
 
 
 def test_preview_health_and_logical_devices_support_dashboard_metrics(client):
