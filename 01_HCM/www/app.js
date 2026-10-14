@@ -108,22 +108,18 @@ async function renderDashboard() {
     api("/health"),
     api("/hvac"),
     loadRegistry(),
-    api("/logical-devices"),
+    api("/dashboard/status"),
   ]);
   const health = settledValue(healthResult, {});
   const hvac = settledValue(hvacResult, null);
   const modules = settledValue(modulesResult, []);
-  const logicalDevices = settledValue(logicalResult, null)?.logical_devices || null;
+  const dashboardStatus = settledValue(logicalResult, null);
   const onlineCount = modules.filter(online).length;
   const offlineModules = modules.filter((module) => !online(module));
-  const maintenanceCount = Array.isArray(logicalDevices)
-    ? logicalDevices.filter((device) => device.maintenance_locked).length
-    : unavailableValue();
-  const activeFaultCount = firstKnownNumber(
-    health.active_fault_count,
-    health.fault_count,
-    health.faults?.active_count,
-  );
+  const lockoutItems = Array.isArray(dashboardStatus?.maintenance_lockouts?.items) ? dashboardStatus.maintenance_lockouts.items : null;
+  const faultItems = Array.isArray(dashboardStatus?.active_faults?.items) ? dashboardStatus.active_faults.items : null;
+  const maintenanceCount = lockoutItems ? Number(dashboardStatus.maintenance_lockouts.count ?? lockoutItems.length) : unavailableValue();
+  const activeFaultCount = faultItems ? Number(dashboardStatus.active_faults.count ?? faultItems.length) : unavailableValue();
   const conflictStatus = health.heartbeat_supervisor?.status || health.conflict_heartbeat?.status || null;
   const fireStatus = health.fire_life_safety?.status || health.life_safety?.status || null;
   const conflictReported = statusKnown(conflictStatus);
@@ -160,16 +156,16 @@ async function renderDashboard() {
         <strong>${esc(fireStatus || "Unavailable")}</strong>
         <p>${fireReported ? "Reported by HCM health data" : "No safety status API value reported"}</p>
       </article>
-      <article class="summary dashboard-card">
+      <button class="summary dashboard-card" type="button" data-open-lockouts>
         <span>Maintenance Lockouts</span>
         <strong>${displayMetric(maintenanceCount)}</strong>
-        <p>${Array.isArray(logicalDevices) ? "active logical-device lockouts" : "Logical-device API unavailable"}</p>
-      </article>
-      <article class="summary dashboard-card">
+        <p>${lockoutItems ? "active bound channel lockouts" : "Dashboard status API unavailable"}</p>
+      </button>
+      <button class="summary dashboard-card" type="button" data-open-faults>
         <span>Active Faults</span>
         <strong>${displayMetric(activeFaultCount)}</strong>
-        <p>${Number.isFinite(activeFaultCount) ? "reported by HCM" : "No fault count API value reported"}</p>
-      </article>
+        <p>${faultItems ? "current active fault aggregation" : "Dashboard status API unavailable"}</p>
+      </button>
       ${hvacSummaryCard(hvac, hvacResult.status === "fulfilled")}
     </section>
     <section class="dashboard-row">
@@ -301,6 +297,121 @@ function hvacBandText(target) {
   if (!Number.isFinite(target)) return "Automatic range unavailable";
   const band = hvacBand(target);
   return `Heat at ${formatTemp(band.heat)} / Cool at ${formatTemp(band.cool)}`;
+}
+
+async function dashboardStatus() {
+  return await api("/dashboard/status");
+}
+
+function groupBy(items, keyFn) {
+  const groups = new Map();
+  items.forEach((item) => {
+    const key = keyFn(item) || "Unknown";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  });
+  return [...groups.entries()];
+}
+
+function openLoadingDialog(title, message = "Loading current HCM status...") {
+  modal(`<section class="modal detail-modal" role="dialog" aria-modal="true" aria-labelledby="detail-title">
+    <div class="modal-head">
+      <h3 id="detail-title">${esc(title)}</h3>
+      <button type="button" class="secondary icon-button" data-close-dialog aria-label="Close">x</button>
+    </div>
+    <div class="loading">${esc(message)}</div>
+  </section>`);
+}
+
+async function openLockoutsDialog() {
+  openLoadingDialog("Maintenance Lockouts");
+  try {
+    const status = await dashboardStatus();
+    const items = status.maintenance_lockouts?.items;
+    if (!Array.isArray(items)) throw new Error("Maintenance lockout data is unavailable");
+    modal(`<section class="modal detail-modal" role="dialog" aria-modal="true" aria-labelledby="lockouts-title">
+      <div class="modal-head">
+        <h3 id="lockouts-title">Maintenance Lockouts</h3>
+        <button type="button" class="secondary icon-button" data-close-dialog aria-label="Close">x</button>
+      </div>
+      <p class="muted">${items.length} locked bound channel${items.length === 1 ? "" : "s"}</p>
+      ${items.length ? `<div class="detail-groups">${groupBy(items, (item) => item.module).map(lockoutGroup).join("")}</div>` : `<div class="empty">No current maintenance lockouts reported by HCM.</div>`}
+    </section>`);
+  } catch (error) {
+    modalUnavailable("Maintenance Lockouts", error.message);
+  }
+}
+
+function lockoutGroup([module, items]) {
+  return `<section class="detail-group">
+    <h4>${esc(module)}</h4>
+    <div class="detail-list">${items.map(lockoutItem).join("")}</div>
+  </section>`;
+}
+
+function lockoutItem(item) {
+  const detail = [
+    `Channel ${item.channel || "Unknown"}`,
+    item.locked ? "Locked" : "Not locked",
+    item.reason || null,
+    item.locked_at || null,
+  ].filter(Boolean).join(" / ");
+  return `<a class="detail-item" href="/devices/${encodeURIComponent(item.module)}">
+    <strong>${esc(item.channel_name || item.logical_name || item.channel || "Unnamed channel")}</strong>
+    <span>${esc(item.module || "Unknown module")} / ${esc(detail)}</span>
+  </a>`;
+}
+
+async function openFaultsDialog() {
+  openLoadingDialog("Active Faults");
+  try {
+    const status = await dashboardStatus();
+    const items = status.active_faults?.items;
+    if (!Array.isArray(items)) throw new Error("Active fault data is unavailable");
+    modal(`<section class="modal detail-modal" role="dialog" aria-modal="true" aria-labelledby="faults-title">
+      <div class="modal-head">
+        <h3 id="faults-title">Active Faults</h3>
+        <button type="button" class="secondary icon-button" data-close-dialog aria-label="Close">x</button>
+      </div>
+      <p class="muted">${items.length} current active fault${items.length === 1 ? "" : "s"}</p>
+      ${items.length ? `<div class="detail-groups">${groupBy(items, (item) => item.module || item.component || item.source).map(faultGroup).join("")}</div>` : `<div class="empty">No current active faults reported by HCM.</div>`}
+      ${status.active_faults?.unsupported_sources?.length ? `<div class="notice">${status.active_faults.unsupported_sources.map(esc).join("<br>")}</div>` : ""}
+    </section>`);
+  } catch (error) {
+    modalUnavailable("Active Faults", error.message);
+  }
+}
+
+function faultGroup([module, items]) {
+  return `<section class="detail-group">
+    <h4>${esc(module)}</h4>
+    <div class="detail-list">${items.map(faultItem).join("")}</div>
+  </section>`;
+}
+
+function faultItem(item) {
+  const title = item.description || item.code || "Fault";
+  const detail = [
+    item.severity || "unknown",
+    item.component || null,
+    item.code || null,
+    item.reported_at || null,
+    item.active === false ? "cleared" : "active",
+  ].filter(Boolean).join(" / ");
+  const module = item.module ? `/devices/${encodeURIComponent(item.module)}` : null;
+  const body = `<strong>${esc(title)}</strong><span>${esc(detail)}</span>`;
+  return module ? `<a class="detail-item ${esc(item.severity || "unknown")}" href="${module}">${body}</a>` : `<article class="detail-item ${esc(item.severity || "unknown")}">${body}</article>`;
+}
+
+function modalUnavailable(title, message) {
+  modal(`<section class="modal detail-modal" role="dialog" aria-modal="true" aria-labelledby="unavailable-title">
+    <div class="modal-head">
+      <h3 id="unavailable-title">${esc(title)}</h3>
+      <button type="button" class="secondary icon-button" data-close-dialog aria-label="Close">x</button>
+    </div>
+    <div class="notice warn">Unavailable: ${esc(message)}</div>
+    <div class="modal-actions"><button type="button" data-close-dialog>Close</button></div>
+  </section>`);
 }
 
 function deviceTable(modules) {
@@ -930,6 +1041,16 @@ document.addEventListener("click", async (event) => {
   const hvacOpen = event.target.closest("[data-open-hvac]");
   if (hvacOpen) {
     await openHvacDialog();
+    return;
+  }
+  const lockoutsOpen = event.target.closest("[data-open-lockouts]");
+  if (lockoutsOpen) {
+    await openLockoutsDialog();
+    return;
+  }
+  const faultsOpen = event.target.closest("[data-open-faults]");
+  if (faultsOpen) {
+    await openFaultsDialog();
     return;
   }
   const output = event.target.closest("[data-output-channel]");

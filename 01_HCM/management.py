@@ -217,6 +217,95 @@ def _binding(row) -> dict[str, Any]:
     }
 
 
+def _metadata_value(*metadata: Any, keys: tuple[str, ...]) -> Any:
+    for item in metadata:
+        clean = _wire_value(item or {})
+        if not isinstance(clean, dict):
+            continue
+        for key in keys:
+            value = clean.get(key)
+            if value not in (None, ""):
+                return value
+    return None
+
+
+def _severity_rank(value: str | None) -> int:
+    order = {
+        "critical": 0,
+        "fatal": 0,
+        "error": 1,
+        "fault": 1,
+        "warning": 2,
+        "warn": 2,
+        "offline": 2,
+        "stale": 3,
+        "info": 4,
+        "unknown": 5,
+    }
+    return order.get(str(value or "unknown").lower(), 5)
+
+
+def _health_fault_items(module: dict[str, Any]) -> list[dict[str, Any]]:
+    health = _wire_value(module.get("last_health") or {})
+    if not isinstance(health, dict):
+        return []
+    faults = health.get("faults")
+    if not isinstance(faults, list):
+        return []
+    items = []
+    for index, fault in enumerate(faults, start=1):
+        if isinstance(fault, str):
+            fault = {"code": fault}
+        if not isinstance(fault, dict):
+            continue
+        if fault.get("active") is False or fault.get("cleared") is True:
+            continue
+        code = fault.get("code") or fault.get("name") or fault.get("type") or f"health_fault_{index}"
+        items.append({
+            "source": "module_health",
+            "severity": str(fault.get("severity") or "warning"),
+            "module": module.get("hostname"),
+            "component": fault.get("component") or fault.get("type") or "module health",
+            "code": str(code),
+            "description": fault.get("description") or fault.get("detail") or fault.get("message") or str(code),
+            "reported_at": _wire_value(fault.get("reported_at") or fault.get("timestamp") or fault.get("updated_at")),
+            "active": True,
+        })
+    return items
+
+
+def _sim_rmc_fault_items(module: dict[str, Any]) -> list[dict[str, Any]]:
+    state = _nested_state(module)
+    nodes = state.get("rmc_nodes")
+    if not isinstance(nodes, dict):
+        return []
+    items = []
+    for node_key, node in nodes.items():
+        if not isinstance(node, dict):
+            continue
+        faults = node.get("faults") or node.get("sensor_faults") or []
+        active = bool(node.get("fault_active") or node.get("any_sensor_fault") or faults)
+        if not active:
+            continue
+        if isinstance(faults, str):
+            faults = [faults]
+        if not isinstance(faults, list) or not faults:
+            faults = ["rmc_fault"]
+        for fault in faults:
+            code = str(fault)
+            items.append({
+                "source": "sim_rmc_state",
+                "severity": "warning",
+                "module": module.get("hostname"),
+                "component": node.get("rmc_id") or f"RMC {node.get('address', node_key)}",
+                "code": code,
+                "description": code,
+                "reported_at": _wire_value(node.get("last_heartbeat") or node.get("last_seen")),
+                "active": True,
+            })
+    return items
+
+
 def _capability_names(rows) -> set[str]:
     return {str(row["capability"]) for row in rows}
 
@@ -1123,6 +1212,164 @@ async def list_bindings() -> list[dict[str, Any]]:
             """
         )
     return [_binding(row) for row in rows]
+
+
+async def dashboard_status() -> dict[str, Any]:
+    async with db.acquire() as conn:
+        lock_rows = await conn.fetch(
+            """
+            SELECT m.hostname AS module_hostname,
+                   m.module_type,
+                   d.logical_name,
+                   d.device_class,
+                   d.maintenance_locked,
+                   d.metadata AS logical_metadata,
+                   b.channel,
+                   b.metadata AS binding_metadata
+            FROM logical_devices d
+            JOIN device_bindings b ON b.logical_device_id=d.id
+            JOIN modules m ON m.id=b.module_id
+            WHERE d.maintenance_locked=true
+              AND b.enabled=true
+              AND b.channel IS NOT NULL
+            ORDER BY m.hostname, b.channel, d.logical_name
+            """
+        )
+        fault_rows = await conn.fetch(
+            """
+            SELECT f.id,
+                   f.device_id,
+                   f.module_uuid,
+                   f.logical_device_id,
+                   f.code,
+                   f.severity,
+                   f.details,
+                   f.active,
+                   f.created_at,
+                   m.hostname AS module_hostname,
+                   d.logical_name
+            FROM faults f
+            LEFT JOIN modules m
+              ON (f.device_id IS NOT NULL AND m.device_id=f.device_id)
+              OR (f.module_uuid IS NOT NULL AND m.module_uuid=f.module_uuid)
+            LEFT JOIN logical_devices d ON d.id=f.logical_device_id
+            WHERE f.active=true
+            ORDER BY f.severity, f.created_at DESC, f.id DESC
+            """
+        )
+        safety_rows = await conn.fetch(
+            """
+            SELECT DISTINCT ON (event_type)
+                   event_type,
+                   active,
+                   details,
+                   created_at
+            FROM safety_events
+            ORDER BY event_type, created_at DESC, id DESC
+            """
+        )
+        module_rows = await conn.fetch(
+            """
+            SELECT *
+            FROM modules
+            ORDER BY hostname
+            """
+        )
+
+    lockouts = []
+    for row in lock_rows:
+        logical_metadata = _wire_value(row["logical_metadata"] or {})
+        binding_metadata = _wire_value(row["binding_metadata"] or {})
+        lockouts.append({
+            "module": row["module_hostname"],
+            "module_type": row["module_type"],
+            "logical_name": row["logical_name"],
+            "channel_name": _metadata_value(
+                logical_metadata,
+                binding_metadata,
+                keys=("channel_name", "name", "label"),
+            ) or row["logical_name"],
+            "channel": row["channel"],
+            "locked": bool(row["maintenance_locked"]),
+            "reason": _metadata_value(
+                logical_metadata,
+                binding_metadata,
+                keys=("maintenance_lock_reason", "maintenance_locked_reason", "lockout_reason"),
+            ),
+            "locked_at": _metadata_value(
+                logical_metadata,
+                binding_metadata,
+                keys=("maintenance_locked_at", "locked_at", "lockout_at"),
+            ),
+        })
+
+    faults = []
+    for row in fault_rows:
+        details = _wire_value(row["details"] or {})
+        description = None
+        component = None
+        if isinstance(details, dict):
+            description = details.get("description") or details.get("detail") or details.get("message")
+            component = details.get("component") or details.get("subsystem")
+        faults.append({
+            "source": "faults",
+            "severity": row["severity"],
+            "module": row["module_hostname"],
+            "component": component or row["logical_name"] or row["device_id"] or row["module_uuid"] or "HCM",
+            "code": row["code"],
+            "description": description or row["code"],
+            "reported_at": _wire_value(row["created_at"]),
+            "active": bool(row["active"]),
+        })
+
+    for row in safety_rows:
+        if not row["active"]:
+            continue
+        details = _wire_value(row["details"] or {})
+        faults.append({
+            "source": "safety_events",
+            "severity": "critical" if row["event_type"] == "fire" else "warning",
+            "module": "HCM",
+            "component": "safety",
+            "code": row["event_type"],
+            "description": details.get("reason") if isinstance(details, dict) and details.get("reason") else row["event_type"],
+            "reported_at": _wire_value(row["created_at"]),
+            "active": True,
+        })
+
+    modules = [_module_summary(row) for row in module_rows]
+    for module in modules:
+        state = str(module.get("supervision_state") or "").lower()
+        if not module.get("online") or state in {"offline", "fault", "error"}:
+            faults.append({
+                "source": "module_supervision",
+                "severity": "warning",
+                "module": module.get("hostname"),
+                "component": "supervision",
+                "code": state or "offline",
+                "description": f"Module supervision state is {module.get('supervision_state') or 'unknown'}",
+                "reported_at": module.get("supervision_last_seen") or module.get("last_seen"),
+                "active": True,
+            })
+        faults.extend(_health_fault_items(module))
+        faults.extend(_sim_rmc_fault_items(module))
+
+    faults.sort(key=lambda item: str(item.get("reported_at") or ""), reverse=True)
+    faults.sort(key=lambda item: _severity_rank(item.get("severity")))
+    return {
+        "maintenance_lockouts": {
+            "count": len(lockouts),
+            "items": lockouts,
+        },
+        "active_faults": {
+            "count": len(faults),
+            "items": faults,
+            "unsupported_sources": [
+                "Conflict heartbeat supervisor state is unavailable unless reported through HCM health/module state.",
+                "Historical output-arbitration log entries are not treated as current active faults.",
+            ],
+        },
+    }
 
 
 async def resolve_module_id(conn, identifier: str | int) -> int:

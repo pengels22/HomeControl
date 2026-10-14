@@ -112,6 +112,10 @@ async def get_hvac(user=Depends(require_user)):
 async def modules(user=Depends(require_user)):
     return {'modules': await management.list_modules()}
 
+@router.get('/dashboard/status')
+async def dashboard_status(user=Depends(require_user)):
+    return await management.dashboard_status()
+
 @router.get('/modules/{identifier}')
 async def module_detail(identifier: str, user=Depends(require_user)):
     try:
