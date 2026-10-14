@@ -555,6 +555,13 @@ async def _probe_emergency_interface(module: dict[str, Any]) -> dict[str, Any]:
     address = str(module.get("ip_address") or "").strip()
     if not capability or not address or not module.get("online"):
         return result
+    heartbeat = _state_payload(module).get("ts")
+    try:
+        heartbeat_age = time.time() - float(heartbeat)
+    except (TypeError, ValueError):
+        return {**result, "status": "unknown", "reason": "Emergency service advertisement has no valid heartbeat timestamp"}
+    if heartbeat_age < 0 or heartbeat_age > 30:
+        return {**result, "status": "unknown", "reason": "Emergency service advertisement is stale"}
     try:
         ipaddress.ip_address(address)
     except ValueError:

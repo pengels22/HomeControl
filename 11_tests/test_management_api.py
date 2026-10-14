@@ -39,7 +39,7 @@ def test_emergency_capability_rejects_unapproved_port_and_paths():
         'device_id': '2ccf675d3414',
         'online': True,
         'ip_address': '192.168.20.36',
-        'last_state': {'state': {'emergency_ui': {
+        'last_state': {'ts': time.time(), 'state': {'emergency_ui': {
             'enabled': True, 'available': True, 'protocol': 'http',
             'port': 8080, 'config_path': '/config', 'health_path': '/health',
         }}},
@@ -57,7 +57,7 @@ async def test_emergency_probe_binds_health_identity_and_constructs_config_url(m
         'device_id': '2ccf675d3414',
         'online': True,
         'ip_address': '192.168.20.36',
-        'last_state': {'state': {'emergency_ui': {
+        'last_state': {'ts': time.time(), 'state': {'emergency_ui': {
             'enabled': True, 'available': True, 'protocol': 'http',
             'port': 6010, 'config_path': '/config', 'health_path': '/health',
         }}},
@@ -99,7 +99,7 @@ async def test_emergency_probe_binds_health_identity_and_constructs_config_url(m
 async def test_emergency_probe_rejects_wrong_health_identity(monkeypatch):
     module = {
         'device_id': '2ccf675d3414', 'online': True, 'ip_address': '192.168.20.36',
-        'last_state': {'emergency_ui': {
+        'last_state': {'ts': time.time(), 'emergency_ui': {
             'enabled': True, 'available': True, 'protocol': 'http',
             'port': 6010, 'config_path': '/config', 'health_path': '/health',
         }},
@@ -121,6 +121,24 @@ async def test_emergency_probe_rejects_wrong_health_identity(monkeypatch):
 
     assert result['available'] is False
     assert result['status'] == 'unavailable'
+
+
+@pytest.mark.asyncio
+async def test_emergency_probe_does_not_expose_stale_advertisement():
+    module = {
+        'device_id': '2ccf675d3414', 'online': True, 'ip_address': '192.168.20.36',
+        'last_state': {'ts': time.time() - 31, 'emergency_ui': {
+            'enabled': True, 'available': True, 'protocol': 'http',
+            'port': 6010, 'config_path': '/config', 'health_path': '/health',
+        }},
+    }
+
+    result = await management._probe_emergency_interface(module)
+
+    assert result['available'] is False
+    assert result['status'] == 'unknown'
+    assert result['url'] is None
+    assert 'stale' in result['reason']
 
 
 class FakeTransaction:
