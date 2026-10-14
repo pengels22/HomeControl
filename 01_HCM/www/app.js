@@ -4,6 +4,7 @@ let currentUser = null;
 let lastModules = [];
 const pending = new Set();
 let activeDialog = null;
+let previewMode = false;
 
 async function api(path, options = {}) {
   const headers = {"Content-Type": "application/json", ...(options.headers || {})};
@@ -63,7 +64,16 @@ function statusPill(online, label = null) {
 }
 
 function roleLabel(device) {
-  return device.effective_role || device.module?.module_type || "UNASSIGNED";
+  return device.effective_role || moduleEffectiveRole(device.module || device);
+}
+
+function moduleState(module) {
+  return module?.last_state?.state || {};
+}
+
+function moduleEffectiveRole(module) {
+  const state = moduleState(module);
+  return state.lab_role || state.operational_role || state.role || module?.effective_role || module?.module_type || "UNASSIGNED";
 }
 
 function online(module) {
@@ -79,8 +89,10 @@ async function loadRegistry() {
 async function detectPreviewMode() {
   try {
     const data = await api("/preview-mode");
-    $("preview-banner").hidden = !data.preview;
+    previewMode = Boolean(data.preview);
+    $("preview-banner").hidden = !previewMode;
   } catch {
+    previewMode = false;
     $("preview-banner").hidden = true;
   }
 }
@@ -92,34 +104,203 @@ function deviceLink(module) {
 async function renderDashboard() {
   setTitle("Overview", "Dashboard");
   $("content").innerHTML = `<div class="loading">Loading HCM health...</div>`;
-  const [health, hvac, modules] = await Promise.all([
+  const [healthResult, hvacResult, modulesResult, logicalResult] = await Promise.allSettled([
     api("/health"),
     api("/hvac"),
     loadRegistry(),
+    api("/logical-devices"),
   ]);
+  const health = settledValue(healthResult, {});
+  const hvac = settledValue(hvacResult, null);
+  const modules = settledValue(modulesResult, []);
+  const logicalDevices = settledValue(logicalResult, null)?.logical_devices || null;
   const onlineCount = modules.filter(online).length;
+  const offlineModules = modules.filter((module) => !online(module));
+  const maintenanceCount = Array.isArray(logicalDevices)
+    ? logicalDevices.filter((device) => device.maintenance_locked).length
+    : unavailableValue();
+  const activeFaultCount = firstKnownNumber(
+    health.active_fault_count,
+    health.fault_count,
+    health.faults?.active_count,
+  );
+  const conflictStatus = health.heartbeat_supervisor?.status || health.conflict_heartbeat?.status || null;
+  const fireStatus = health.fire_life_safety?.status || health.life_safety?.status || null;
+  const conflictReported = statusKnown(conflictStatus);
+  const fireReported = statusKnown(fireStatus);
+  const moduleTotals = moduleTypeTotals(modules);
+  const attention = attentionItems({
+    offlineModules,
+    maintenanceCount,
+    activeFaultCount,
+    conflictReported,
+    fireReported,
+    healthOk: healthResult.status === "fulfilled" && Boolean(health.ok),
+    hvacAvailable: hvacResult.status === "fulfilled",
+  });
   $("content").innerHTML = `
-    <section class="summary-grid">
-      <article class="summary">
-        <span>Backend</span>
-        <strong>${health.ok ? "Healthy" : "Unavailable"}</strong>
-        ${statusPill(Boolean(health.ok), health.ok ? "HTTP 200" : "Check failed")}
+    <section class="dashboard-grid">
+      <article class="summary dashboard-card">
+        <span>HCM Backend</span>
+        <strong>${healthResult.status === "fulfilled" && health.ok ? "Healthy" : "Unavailable"}</strong>
+        ${statusPill(healthResult.status === "fulfilled" && Boolean(health.ok), healthResult.status === "fulfilled" && health.ok ? "API responding" : "Check failed")}
       </article>
-      <article class="summary">
-        <span>Registered Devices</span>
-        <strong>${modules.length}</strong>
-        <p>${onlineCount} online, ${modules.length - onlineCount} offline</p>
+      <article class="summary dashboard-card">
+        <span>Conflict Supervisor</span>
+        <strong>${esc(conflictStatus || "Unavailable")}</strong>
+        <p>${conflictReported && health.heartbeat_supervisor?.host ? `${esc(health.heartbeat_supervisor.host)}:${esc(health.heartbeat_supervisor.port || "")}` : "No status API value reported"}</p>
       </article>
-      <article class="summary">
-        <span>HVAC</span>
-        <strong>${esc(hvac.mode)}</strong>
-        <p>${esc(hvac.setpoint_f)} F setpoint</p>
+      <article class="summary dashboard-card">
+        <span>Modules</span>
+        <strong>${modulesResult.status === "fulfilled" ? `${onlineCount}/${modules.length}` : "Unavailable"}</strong>
+        <p>connected / registered</p>
       </article>
+      <article class="summary dashboard-card">
+        <span>Fire / Life Safety</span>
+        <strong>${esc(fireStatus || "Unavailable")}</strong>
+        <p>${fireReported ? "Reported by HCM health data" : "No safety status API value reported"}</p>
+      </article>
+      <article class="summary dashboard-card">
+        <span>Maintenance Lockouts</span>
+        <strong>${displayMetric(maintenanceCount)}</strong>
+        <p>${Array.isArray(logicalDevices) ? "active logical-device lockouts" : "Logical-device API unavailable"}</p>
+      </article>
+      <article class="summary dashboard-card">
+        <span>Active Faults</span>
+        <strong>${displayMetric(activeFaultCount)}</strong>
+        <p>${Number.isFinite(activeFaultCount) ? "reported by HCM" : "No fault count API value reported"}</p>
+      </article>
+      ${hvacSummaryCard(hvac, hvacResult.status === "fulfilled")}
     </section>
-    <section class="panel">
-      <div class="panel-head"><h3>Device Status</h3><a class="text-link" href="/devices">Open Devices</a></div>
-      ${deviceTable(modules)}
+    <section class="dashboard-row">
+      <section class="panel attention-panel">
+        <div class="panel-head"><h3>Attention Required</h3><span class="muted">${attention.length} items</span></div>
+        ${attention.length ? `<div class="attention-list">${attention.map(attentionItem).join("")}</div>` : `<div class="empty">No offline modules or reported abnormal conditions in the available HCM data.</div>`}
+      </section>
+      <section class="panel module-totals-panel">
+        <div class="panel-head"><h3>Module Totals</h3><a class="text-link" href="/devices">Open Devices</a></div>
+        <div class="module-totals">${moduleTotals.map(moduleTotalCard).join("") || `<div class="empty">No module registry data available.</div>`}</div>
+      </section>
     </section>`;
+}
+
+function settledValue(result, fallback) {
+  return result.status === "fulfilled" ? result.value : fallback;
+}
+
+function unavailableValue() {
+  return Number.NaN;
+}
+
+function firstKnownNumber(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+  return unavailableValue();
+}
+
+function displayMetric(value) {
+  return Number.isFinite(value) ? String(value) : "Unavailable";
+}
+
+function statusKnown(status) {
+  const clean = String(status || "").trim().toLowerCase();
+  return Boolean(clean) && !["unknown", "unavailable", "unsupported"].includes(clean);
+}
+
+function moduleTypeTotals(modules) {
+  const counts = new Map();
+  modules.forEach((module) => {
+    const role = moduleEffectiveRole(module);
+    const existing = counts.get(role) || {role, total: 0, online: 0};
+    existing.total += 1;
+    if (online(module)) existing.online += 1;
+    counts.set(role, existing);
+  });
+  return [...counts.values()].sort((a, b) => a.role.localeCompare(b.role));
+}
+
+function moduleTotalCard(item) {
+  return `<a class="module-total" href="/devices">
+    <strong>${esc(item.role)}</strong>
+    <span>${item.online}/${item.total} online</span>
+  </a>`;
+}
+
+function attentionItems({offlineModules, maintenanceCount, activeFaultCount, conflictReported, fireReported, healthOk, hvacAvailable}) {
+  const items = [];
+  offlineModules.forEach((module) => {
+    items.push({level: "warn", title: `${module.hostname} offline`, detail: `${moduleEffectiveRole(module)} / ${module.supervision_state || "unknown"}`});
+  });
+  if (!healthOk) items.push({level: "critical", title: "HCM backend health unavailable", detail: "The health check did not return an OK response."});
+  if (!hvacAvailable) items.push({level: "warn", title: "HVAC status unavailable", detail: "The authenticated HVAC API did not return current state."});
+  if (!conflictReported) items.push({level: "unknown", title: "Conflict supervisor status unavailable", detail: "No authenticated HCM status value is exposed yet."});
+  if (!fireReported) items.push({level: "unknown", title: "Fire/life-safety status unavailable", detail: "No authenticated HCM status value is exposed yet."});
+  if (Number.isFinite(maintenanceCount) && maintenanceCount > 0) {
+    items.push({level: "warn", title: `${maintenanceCount} maintenance lockout${maintenanceCount === 1 ? "" : "s"} active`, detail: "Controlled outputs remain inhibited by HCM safety lockout."});
+  }
+  if (Number.isFinite(activeFaultCount) && activeFaultCount > 0) {
+    items.push({level: "critical", title: `${activeFaultCount} active fault${activeFaultCount === 1 ? "" : "s"}`, detail: "Review service diagnostics before clearing conditions."});
+  }
+  if (!Number.isFinite(activeFaultCount)) {
+    items.push({level: "unknown", title: "Active fault count unavailable", detail: "No fault count API value is exposed yet."});
+  }
+  return items;
+}
+
+function attentionItem(item) {
+  return `<article class="attention-item ${esc(item.level)}">
+    <strong>${esc(item.title)}</strong>
+    <span>${esc(item.detail)}</span>
+  </article>`;
+}
+
+function hvacSummaryCard(hvac, available) {
+  if (!available || !hvac) {
+    return `<button class="summary dashboard-card hvac-card" type="button" data-open-hvac>
+      <span>HVAC</span>
+      <strong>Unavailable</strong>
+      <p>Open thermostat controls</p>
+    </button>`;
+  }
+  const mode = normalizeHvacMode(hvac.mode);
+  const target = hvacTargetText(hvac);
+  return `<button class="summary dashboard-card hvac-card" type="button" data-open-hvac aria-label="Open thermostat controls">
+    <span>HVAC</span>
+    <strong>${esc(mode.label)}</strong>
+    <p>${esc(target)}</p>
+    ${mode.value === "HEAT_COOL" ? `<p>${esc(hvacBandText(Number(hvac.setpoint_f)))}</p>` : ""}
+  </button>`;
+}
+
+function normalizeHvacMode(mode) {
+  const value = String(mode || "OFF").toUpperCase().replace(/[-\s/]+/g, "_");
+  if (value === "AUTO" || value === "HEAT_COOL" || value === "HEATCOOL") return {value: "HEAT_COOL", label: "Heat/Cool"};
+  if (value === "HEAT") return {value: "HEAT", label: "Heat"};
+  if (value === "COOL") return {value: "COOL", label: "Cool"};
+  if (value === "FAN") return {value: "FAN", label: "Fan"};
+  return {value: "OFF", label: "Off"};
+}
+
+function hvacTargetText(hvac) {
+  const target = Number(hvac?.setpoint_f);
+  if (!Number.isFinite(target)) return "Target unavailable";
+  return `${formatTemp(target)} target`;
+}
+
+function formatTemp(value) {
+  return `${Math.round(Number(value))} F`;
+}
+
+function hvacBand(target) {
+  return {heat: target - 3, cool: target + 2};
+}
+
+function hvacBandText(target) {
+  if (!Number.isFinite(target)) return "Automatic range unavailable";
+  const band = hvacBand(target);
+  return `Heat at ${formatTemp(band.heat)} / Cool at ${formatTemp(band.cool)}`;
 }
 
 function deviceTable(modules) {
@@ -129,7 +310,7 @@ function deviceTable(modules) {
     <tbody>${modules.map((module) => `
       <tr>
         <td><a href="${deviceLink(module)}">${esc(module.hostname)}</a></td>
-        <td>${esc(module.module_type)}</td>
+        <td>${esc(moduleEffectiveRole(module))}${moduleEffectiveRole(module) !== module.module_type ? `<br><span>registered ${esc(module.module_type)}</span>` : ""}</td>
         <td>${statusPill(online(module))}</td>
         <td><code>${esc(module.device_id || module.module_uuid || "-")}</code></td>
         <td>${esc(module.supervision_state || "unknown")}<br><span>${esc(module.supervision_last_seen || module.last_seen || "")}</span></td>
@@ -583,6 +764,136 @@ function openSettingsDialog(channelId) {
   </section>`);
 }
 
+async function openHvacDialog() {
+  let hvac = null;
+  try {
+    hvac = await api("/hvac");
+  } catch (error) {
+    modal(`<section class="modal thermostat-modal" role="dialog" aria-modal="true" aria-labelledby="hvac-title">
+      <div class="modal-head">
+        <h3 id="hvac-title">Thermostat</h3>
+        <button type="button" class="secondary icon-button" data-close-dialog aria-label="Close">x</button>
+      </div>
+      <div class="notice warn">HVAC status is unavailable: ${esc(error.message)}</div>
+      <div class="modal-actions"><button type="button" data-close-dialog>Close</button></div>
+    </section>`);
+    return;
+  }
+  const mode = normalizeHvacMode(hvac.mode);
+  const target = Number.isFinite(Number(hvac.setpoint_f)) ? Number(hvac.setpoint_f) : 70;
+  modal(`<section class="modal thermostat-modal" role="dialog" aria-modal="true" aria-labelledby="hvac-title">
+    <div class="modal-head">
+      <h3 id="hvac-title">Thermostat</h3>
+      <button type="button" class="secondary icon-button" data-close-dialog aria-label="Close">x</button>
+    </div>
+    <div class="thermostat-status">
+      <div><span>Requested mode</span><strong>${esc(mode.label)}</strong></div>
+      <div><span>Target</span><strong>${esc(hvacTargetText(hvac))}</strong></div>
+      <div><span>Equipment state</span><strong>${esc(equipmentStateText(hvac))}</strong></div>
+    </div>
+    <fieldset class="mode-grid" aria-label="Requested HVAC mode">
+      ${hvacModeOption("HEAT", "Heat", mode.value)}
+      ${hvacModeOption("COOL", "Cool", mode.value)}
+      ${hvacModeOption("HEAT_COOL", "Heat/Cool", mode.value)}
+      ${hvacModeOption("FAN", "Fan", mode.value)}
+      ${hvacModeOption("OFF", "Off", mode.value)}
+    </fieldset>
+    <label class="target-control" data-hvac-target-wrap>Target temperature
+      <input type="number" min="45" max="90" step="1" value="${esc(target)}" data-hvac-target aria-describedby="hvac-thresholds">
+    </label>
+    <div class="threshold-preview" id="hvac-thresholds" data-hvac-thresholds>${esc(hvacBandText(target))}</div>
+    <div class="notice warn" data-hvac-gap ${previewMode ? "hidden" : ""}>Heat/Cool is not supported by the current production HCM HVAC API. It is available here only as a frontend preview state.</div>
+    <div class="modal-error" role="status" aria-live="polite" data-hvac-modal-status></div>
+    <div class="modal-actions">
+      <button type="button" class="secondary" data-close-dialog>Cancel</button>
+      <button type="button" data-save-hvac>Apply</button>
+    </div>
+  </section>`);
+  syncHvacDialog();
+}
+
+function hvacModeOption(value, label, selected) {
+  return `<label class="mode-option">
+    <input type="radio" name="hvac-mode" value="${esc(value)}" ${value === selected ? "checked" : ""}>
+    <span>${esc(label)}</span>
+  </label>`;
+}
+
+function equipmentStateText(hvac) {
+  const active = [];
+  if (hvac.heat) active.push("heat output");
+  if (hvac.cool) active.push("cool output");
+  if (hvac.fan) active.push("fan");
+  return active.length ? active.join(", ") : "No active equipment reported";
+}
+
+function selectedHvacMode() {
+  return activeDialog?.querySelector("input[name='hvac-mode']:checked")?.value || "OFF";
+}
+
+function syncHvacDialog() {
+  if (!activeDialog) return;
+  const mode = selectedHvacMode();
+  const targetInput = activeDialog.querySelector("[data-hvac-target]");
+  const targetWrap = activeDialog.querySelector("[data-hvac-target-wrap]");
+  const thresholds = activeDialog.querySelector("[data-hvac-thresholds]");
+  const gap = activeDialog.querySelector("[data-hvac-gap]");
+  const save = activeDialog.querySelector("[data-save-hvac]");
+  const usesTemperature = ["HEAT", "COOL", "HEAT_COOL"].includes(mode);
+  const target = Number(targetInput?.value);
+  if (targetInput) targetInput.disabled = !usesTemperature;
+  if (targetWrap) targetWrap.classList.toggle("disabled", !usesTemperature);
+  if (thresholds) {
+    thresholds.hidden = mode !== "HEAT_COOL";
+    thresholds.textContent = hvacBandText(target);
+  }
+  if (gap) gap.hidden = previewMode || mode !== "HEAT_COOL";
+  if (save) save.disabled = !previewMode && mode === "HEAT_COOL";
+}
+
+async function saveHvacSettings() {
+  if (!activeDialog) return;
+  const mode = selectedHvacMode();
+  const target = Number(activeDialog.querySelector("[data-hvac-target]")?.value);
+  const status = activeDialog.querySelector("[data-hvac-modal-status]");
+  const save = activeDialog.querySelector("[data-save-hvac]");
+  const usesTemperature = ["HEAT", "COOL", "HEAT_COOL"].includes(mode);
+  if (mode === "HEAT_COOL" && !previewMode) {
+    if (status) status.textContent = "Heat/Cool is not supported by the current HCM HVAC backend.";
+    return;
+  }
+  if (usesTemperature && !Number.isFinite(target)) {
+    if (status) status.textContent = "Enter a valid target temperature.";
+    return;
+  }
+  try {
+    if (save) {
+      save.disabled = true;
+      save.textContent = "Applying...";
+    }
+    if (status) status.textContent = "Applying thermostat request...";
+    if (usesTemperature) {
+      await api("/hvac/setpoint", {
+        method: "PUT",
+        body: JSON.stringify({setpoint_f: target}),
+      });
+    }
+    await api("/hvac/mode", {
+      method: "PUT",
+      body: JSON.stringify({mode}),
+    });
+    closeDialog();
+    await renderDashboard();
+  } catch (error) {
+    if (status) status.textContent = `HVAC command failed: ${error.message}`;
+    if (save) {
+      save.disabled = false;
+      save.textContent = "Apply";
+    }
+    setError(error.message);
+  }
+}
+
 async function renderRoute() {
   if (!token) {
     showApp(false);
@@ -614,6 +925,11 @@ document.addEventListener("click", async (event) => {
   if (link) {
     event.preventDefault();
     go(link.getAttribute("href"));
+    return;
+  }
+  const hvacOpen = event.target.closest("[data-open-hvac]");
+  if (hvacOpen) {
+    await openHvacDialog();
     return;
   }
   const output = event.target.closest("[data-output-channel]");
@@ -688,6 +1004,11 @@ document.addEventListener("click", async (event) => {
   const saveSimAi = event.target.closest("[data-save-sim-ai]");
   if (saveSimAi) {
     await saveSimAnalogSettings(saveSimAi.dataset.saveSimAi);
+    return;
+  }
+  const saveHvac = event.target.closest("[data-save-hvac]");
+  if (saveHvac) {
+    await saveHvacSettings();
   }
 });
 
@@ -708,12 +1029,21 @@ document.addEventListener("focusout", async (event) => {
 
 document.addEventListener("input", (event) => {
   const slider = event.target.closest("[data-dimmer-slider]");
-  if (!slider) return;
-  const readout = activeDialog?.querySelector("[data-dimmer-readout]");
-  if (readout) readout.textContent = `${slider.value}%`;
+  if (slider) {
+    const readout = activeDialog?.querySelector("[data-dimmer-readout]");
+    if (readout) readout.textContent = `${slider.value}%`;
+    return;
+  }
+  if (event.target.closest("[data-hvac-target]")) {
+    syncHvacDialog();
+  }
 });
 
 document.addEventListener("change", async (event) => {
+  if (event.target.closest("input[name='hvac-mode']")) {
+    syncHvacDialog();
+    return;
+  }
   const slider = event.target.closest("[data-dimmer-slider]");
   if (!slider) return;
   await setLcmDimmer(slider.dataset.dimmerSlider, Number(slider.value));

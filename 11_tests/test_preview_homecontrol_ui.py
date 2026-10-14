@@ -38,10 +38,13 @@ def test_preview_assets_load_from_real_www_directory(client):
     assert ".preview-banner" in css.text
     assert ".toggle-control" in css.text
     assert ".toggle-thumb" in css.text
+    assert ".dashboard-grid" in css.text
+    assert ".thermostat-modal" in css.text
     assert js.status_code == 200
     assert "detectPreviewMode" in js.text
     assert "data-output-channel" in js.text
     assert "data-lock-channel" in js.text
+    assert "data-open-hvac" in js.text
 
 
 def test_browser_route_refresh_serves_spa_for_device_detail(client):
@@ -72,6 +75,59 @@ def test_role_based_device_interface_selection_uses_fixture_role(client):
     assert rcm["effective_role"] == "RCM"
     assert lcm["effective_role"] == "LCM"
     assert sim["effective_role"] == "SIM"
+
+
+def test_dashboard_frontend_uses_health_overview_and_effective_roles(client):
+    js = client.get("/static/app.js").text
+
+    assert "Attention Required" in js
+    assert "moduleEffectiveRole" in js
+    assert "module_type" in js
+    assert "registered " in js
+    assert "deviceTable(modules)" not in js[js.index("async function renderDashboard"):js.index("function settledValue")]
+    assert "Conflict Supervisor" in js
+    assert "Fire / Life Safety" in js
+
+
+def test_preview_health_and_logical_devices_support_dashboard_metrics(client):
+    health = client.get("/api/v1/health", headers=headers()).json()
+    logical = client.get("/api/v1/logical-devices", headers=headers()).json()
+
+    assert health["heartbeat_supervisor"]["status"] == "Online"
+    assert health["fire_life_safety"]["status"] == "Unavailable"
+    assert health["active_fault_count"] == 2
+    assert any(device["maintenance_locked"] for device in logical["logical_devices"])
+
+
+def test_hvac_preview_supports_modal_modes_and_threshold_contract(client):
+    js = client.get("/static/app.js").text
+
+    assert 'hvacModeOption("HEAT"' in js
+    assert 'hvacModeOption("COOL"' in js
+    assert 'hvacModeOption("HEAT_COOL"' in js
+    assert 'hvacModeOption("FAN"' in js
+    assert 'hvacModeOption("OFF"' in js
+    assert "target - 3" in js
+    assert "target + 2" in js
+    assert "Heat/Cool is not supported by the current production HCM HVAC API" in js
+    assert "Applying thermostat request" in js
+    assert "HVAC command failed" in js
+
+
+def test_hvac_preview_state_updates_only_through_authenticated_preview_api(client):
+    unauthorized = client.put("/api/v1/hvac/mode", json={"mode": "FAN"})
+    mode = client.put("/api/v1/hvac/mode", headers=headers(), json={"mode": "FAN"})
+    setpoint = client.put("/api/v1/hvac/setpoint", headers=headers(), json={"setpoint_f": 73})
+    invalid = client.put("/api/v1/hvac/mode", headers=headers(), json={"mode": "EMERGENCY_HEAT"})
+    state = client.get("/api/v1/hvac", headers=headers()).json()
+
+    assert unauthorized.status_code == 401
+    assert mode.status_code == 200
+    assert setpoint.status_code == 200
+    assert invalid.status_code == 422
+    assert state["mode"] == "FAN"
+    assert state["fan"] is True
+    assert state["setpoint_f"] == 73.0
 
 
 def test_sim_preview_dashboard_reports_can_loops_room_groups_and_ai(client):

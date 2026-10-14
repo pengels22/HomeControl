@@ -8,6 +8,11 @@ physical-output changes.
 
 - Authenticated dark-theme HCM web shell with Dashboard, Devices, Service,
   Settings and Users navigation.
+- Dashboard now acts as a compact HCM system-health overview. It uses
+  authenticated HCM APIs for backend health, HVAC state, module registry and
+  logical-device maintenance lockouts, and displays `Unavailable` for
+  Conflict heartbeat supervisor, fire/life-safety and active-fault details
+  unless those values are explicitly reported by HCM health data.
 - Registered-device list is loaded from HCM `/api/v1/modules`; offline devices
   remain visible.
 - Device detail pages resolve through HCM by selected logical hostname or device
@@ -108,6 +113,17 @@ stale; it does not infer health from saved configuration alone.
 - Detailed SIM controls are intentionally deferred. LCM production backend
   integration beyond existing logical command routing and metadata writes is
   intentionally deferred.
+- Dashboard thermostat controls use the existing production HVAC endpoints:
+  `GET /api/v1/hvac`, `PUT /api/v1/hvac/mode`, and
+  `PUT /api/v1/hvac/setpoint`. The current production backend supports
+  `OFF`, `HEAT`, `COOL` and `FAN`. Heat/Cool is represented in the standalone
+  preview to validate the modal and five-degree band calculation, but the
+  production UI does not submit Heat/Cool while the backend model lacks that
+  mode.
+- Future production Heat/Cool support still requires backend thermostat
+  arbitration that enforces mutual exclusion, minimum on/off timers, compressor
+  short-cycle protection, safe transitions, verified equipment/temperature
+  feedback, and hysteresis separate from the displayed five-degree target band.
 - The SIM UI enumerates ten requested physical analog input rows. The checked-in
   SIM firmware/config still defines eight Hexa AIO analog inputs (`A1`-`A8`) in
   `06_config/02_SIM/sim.yaml`; `AI-9` and `AI-10` have no verified module-local

@@ -260,6 +260,14 @@ class PreviewState:
                 "analog_inputs": {"AI-1": {"name": "SIM2 Input 1", "value": 0.48, "unit": "V", "status": "OK", "source": "ADS 0x48 CH0", "bound": True}},
             },
         }
+        self.hvac = {
+            "mode": "HEAT_COOL",
+            "setpoint_f": 70.0,
+            "average_f": 68.4,
+            "fan": False,
+            "heat": False,
+            "cool": False,
+        }
         self._sync_relays()
 
     def _sync_relays(self) -> None:
@@ -589,6 +597,48 @@ class PreviewState:
         self._sync_relays()
         return {"ok": True, "logical_name": logical_name, "maintenance_locked": bool(active), "preview": True}
 
+    def logical_devices(self) -> list[dict[str, Any]]:
+        devices = []
+        for hostname, channels in {**self.rcm, **self.lcm}.items():
+            for channel, channel_state in channels.items():
+                if channel_state is None:
+                    continue
+                devices.append({
+                    "logical_name": f"{hostname} {channel}",
+                    "device_class": channel_state.get("kind", "relay"),
+                    "enabled": True,
+                    "maintenance_locked": bool(channel_state.get("maintenance_locked")),
+                    "metadata": {"preview": True, "channel": channel},
+                    "room": None,
+                })
+        return devices
+
+    def hvac_state(self) -> dict[str, Any]:
+        return copy.deepcopy(self.hvac)
+
+    def set_hvac_setpoint(self, value: Any) -> dict[str, Any]:
+        try:
+            target = float(value)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(422, "setpoint_f must be numeric") from exc
+        if target < 45 or target > 90:
+            raise HTTPException(422, "setpoint_f must be between 45 and 90")
+        self.hvac["setpoint_f"] = target
+        return {"ok": True, "setpoint_f": target, "preview": True}
+
+    def set_hvac_mode(self, mode: Any) -> dict[str, Any]:
+        normalized = str(mode or "").upper().replace("-", "_").replace("/", "_")
+        if normalized == "AUTO":
+            normalized = "HEAT_COOL"
+        allowed = {"OFF", "HEAT", "COOL", "HEAT_COOL", "FAN"}
+        if normalized not in allowed:
+            raise HTTPException(422, "unsupported preview HVAC mode")
+        self.hvac["mode"] = normalized
+        self.hvac["fan"] = normalized == "FAN"
+        self.hvac["heat"] = False
+        self.hvac["cool"] = False
+        return {"ok": True, "mode": normalized, "preview": True}
+
     def _split_logical(self, logical_name: str) -> tuple[str, str]:
         parts = logical_name.split()
         if len(parts) != 2:
@@ -632,19 +682,54 @@ async def session(authorization: str | None = Header(default=None)):
 @app.get("/api/v1/health")
 async def health(authorization: str | None = Header(default=None)):
     _require_preview_auth(authorization)
-    return {"ok": True, "preview": True, "database": "not used", "production_connected": False}
+    return {
+        "ok": True,
+        "preview": True,
+        "database": "not used",
+        "production_connected": False,
+        "heartbeat_supervisor": {
+            "status": "Online",
+            "host": "preview-local",
+            "port": 6004,
+            "source": "preview_fixture",
+        },
+        "fire_life_safety": {
+            "status": "Unavailable",
+            "source": "preview_fixture",
+            "detail": "No production safety controller is connected to preview.",
+        },
+        "active_fault_count": 2,
+    }
 
 
 @app.get("/api/v1/hvac")
 async def hvac(authorization: str | None = Header(default=None)):
     _require_preview_auth(authorization)
-    return {"mode": "OFF", "setpoint_f": 70, "average_f": None, "fan": False, "heat": False, "cool": False}
+    return state.hvac_state()
+
+
+@app.put("/api/v1/hvac/setpoint")
+async def hvac_setpoint(body: dict[str, Any], authorization: str | None = Header(default=None)):
+    _require_preview_auth(authorization)
+    return state.set_hvac_setpoint(body.get("setpoint_f"))
+
+
+@app.put("/api/v1/hvac/mode")
+async def hvac_mode(body: dict[str, Any], authorization: str | None = Header(default=None)):
+    _require_preview_auth(authorization)
+    return state.set_hvac_mode(body.get("mode"))
 
 
 @app.get("/api/v1/modules")
 async def modules(authorization: str | None = Header(default=None)):
     _require_preview_auth(authorization)
     return {"modules": [copy.deepcopy(module) for module in state.modules.values()]}
+
+
+@app.get("/api/v1/logical-devices")
+async def logical_devices(authorization: str | None = Header(default=None)):
+    _require_preview_auth(authorization)
+    return {"logical_devices": state.logical_devices()}
 
 
 @app.get("/api/v1/device-admin/{identifier}")
