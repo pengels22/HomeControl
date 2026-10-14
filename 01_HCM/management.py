@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import urlparse
 
+import httpx
 from homecontrol_identity import InvalidDeviceId, maybe_normalize_device_id
 
 from . import db
@@ -246,6 +247,99 @@ def _severity_rank(value: str | None) -> int:
         "unknown": 5,
     }
     return order.get(str(value or "unknown").lower(), 5)
+
+
+def _conflict_supervisor_from_status(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {
+            "status": "Unavailable",
+            "available": False,
+            "reason": "Conflict heartbeat status response was not structured data",
+        }
+    registry = payload.get("status", {}).get("registry") if isinstance(payload.get("status"), dict) else None
+    if not isinstance(registry, dict):
+        return {
+            "status": "Unavailable",
+            "available": False,
+            "reason": "Conflict status did not include a heartbeat registry",
+            "host": settings.conflict_heartbeat_host,
+            "port": settings.conflict_heartbeat_port,
+        }
+    peer = registry.get(settings.hcm_heartbeat_device_id)
+    if not isinstance(peer, dict):
+        return {
+            "status": "Unknown",
+            "available": True,
+            "reason": "Conflict registry does not include the configured HCM heartbeat identity",
+            "host": settings.conflict_heartbeat_host,
+            "port": settings.conflict_heartbeat_port,
+            "conflict_device_id": payload.get("device_id"),
+            "hcm_device_id": settings.hcm_heartbeat_device_id,
+        }
+    age = peer.get("last_seen_seconds_ago")
+    try:
+        age_seconds = float(age) if age is not None else None
+    except (TypeError, ValueError):
+        age_seconds = None
+    online = peer.get("online")
+    active_fault = peer.get("active_fault")
+    conflict_health = payload.get("health", {}) if isinstance(payload.get("health"), dict) else {}
+    conflict_status = payload.get("status", {}) if isinstance(payload.get("status"), dict) else {}
+    conflict_healthy = conflict_health.get("state") == "healthy" and conflict_status.get("state") == "operational"
+    if online is False:
+        status = "Offline"
+        reason = "Conflict registry marks the HCM heartbeat peer offline"
+    elif online is True and age_seconds is not None and age_seconds <= settings.conflict_heartbeat_timeout_s and not active_fault and conflict_healthy:
+        status = "Healthy"
+        reason = "Conflict registry has a recent HCM heartbeat acknowledgement"
+    elif online is True:
+        status = "Degraded"
+        reason = "Conflict registry is valid but acknowledgement age, peer fault, or supervisor health is abnormal"
+    else:
+        status = "Unknown"
+        reason = "Conflict registry does not provide a confirmed online/offline state"
+    return {
+        "status": status,
+        "available": True,
+        "reason": reason,
+        "host": settings.conflict_heartbeat_host,
+        "port": settings.conflict_heartbeat_port,
+        "protocol": settings.conflict_heartbeat_protocol,
+        "conflict_device_id": payload.get("device_id"),
+        "conflict_hostname": payload.get("hostname"),
+        "hcm_device_id": settings.hcm_heartbeat_device_id,
+        "hcm_hostname": peer.get("hostname"),
+        "last_ack_age_seconds": age_seconds,
+        "last_sequence": peer.get("last_sequence"),
+        "peer_online": online,
+        "peer_health": peer.get("health", {}).get("state") if isinstance(peer.get("health"), dict) else None,
+        "peer_status": peer.get("status", {}).get("state") if isinstance(peer.get("status"), dict) else None,
+        "active_fault": active_fault,
+    }
+
+
+async def conflict_supervisor_status() -> dict[str, Any]:
+    if not settings.conflict_heartbeat_enabled:
+        return {
+            "status": "Unavailable",
+            "available": False,
+            "reason": "Conflict heartbeat status is disabled in HCM settings",
+        }
+    url = f"http://{settings.conflict_heartbeat_host}:{settings.conflict_heartbeat_port}/status"
+    try:
+        async with httpx.AsyncClient(timeout=2.5) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            payload = response.json()
+    except Exception as exc:
+        return {
+            "status": "Unavailable",
+            "available": False,
+            "reason": f"Conflict heartbeat status could not be verified: {exc}",
+            "host": settings.conflict_heartbeat_host,
+            "port": settings.conflict_heartbeat_port,
+        }
+    return _conflict_supervisor_from_status(payload)
 
 
 def _health_fault_items(module: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1285,6 +1379,7 @@ async def list_bindings() -> list[dict[str, Any]]:
 
 
 async def dashboard_status() -> dict[str, Any]:
+    conflict_status = await conflict_supervisor_status()
     async with db.acquire() as conn:
         lock_rows = await conn.fetch(
             """
@@ -1435,10 +1530,10 @@ async def dashboard_status() -> dict[str, Any]:
             "count": len(faults),
             "items": faults,
             "unsupported_sources": [
-                "Conflict heartbeat supervisor state is unavailable unless reported through HCM health/module state.",
                 "Historical output-arbitration log entries are not treated as current active faults.",
             ],
         },
+        "conflict_supervisor": conflict_status,
     }
 
 

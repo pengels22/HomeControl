@@ -280,7 +280,7 @@ async def device_admin_sim_analog_settings(
 
 @router.get('/module-roles')
 async def module_roles(user=Depends(require_user)):
-    return {'modules': await role_switching.list_role_managed_modules()}
+    return {'modules': await role_switching.list_role_managed_modules(), 'roles': list(role_switching.ALLOWED_ROLES)}
 
 @router.get('/module-role-transitions/{operation_id}')
 async def module_role_transition(operation_id: str, user=Depends(require_user)):

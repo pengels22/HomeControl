@@ -111,6 +111,7 @@ class PreviewState:
         self.modules["SIM1"]["ip_address"] = "192.168.20.51"
         self.modules["SIM2"]["ip_address"] = "192.168.20.52"
         self.modules["RCM3"]["ip_address"] = "192.168.20.33"
+        self.role_transitions: dict[str, dict[str, Any]] = {}
         self.rcm: dict[str, dict[str, dict[str, Any]]] = {}
         for hostname in ("RCM1", "RCM2", "RCM3"):
             self.rcm[hostname] = {
@@ -681,7 +682,87 @@ class PreviewState:
                 "items": faults,
                 "unsupported_sources": ["Preview does not connect to Conflict or production safety services."],
             },
+            "conflict_supervisor": {
+                "status": "Healthy",
+                "available": True,
+                "host": "preview-conflict",
+                "port": 6004,
+                "protocol": "hcm-heartbeat-v3",
+                "reason": "Preview fixture has recent simulated heartbeat acknowledgments.",
+                "last_ack_age_seconds": 4.0,
+                "hcm_device_id": "48b02d87db16",
+                "conflict_device_id": "3c53bbf7adb2",
+            },
         }
+
+    def module_roles(self) -> dict[str, Any]:
+        module = self.modules["LAB1"]
+        transition = None
+        if self.role_transitions:
+            transition = sorted(self.role_transitions.values(), key=lambda item: item["requested_at"])[-1]
+        nested = module["last_state"]["state"]
+        return {
+            "roles": ["UNASSIGNED", "RCM", "SIM", "LCM"],
+            "modules": [{
+                "id": module["id"],
+                "device_id": module["device_id"],
+                "hostname": module["hostname"],
+                "module_type": module["module_type"],
+                "ip_address": module["ip_address"],
+                "online": module["online"],
+                "control_session_online": module["control_session_online"],
+                "last_seen": module["last_seen"],
+                "last_state": copy.deepcopy(module["last_state"]),
+                "role_management": {
+                    "enabled": True,
+                    "current_role": nested.get("lab_role"),
+                    "requested_role": None,
+                    "last_transition": copy.deepcopy(transition),
+                    "simulation": nested.get("simulation"),
+                    "physical_outputs_enabled": nested.get("physical_outputs_enabled"),
+                },
+            }],
+        }
+
+    def request_module_role(self, device_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        module = next((item for item in self.modules.values() if item["device_id"] == device_id.lower()), None)
+        if not module:
+            raise HTTPException(404, "preview module not found")
+        if not module["control_session_online"]:
+            raise HTTPException(409, "module has no authenticated online control session")
+        if not body.get("confirm"):
+            raise HTTPException(400, "explicit confirmation is required")
+        requested = str(body.get("requested_role", "")).upper()
+        if requested not in {"UNASSIGNED", "RCM", "SIM", "LCM"}:
+            raise HTTPException(400, "unsupported role")
+        operation_id = f"preview-{len(self.role_transitions) + 1}"
+        previous_role = module["last_state"]["state"].get("lab_role")
+        module["last_state"]["state"]["lab_role"] = requested
+        module["last_state"]["state"]["simulation"] = True
+        module["last_state"]["state"]["physical_outputs_enabled"] = False
+        transition = {
+            "operation_id": operation_id,
+            "device_id": module["device_id"],
+            "previous_role": previous_role,
+            "requested_role": requested,
+            "status": "CONFIRMED",
+            "simulation_required": True,
+            "error": None,
+            "rejection_reason": None,
+            "ack_payload": {"ok": True, "accepted": True, "preview": True},
+            "requested_at": _now(),
+            "sent_at": _now(),
+            "accepted_at": _now(),
+            "completed_at": _now(),
+        }
+        self.role_transitions[operation_id] = transition
+        return copy.deepcopy(transition)
+
+    def module_role_transition(self, operation_id: str) -> dict[str, Any]:
+        transition = self.role_transitions.get(operation_id)
+        if not transition:
+            raise HTTPException(404, "preview transition not found")
+        return copy.deepcopy(transition)
 
     def settings_network(self) -> dict[str, Any]:
         modules = []
@@ -882,6 +963,24 @@ async def hvac_mode(body: dict[str, Any], authorization: str | None = Header(def
 async def modules(authorization: str | None = Header(default=None)):
     _require_preview_auth(authorization)
     return {"modules": [copy.deepcopy(module) for module in state.modules.values()]}
+
+
+@app.get("/api/v1/module-roles")
+async def module_roles(authorization: str | None = Header(default=None)):
+    _require_preview_auth(authorization)
+    return state.module_roles()
+
+
+@app.post("/api/v1/modules/{device_id}/role")
+async def module_role_change(device_id: str, body: dict[str, Any], authorization: str | None = Header(default=None)):
+    _require_preview_admin(authorization)
+    return state.request_module_role(device_id, body)
+
+
+@app.get("/api/v1/module-role-transitions/{operation_id}")
+async def module_role_transition(operation_id: str, authorization: str | None = Header(default=None)):
+    _require_preview_auth(authorization)
+    return state.module_role_transition(operation_id)
 
 
 @app.get("/api/v1/dashboard/status")

@@ -412,6 +412,33 @@ th {
   color: #ffe0a6;
 }
 
+.role-admin-strip {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto auto;
+  gap: 8px 12px;
+  align-items: center;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #2a3238;
+  border-radius: 6px;
+  background: #12171b;
+}
+
+.role-admin-strip span,
+.role-admin-strip p {
+  color: #98a5ad;
+  font-size: 0.82rem;
+}
+
+.role-admin-strip p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.role-admin-strip strong {
+  color: #e6edf1;
+}
+
 .rcm-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(170px, 1fr));
@@ -1184,6 +1211,10 @@ th {
   }
 
   .identity-grid, .rcm-grid, .summary-grid, .dashboard-grid, .lcm-columns, .rmc-grid, .sim-ai-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .role-admin-strip {
     grid-template-columns: 1fr;
   }
 

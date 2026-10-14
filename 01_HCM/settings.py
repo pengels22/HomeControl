@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     commissioning_enabled: bool = hcm_globals.Commissioning_Enabled
     conflict_heartbeat_enabled: bool = True
     conflict_heartbeat_device_id: str = '3c53bbf7adb2'
+    hcm_heartbeat_device_id: str = '48b02d87db16'
     conflict_heartbeat_host: str = '192.168.20.26'
     conflict_heartbeat_port: int = 6004
     conflict_heartbeat_interval_s: int = 5

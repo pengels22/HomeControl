@@ -2,6 +2,8 @@ const $ = (id) => document.getElementById(id);
 let token = localStorage.getItem("homecontrol_token") || "";
 let currentUser = null;
 let lastModules = [];
+let roleManagementByDevice = new Map();
+let moduleRoleOptions = ["UNASSIGNED", "RCM", "SIM", "LCM"];
 const pending = new Set();
 let activeDialog = null;
 let previewMode = false;
@@ -67,6 +69,10 @@ function roleLabel(device) {
   return device.effective_role || moduleEffectiveRole(device.module || device);
 }
 
+function reportedRole(module) {
+  return moduleEffectiveRole(module);
+}
+
 function moduleState(module) {
   return module?.last_state?.state || {};
 }
@@ -84,6 +90,31 @@ async function loadRegistry() {
   const data = await api("/modules");
   lastModules = data.modules || [];
   return lastModules;
+}
+
+async function loadRoleManagement() {
+  try {
+    const data = await api("/module-roles");
+    moduleRoleOptions = data.roles || moduleRoleOptions;
+    roleManagementByDevice = new Map((data.modules || []).map((module) => [module.device_id, module]));
+    return data;
+  } catch {
+    roleManagementByDevice = new Map();
+    return {modules: [], roles: moduleRoleOptions};
+  }
+}
+
+function roleManagementFor(module) {
+  return roleManagementByDevice.get(module?.device_id) || null;
+}
+
+function assignedRoleLabel(module) {
+  const managed = roleManagementFor(module);
+  const info = managed?.role_management;
+  const transition = info?.last_transition;
+  if (info?.requested_role) return `${info.requested_role} (${transition?.status || "requested"})`;
+  if (transition?.requested_role) return `${transition.requested_role} (${transition.status || "recorded"})`;
+  return "Unknown";
 }
 
 async function detectPreviewMode() {
@@ -120,7 +151,8 @@ async function renderDashboard() {
   const faultItems = Array.isArray(dashboardStatus?.active_faults?.items) ? dashboardStatus.active_faults.items : null;
   const maintenanceCount = lockoutItems ? Number(dashboardStatus.maintenance_lockouts.count ?? lockoutItems.length) : unavailableValue();
   const activeFaultCount = faultItems ? Number(dashboardStatus.active_faults.count ?? faultItems.length) : unavailableValue();
-  const conflictStatus = health.heartbeat_supervisor?.status || health.conflict_heartbeat?.status || null;
+  const conflictSupervisor = dashboardStatus?.conflict_supervisor || health.heartbeat_supervisor || health.conflict_heartbeat || null;
+  const conflictStatus = conflictSupervisor?.status || null;
   const fireStatus = health.fire_life_safety?.status || health.life_safety?.status || null;
   const conflictReported = statusKnown(conflictStatus);
   const fireReported = statusKnown(fireStatus);
@@ -130,6 +162,7 @@ async function renderDashboard() {
     maintenanceCount,
     activeFaultCount,
     conflictReported,
+    conflictStatus,
     fireReported,
     healthOk: healthResult.status === "fulfilled" && Boolean(health.ok),
     hvacAvailable: hvacResult.status === "fulfilled",
@@ -144,7 +177,7 @@ async function renderDashboard() {
       <article class="summary dashboard-card">
         <span>Conflict Supervisor</span>
         <strong>${esc(conflictStatus || "Unavailable")}</strong>
-        <p>${conflictReported && health.heartbeat_supervisor?.host ? `${esc(health.heartbeat_supervisor.host)}:${esc(health.heartbeat_supervisor.port || "")}` : "No status API value reported"}</p>
+        <p>${conflictStatusDetail(conflictSupervisor)}</p>
       </article>
       <article class="summary dashboard-card">
         <span>Modules</span>
@@ -178,6 +211,14 @@ async function renderDashboard() {
         <div class="module-totals">${moduleTotals.map(moduleTotalCard).join("") || `<div class="empty">No module registry data available.</div>`}</div>
       </section>
     </section>`;
+}
+
+function conflictStatusDetail(conflictSupervisor) {
+  if (!conflictSupervisor) return "No authenticated supervisor status reported";
+  const age = Number(conflictSupervisor.last_ack_age_seconds);
+  if (Number.isFinite(age)) return `Last ACK ${Math.round(age)}s ago`;
+  if (conflictSupervisor.host) return `${esc(conflictSupervisor.host)}:${esc(conflictSupervisor.port || "")}`;
+  return esc(conflictSupervisor.reason || "Supervisor status unavailable");
 }
 
 function settledValue(result, fallback) {
@@ -224,14 +265,18 @@ function moduleTotalCard(item) {
   </a>`;
 }
 
-function attentionItems({offlineModules, maintenanceCount, activeFaultCount, conflictReported, fireReported, healthOk, hvacAvailable}) {
+function attentionItems({offlineModules, maintenanceCount, activeFaultCount, conflictReported, conflictStatus, fireReported, healthOk, hvacAvailable}) {
   const items = [];
   offlineModules.forEach((module) => {
     items.push({level: "warn", title: `${module.hostname} offline`, detail: `${moduleEffectiveRole(module)} / ${module.supervision_state || "unknown"}`});
   });
   if (!healthOk) items.push({level: "critical", title: "HCM backend health unavailable", detail: "The health check did not return an OK response."});
   if (!hvacAvailable) items.push({level: "warn", title: "HVAC status unavailable", detail: "The authenticated HVAC API did not return current state."});
-  if (!conflictReported) items.push({level: "unknown", title: "Conflict supervisor status unavailable", detail: "No authenticated HCM status value is exposed yet."});
+  if (!conflictReported) {
+    items.push({level: "unknown", title: "Conflict supervisor status unavailable", detail: "HCM could not verify recent heartbeat acknowledgments from the authenticated dashboard status API."});
+  } else if (["Degraded", "Offline"].includes(conflictStatus)) {
+    items.push({level: conflictStatus === "Offline" ? "critical" : "warn", title: `Conflict supervisor ${conflictStatus.toLowerCase()}`, detail: "Review heartbeat acknowledgments before treating supervision as healthy."});
+  }
   if (!fireReported) items.push({level: "unknown", title: "Fire/life-safety status unavailable", detail: "No authenticated HCM status value is exposed yet."});
   if (Number.isFinite(maintenanceCount) && maintenanceCount > 0) {
     items.push({level: "warn", title: `${maintenanceCount} maintenance lockout${maintenanceCount === 1 ? "" : "s"} active`, detail: "Controlled outputs remain inhibited by HCM safety lockout."});
@@ -481,6 +526,92 @@ function openResetPasswordDialog(username) {
   </section>`);
 }
 
+function moduleRoleOptionList(selected) {
+  return moduleRoleOptions.map((role) => `<option value="${esc(role)}" ${role === selected ? "selected" : ""}>${esc(role)}</option>`).join("");
+}
+
+function openModuleRoleDialog(deviceId) {
+  const managed = roleManagementByDevice.get(deviceId);
+  if (!managed) return;
+  const info = managed.role_management || {};
+  const current = reportedRole(managed);
+  modal(`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="module-role-title">
+    <div class="modal-head">
+      <h3 id="module-role-title">Change Module Role</h3>
+      <button type="button" class="secondary icon-button" data-close-dialog aria-label="Close">x</button>
+    </div>
+    <div class="diagnostic-grid">
+      ${kv("Hostname", managed.hostname)}
+      ${kv("Device ID", managed.device_id)}
+      ${kv("Registered type", managed.module_type)}
+      ${kv("Reported role", current)}
+      ${kv("Assigned/requested role", assignedRoleLabel(managed))}
+      ${kv("Control session", managed.control_session_online ? "Authenticated" : "Unavailable")}
+      ${kv("Simulation", info.simulation === true ? "Enabled" : info.simulation === false ? "Disabled" : "Unknown")}
+      ${kv("Physical outputs", info.physical_outputs_enabled === true ? "Enabled" : info.physical_outputs_enabled === false ? "Disabled" : "Unknown")}
+    </div>
+    <label>Requested role <select data-module-role>${moduleRoleOptionList(current)}</select></label>
+    <div class="notice warn">HCM will send this request to the authenticated module session and wait for the module acknowledgment. This does not enable physical outputs or create logical bindings.</div>
+    <div class="modal-error" role="status" aria-live="polite" data-module-role-status></div>
+    <div class="modal-actions">
+      <button type="button" class="secondary" data-close-dialog>Cancel</button>
+      <button type="button" data-save-module-role="${esc(deviceId)}">Request Role Change</button>
+    </div>
+  </section>`);
+}
+
+function moduleRoleStatus(message) {
+  const status = activeDialog?.querySelector("[data-module-role-status]");
+  if (status) status.textContent = message;
+}
+
+async function pollModuleRoleTransition(operationId) {
+  let latest = null;
+  for (let attempt = 0; attempt < 15; attempt += 1) {
+    latest = await api(`/module-role-transitions/${encodeURIComponent(operationId)}`);
+    if (["CONFIRMED", "REJECTED", "TIMED_OUT", "FAILED"].includes(latest.status)) return latest;
+    moduleRoleStatus(`Transition ${latest.status.toLowerCase()}; waiting for module confirmation...`);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  return latest;
+}
+
+async function saveModuleRole(deviceId) {
+  const requestedRole = activeDialog.querySelector("[data-module-role]").value;
+  const save = activeDialog.querySelector("[data-save-module-role]");
+  try {
+    if (save) {
+      save.disabled = true;
+      save.textContent = "Sending...";
+    }
+    moduleRoleStatus("Sending role request to HCM...");
+    const transition = await api(`/modules/${encodeURIComponent(deviceId)}/role`, {
+      method: "POST",
+      body: JSON.stringify({requested_role: requestedRole, confirm: true}),
+    });
+    moduleRoleStatus(`Module acknowledged: ${transition.status}. Waiting for reported role confirmation...`);
+    const final = await pollModuleRoleTransition(transition.operation_id);
+    if (final?.status === "CONFIRMED") {
+      closeDialog();
+      await loadRoleManagement();
+      await renderDeviceDetail(selectedDeviceIdentifier());
+      return;
+    }
+    moduleRoleStatus(`Transition ${final?.status || transition.status}: ${final?.rejection_reason || final?.error || "No final confirmation yet."}`);
+    if (save) {
+      save.disabled = false;
+      save.textContent = "Request Role Change";
+    }
+  } catch (error) {
+    moduleRoleStatus(`Role change failed: ${error.message}`);
+    setError(error.message);
+    if (save) {
+      save.disabled = false;
+      save.textContent = "Request Role Change";
+    }
+  }
+}
+
 function userModalStatus(message) {
   const status = activeDialog?.querySelector("[data-user-modal-status]");
   if (status) status.textContent = message;
@@ -574,8 +705,9 @@ function identityBlock(device) {
   const module = device.module;
   return `<section class="identity-grid">
     <div><span>Hostname</span><strong>${esc(module.hostname)}</strong></div>
-    <div><span>Assigned Interface</span><strong>${esc(roleLabel(device))}</strong></div>
     <div><span>Registered Module Type</span><strong>${esc(module.module_type)}</strong></div>
+    <div><span>Assigned / Requested Role</span><strong>${esc(assignedRoleLabel(module))}</strong></div>
+    <div><span>Reported Operational Role</span><strong>${esc(roleLabel(device))}</strong></div>
     <div><span>Status</span><strong>${online(module) ? "Online" : "Offline"}</strong></div>
     <div><span>Device ID</span><strong><code>${esc(module.device_id || "-")}</code></strong></div>
     <div><span>Control Session</span><strong>${module.control_session_online ? "Authenticated" : "Unavailable"}</strong></div>
@@ -586,7 +718,10 @@ function identityBlock(device) {
 
 async function renderDeviceDetail(identifier) {
   $("content").innerHTML = `<div class="loading">Resolving selected device through HCM...</div>`;
-  const device = await api(`/device-admin/${encodeURIComponent(identifier)}`);
+  const [device] = await Promise.all([
+    api(`/device-admin/${encodeURIComponent(identifier)}`),
+    loadRoleManagement(),
+  ]);
   setTitle("Device", device.module.hostname);
   const role = roleLabel(device);
   if (role === "RCM") return renderRcm(device);
@@ -603,6 +738,7 @@ function renderRoleShell(device, label) {
         ${statusPill(online(device.module))}
       </div>
       ${identityBlock(device)}
+      ${roleManagementBlock(device)}
       <div class="notice">
         ${esc(device.module.hostname)} is shown from HCM registry and reported state. No controls are available for this role in this iteration.
       </div>
@@ -623,6 +759,7 @@ async function renderRcm(device) {
         ${statusPill(online(data.device.module))}
       </div>
       ${identityBlock(data.device)}
+      ${roleManagementBlock(data.device)}
       ${data.device.physical_outputs_enabled === false ? `<div class="notice warn">Physical outputs are disabled by the registered device state. Controls remain unavailable until HCM receives a safe, confirmed state.</div>` : ""}
     </section>
     <section class="panel">
@@ -632,6 +769,29 @@ async function renderRcm(device) {
       </div>
       <div class="rcm-grid">${data.channels.map(channelCard).join("")}</div>
     </section>`;
+}
+
+function roleManagementBlock(device) {
+  const module = device.module;
+  const managed = roleManagementFor(module);
+  const info = managed?.role_management;
+  if (!managed || !info?.enabled) {
+    return `<div class="role-admin-strip">
+      <span>Module role administration</span>
+      <strong>Unavailable</strong>
+      <p>No verified backend role-switching contract is available for this physical device ID.</p>
+    </div>`;
+  }
+  const admin = currentUser?.role === "ADMIN";
+  const disabled = !admin || !module.control_session_online;
+  const reason = !admin ? "ADMIN role required" : !module.control_session_online ? "Authenticated control session required" : "Uses permanent device ID";
+  const transition = info.last_transition;
+  return `<div class="role-admin-strip">
+    <span>Module role administration</span>
+    <strong>${esc(info.requested_role || transition?.status || "Ready")}</strong>
+    <p>${esc(reason)}${transition?.requested_role ? `; latest request ${esc(transition.requested_role)} / ${esc(transition.status)}` : ""}</p>
+    <button type="button" class="secondary compact-button" data-module-role-change="${esc(module.device_id)}" ${disabled ? "disabled" : ""}>Change Module Role</button>
+  </div>`;
 }
 
 async function renderLcm(device) {
@@ -647,6 +807,7 @@ async function renderLcm(device) {
         ${statusPill(online(data.device.module))}
       </div>
       ${identityBlock(data.device)}
+      ${roleManagementBlock(data.device)}
     </section>
     <section class="panel lcm-panel">
       <div class="lcm-columns">
@@ -720,6 +881,7 @@ async function renderSim(device) {
         ${statusPill(online(data.device.module))}
       </div>
       ${identityBlock(data.device)}
+      ${roleManagementBlock(data.device)}
     </section>
     <section class="panel sim-panel">
       <div class="panel-head">
@@ -1284,6 +1446,11 @@ document.addEventListener("click", async (event) => {
     openChangeRoleDialog(changeRole.dataset.changeRole);
     return;
   }
+  const moduleRoleChange = event.target.closest("[data-module-role-change]");
+  if (moduleRoleChange) {
+    openModuleRoleDialog(moduleRoleChange.dataset.moduleRoleChange);
+    return;
+  }
   const resetPassword = event.target.closest("[data-reset-password]");
   if (resetPassword) {
     openResetPasswordDialog(resetPassword.dataset.resetPassword);
@@ -1376,6 +1543,11 @@ document.addEventListener("click", async (event) => {
   const saveRole = event.target.closest("[data-save-role]");
   if (saveRole) {
     await saveUserRole(saveRole.dataset.saveRole);
+    return;
+  }
+  const saveModuleRoleButton = event.target.closest("[data-save-module-role]");
+  if (saveModuleRoleButton) {
+    await saveModuleRole(saveModuleRoleButton.dataset.saveModuleRole);
     return;
   }
   const savePassword = event.target.closest("[data-save-password]");

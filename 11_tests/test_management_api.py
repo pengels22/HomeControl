@@ -199,6 +199,67 @@ def test_lcm_channel_support_accepts_corrected_inventory_without_direct_hardware
     assert management._module_supports_channel('LCM', 'HV-4', capabilities) is True
 
 
+def test_conflict_supervisor_status_reports_healthy_recent_ack(monkeypatch):
+    monkeypatch.setattr(management.settings, 'hcm_heartbeat_device_id', '48b02d87db16')
+    monkeypatch.setattr(management.settings, 'conflict_heartbeat_timeout_s', 15)
+
+    result = management._conflict_supervisor_from_status({
+        'device_id': '3c53bbf7adb2',
+        'hostname': 'conflict',
+        'health': {'state': 'healthy'},
+        'status': {
+            'state': 'operational',
+            'registry': {
+                '48b02d87db16': {
+                    'hostname': 'jetson',
+                    'online': True,
+                    'last_seen_seconds_ago': 4,
+                    'last_sequence': 100,
+                    'health': {'state': 'healthy'},
+                    'status': {'state': 'operational'},
+                    'active_fault': None,
+                }
+            },
+        },
+    })
+
+    assert result['status'] == 'Healthy'
+    assert result['last_ack_age_seconds'] == 4
+    assert result['hcm_device_id'] == '48b02d87db16'
+
+
+def test_conflict_supervisor_status_distinguishes_stale_unknown_and_offline(monkeypatch):
+    monkeypatch.setattr(management.settings, 'hcm_heartbeat_device_id', '48b02d87db16')
+    monkeypatch.setattr(management.settings, 'conflict_heartbeat_timeout_s', 15)
+    base = {
+        'health': {'state': 'healthy'},
+        'status': {'state': 'operational', 'registry': {}},
+    }
+
+    missing = management._conflict_supervisor_from_status(base)
+    assert missing['status'] == 'Unknown'
+
+    stale_payload = {
+        **base,
+        'status': {
+            'state': 'operational',
+            'registry': {'48b02d87db16': {'online': True, 'last_seen_seconds_ago': 22}},
+        },
+    }
+    stale = management._conflict_supervisor_from_status(stale_payload)
+    assert stale['status'] == 'Degraded'
+
+    offline_payload = {
+        **base,
+        'status': {
+            'state': 'operational',
+            'registry': {'48b02d87db16': {'online': False, 'last_seen_seconds_ago': 90}},
+        },
+    }
+    offline = management._conflict_supervisor_from_status(offline_payload)
+    assert offline['status'] == 'Offline'
+
+
 def test_sim_physical_ai_inventory_and_supported_rmc_binding_channels():
     capabilities = {'hexa-aio', 'rmc-can'}
 

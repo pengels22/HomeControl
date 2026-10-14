@@ -47,6 +47,8 @@ def test_preview_assets_load_from_real_www_directory(client):
     assert "data-lock-channel" in js.text
     assert "data-open-hvac" in js.text
     assert "data-add-user" in js.text
+    assert "data-module-role-change" in js.text
+    assert "/module-roles" in js.text
     assert "/settings/network" in js.text
 
 
@@ -88,6 +90,10 @@ def test_dashboard_frontend_uses_health_overview_and_effective_roles(client):
     assert "moduleEffectiveRole" in js
     assert "module_type" in js
     assert "registered " in js
+    assert "Assigned / Requested Role" in js
+    assert "Reported Operational Role" in js
+    assert "Change Module Role" in js
+    assert "data-save-module-role" in js
     assert "deviceTable(modules)" not in js[js.index("async function renderDashboard"):js.index("function settledValue")]
     assert "Conflict Supervisor" in js
     assert "Fire / Life Safety" in js
@@ -121,12 +127,47 @@ def test_dashboard_detail_popups_render_individual_field_rows(client):
 
 def test_preview_health_and_logical_devices_support_dashboard_metrics(client):
     health = client.get("/api/v1/health", headers=headers()).json()
+    status = client.get("/api/v1/dashboard/status", headers=headers()).json()
     logical = client.get("/api/v1/logical-devices", headers=headers()).json()
 
     assert health["heartbeat_supervisor"]["status"] == "Online"
+    assert status["conflict_supervisor"]["status"] == "Healthy"
+    assert status["conflict_supervisor"]["last_ack_age_seconds"] == 4.0
     assert health["fire_life_safety"]["status"] == "Unavailable"
     assert health["active_fault_count"] == 2
     assert any(device["maintenance_locked"] for device in logical["logical_devices"])
+
+
+def test_preview_module_role_management_targets_device_id_and_preserves_lab1_safety(client):
+    roles = client.get("/api/v1/module-roles", headers=headers()).json()
+    lab = roles["modules"][0]
+
+    assert roles["roles"] == ["UNASSIGNED", "RCM", "SIM", "LCM"]
+    assert lab["hostname"] == "LAB1"
+    assert lab["role_management"]["enabled"] is True
+    assert lab["role_management"]["simulation"] is True
+    assert lab["role_management"]["physical_outputs_enabled"] is False
+
+    readonly = {"Authorization": f"Bearer {preview.PREVIEW_READONLY_TOKEN}"}
+    forbidden = client.post(
+        f"/api/v1/modules/{lab['device_id']}/role",
+        headers=readonly,
+        json={"requested_role": "SIM", "confirm": True},
+    )
+    assert forbidden.status_code == 403
+
+    transition = client.post(
+        f"/api/v1/modules/{lab['device_id']}/role",
+        headers=headers(),
+        json={"requested_role": "SIM", "confirm": True},
+    )
+    assert transition.status_code == 200
+    assert transition.json()["status"] == "CONFIRMED"
+
+    after = client.get("/api/v1/device-admin/LAB1", headers=headers()).json()
+    assert after["effective_role"] == "SIM"
+    assert after["simulation"] is True
+    assert after["physical_outputs_enabled"] is False
 
 
 def test_settings_preview_reports_interfaces_modules_and_emergency_links(client):

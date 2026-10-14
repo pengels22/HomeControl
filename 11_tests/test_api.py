@@ -147,6 +147,19 @@ async def test_module_role_change_requires_admin():
 
 
 @pytest.mark.asyncio
+async def test_module_roles_returns_supported_backend_roles(monkeypatch):
+    async def list_role_managed_modules():
+        return [{'device_id': '2ccf675d3414'}]
+
+    monkeypatch.setattr(api.role_switching, 'list_role_managed_modules', list_role_managed_modules)
+
+    result = await api.module_roles({'user': 'patrick', 'role': 'ADMIN'})
+
+    assert result['roles'] == ['UNASSIGNED', 'RCM', 'SIM', 'LCM']
+    assert result['modules'][0]['device_id'] == '2ccf675d3414'
+
+
+@pytest.mark.asyncio
 async def test_module_role_change_requires_explicit_confirmation():
     with pytest.raises(HTTPException) as exc:
         await api.module_role_change(
