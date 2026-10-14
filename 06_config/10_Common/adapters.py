@@ -485,7 +485,7 @@ class Lab1Adapter(BaseAdapter):
             AdapterStep("install_emergency_advertisement", f"sudo install -m 0755 {release_dir}/10_scripts/lab1_emergency_advertisement.py /opt/homecontrol-lab/lab1_emergency_advertisement.py && sudo /usr/bin/python3 /opt/homecontrol-lab/lab1_emergency_advertisement.py", changes_system=True),
             AdapterStep("install_user_sync", f"sudo install -m 0755 {release_dir}/10_scripts/lab1_user_sync.py /opt/homecontrol-lab/lab1_user_sync.py && sudo install -m 0755 {release_dir}/10_scripts/lab1_user_sync_patcher.py /opt/homecontrol-lab/lab1_user_sync_patcher.py && sudo /usr/bin/python3 /opt/homecontrol-lab/lab1_user_sync_patcher.py", changes_system=True),
             AdapterStep("restart_lab_agent", "sudo systemctl restart homecontrol-lab.service", changes_system=True, timeout=60),
-            AdapterStep("restart_emergency_ui", "sudo systemctl daemon-reload && sudo systemctl enable --now homecontrol-lab-emergency.service", changes_system=True, timeout=60),
+            AdapterStep("restart_emergency_ui", "sudo systemctl daemon-reload && sudo systemctl enable homecontrol-lab-emergency.service && sudo systemctl restart homecontrol-lab-emergency.service", changes_system=True, timeout=60),
             AdapterStep("verify_lab_state_safety", self._lab_state_safety_command(backup_dir), timeout=60),
             AdapterStep("verify_lab_services", self._lab_services_command(), timeout=60),
             AdapterStep("verify_emergency_ui", self._lab1_emergency_verify_command(), timeout=60),

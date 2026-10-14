@@ -10,8 +10,13 @@ from pathlib import Path
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).parents[1] / "07_servises" / "common"))
+
 lab1 = import_module("10_scripts.lab1_role_agent")
 lab1_advertisement = import_module("10_scripts.lab1_emergency_advertisement")
+lab1_emergency = import_module("10_scripts.lab1_emergency")
+lab1_user_sync = import_module("10_scripts.lab1_user_sync")
+lab1_user_sync_patcher = import_module("10_scripts.lab1_user_sync_patcher")
 
 OPERATION_ID = "11111111-2222-4333-8444-555555555555"
 
@@ -64,6 +69,62 @@ def test_lab1_heartbeat_state_advertises_local_emergency_service():
         "config_path": "/config",
         "health_path": "/health",
     }
+
+
+@pytest.mark.parametrize(("role", "count"), [("RCM", 32), ("LCM", 22), ("SIM", 0), ("UNASSIGNED", 0)])
+def test_lab1_emergency_configuration_uses_active_role_inventory(tmp_path, monkeypatch, role, count):
+    state_path = tmp_path / "module.json"
+    state_path.write_text(json.dumps({"role": role, "simulation": True, "physical_outputs_enabled": False}))
+    monkeypatch.setattr(lab1_emergency, "STATE_PATH", state_path)
+    monkeypatch.setattr(lab1_emergency, "RUNTIME_ROOT", tmp_path / "runtime")
+
+    assert lab1_emergency.active_role() == role
+    assert len(lab1_emergency.role_config(role).get("channels", [])) == count
+
+
+def test_lab1_emergency_html_contains_restricted_role_states():
+    html = lab1_emergency.HTML + lab1_emergency.DYNAMIC_SCRIPT
+
+    assert "No output controls are exposed for this simulation role." in html
+    assert "Assign an operational role through authenticated HCM administration" in html
+    assert "active operational role" in html
+
+
+def test_lab1_user_sync_reports_persisted_role_without_reassigning_it(tmp_path, monkeypatch):
+    state_path = tmp_path / "module.json"
+    state_path.write_text(json.dumps({"role": "LCM", "simulation": True, "physical_outputs_enabled": False}))
+    monkeypatch.setattr(lab1_user_sync, "STATE_PATH", state_path)
+
+    assert lab1_user_sync.active_module_type() == "LCM"
+    state_path.write_text(json.dumps({"role": "UNASSIGNED", "simulation": True, "physical_outputs_enabled": False}))
+    assert lab1_user_sync.active_module_type() == "RCM"
+
+
+def test_lab1_user_sync_patcher_is_idempotent_and_normalizes_role_claims(tmp_path, monkeypatch):
+    target = tmp_path / "lab_agent.py"
+    loop = lab1_user_sync_patcher.LOOP_REPLACEMENT
+    target.write_text(
+        "from pathlib import Path\n"
+        "from lab1_user_sync import apply_config_payload\n"
+        "        if reply.get(\"type\") != \"config\":\n"
+        "            raise RuntimeError(\n"
+        "                \"HCM did not return config; assignment refused\"\n"
+        "            )\n"
+        '"module_type": "RCM",\n'
+        '"registered_module_type": "LCM",\n'
+        + loop + loop
+    )
+    monkeypatch.setattr(lab1_user_sync_patcher, "TARGET", target)
+
+    lab1_user_sync_patcher.main()
+    first = target.read_text()
+    lab1_user_sync_patcher.main()
+
+    assert target.read_text() == first
+    assert "active_module_type" in first
+    assert first.count("if kind == \"config\":") == 1
+    assert '"module_type": active_module_type(),' in first
+    assert '"registered_module_type": active_module_type(),' in first
 
 
 def test_lab1_advertisement_patch_is_atomic_and_idempotent(tmp_path):
