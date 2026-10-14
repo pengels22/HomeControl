@@ -9,16 +9,40 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from typing import Any, Dict, List
 
 
-def _ip_json(args: list[str]) -> list[dict]:
+def _ip_json(args: List[str]) -> List[Dict[str, Any]]:
     ip = shutil.which("ip") or "/usr/sbin/ip"
-    result = subprocess.run([ip, "-j", *args], check=True, capture_output=True, text=True)
-    value = json.loads(result.stdout)
-    return value if isinstance(value, list) else []
+    result = subprocess.run(
+        [ip, "-j"] + args,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+    )
+    try:
+        value = json.loads(result.stdout)
+        return value if isinstance(value, list) else []
+    except ValueError:
+        if args != ["route", "show", "default"]:
+            raise
+        routes = []
+        for line in result.stdout.splitlines():
+            fields = line.split()
+            if not fields or fields[0] != "default":
+                continue
+            route = {}
+            for key, marker in (("gateway", "via"), ("dev", "dev"), ("metric", "metric")):
+                if marker in fields:
+                    index = fields.index(marker)
+                    if index + 1 < len(fields):
+                        route[key] = int(fields[index + 1]) if key == "metric" else fields[index + 1]
+            routes.append(route)
+        return routes
 
 
-def collect_status() -> dict:
+def collect_status() -> Dict[str, Any]:
     addresses = _ip_json(["address", "show"])
     routes = _ip_json(["route", "show", "default"])
     defaults = {}

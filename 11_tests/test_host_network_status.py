@@ -60,3 +60,26 @@ def test_host_network_provider_writes_atomically(tmp_path, monkeypatch):
     assert payload["interfaces"] == []
     assert payload["updated_at"] > 0
     assert not list(output.parent.glob(".*.network.json.*"))
+
+
+def test_host_network_provider_accepts_legacy_text_route_output(tmp_path, monkeypatch):
+    provider = load_provider()
+    fake_ip = tmp_path / "ip"
+    fake_ip.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$4\" = \"default\" ]; then\n"
+        "  printf '%s\\n' 'default via 192.168.20.1 dev eth0 metric 100'\n"
+        "else\n"
+        "  printf '%s' '[]'\n"
+        "fi\n"
+    )
+    fake_ip.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    result = provider.collect_status()
+
+    assert result["default_route"] == {
+        "gateway": "192.168.20.1",
+        "dev": "eth0",
+        "metric": 100,
+    }
