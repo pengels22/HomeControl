@@ -34,6 +34,13 @@ def test_host_network_status_file_rejects_stale_provider_data(monkeypatch, tmp_p
     assert reason == 'Configured host network status is stale'
 
 
+def test_settings_frontend_labels_verified_emergency_endpoint():
+    app_js = (management.Path(__file__).parents[1] / '01_HCM' / 'www' / 'app.js').read_text()
+
+    assert 'Open Configuration' in app_js
+    assert 'emergency?.available && emergency.url' in app_js
+
+
 def test_emergency_capability_rejects_unapproved_port_and_paths():
     module = {
         'device_id': '2ccf675d3414',
@@ -139,6 +146,43 @@ async def test_emergency_probe_does_not_expose_stale_advertisement():
     assert result['status'] == 'unknown'
     assert result['url'] is None
     assert 'stale' in result['reason']
+
+
+@pytest.mark.asyncio
+async def test_emergency_probe_uses_authenticated_registry_receipt_for_freshness(monkeypatch):
+    module = {
+        'device_id': '2ccf675d3414', 'online': True, 'ip_address': '192.168.20.36',
+        'last_seen': __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),
+        'last_state': {'ts': time.time() - 120, 'state': {'emergency_ui': {
+            'enabled': True, 'available': True, 'protocol': 'http',
+            'port': 6010, 'config_path': '/config', 'health_path': '/health',
+        }}},
+    }
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {'identity': {'device_id': '2ccf675d3414'}}
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, url):
+            return Response()
+
+    monkeypatch.setattr(management.httpx, 'AsyncClient', Client)
+    result = await management._probe_emergency_interface(module)
+
+    assert result['available'] is True
+    assert result['url'] == 'http://192.168.20.36:6010/config'
 
 
 class FakeTransaction:

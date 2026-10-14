@@ -1168,7 +1168,7 @@ function moduleNetworkTable(modules) {
 
 function emergencyLink(emergency) {
   if (emergency?.available && emergency.url) {
-    return `<a class="button-link" href="${esc(emergency.url)}" target="_blank" rel="noopener noreferrer">Open</a>`;
+    return `<a class="button-link" href="${esc(emergency.url)}" target="_blank" rel="noopener noreferrer">Open Configuration</a>`;
   }
   return `<button type="button" class="secondary compact-button" disabled title="${esc(emergency?.reason || "Emergency interface unavailable")}">Unavailable</button>`;
 }

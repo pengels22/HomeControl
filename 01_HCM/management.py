@@ -66,6 +66,22 @@ def _wire_value(value: Any) -> Any:
     return value
 
 
+def _timestamp_seconds(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                return None
+    if isinstance(value, datetime):
+        return value.timestamp()
+    return None
+
+
 def _module_selector(identifier: str | int) -> tuple[str, str | None]:
     text = str(identifier).strip()
     if not text:
@@ -555,11 +571,13 @@ async def _probe_emergency_interface(module: dict[str, Any]) -> dict[str, Any]:
     address = str(module.get("ip_address") or "").strip()
     if not capability or not address or not module.get("online"):
         return result
-    heartbeat = _state_payload(module).get("ts")
-    try:
-        heartbeat_age = time.time() - float(heartbeat)
-    except (TypeError, ValueError):
+    # The embedded state timestamp changes only when state changes. Use the
+    # authenticated registry receipt timestamp for advertisement freshness.
+    heartbeat = module.get("last_seen") or module.get("supervision_last_seen") or _state_payload(module).get("ts")
+    heartbeat_timestamp = _timestamp_seconds(heartbeat)
+    if heartbeat_timestamp is None:
         return {**result, "status": "unknown", "reason": "Emergency service advertisement has no valid heartbeat timestamp"}
+    heartbeat_age = time.time() - heartbeat_timestamp
     if heartbeat_age < 0 or heartbeat_age > 30:
         return {**result, "status": "unknown", "reason": "Emergency service advertisement is stale"}
     try:
