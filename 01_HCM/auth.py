@@ -2,6 +2,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import time
 from typing import Any
@@ -14,6 +15,8 @@ from .settings import settings
 _sessions: dict[str, tuple[str,str,float]] = {}
 global_config = import_module('07_servises.common.global_config')
 PASSWORD_ITERATIONS = int(global_config.load_global_config('HCM').Auth_Password_PBKDF2_Iterations)
+SUPPORTED_ROLES = {"ADMIN", "READONLY"}
+USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,64}$")
 
 
 def create_session(user: str, role: str='ADMIN', ttl_s: int | None = None) -> str:
@@ -42,6 +45,22 @@ def verify_password(password: str, password_hash: str | None) -> bool:
     digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("ascii"), iterations)
     return hmac.compare_digest(digest.hex(), expected)
 
+def _validate_username(username: str) -> str:
+    clean = str(username or "").strip()
+    if not USERNAME_RE.fullmatch(clean):
+        raise HTTPException(400, "invalid username")
+    return clean
+
+def _validate_role(role: str) -> str:
+    clean = str(role or "").upper()
+    if clean not in SUPPORTED_ROLES:
+        raise HTTPException(400, "invalid role")
+    return clean
+
+def _validate_password(password: str) -> None:
+    if len(password or "") < 10:
+        raise HTTPException(400, "password must be at least 10 characters")
+
 async def create_persistent_session(user: str, role: str, ttl_s: int | None = None) -> str:
     token = secrets.token_urlsafe(32)
     async with db.acquire() as conn:
@@ -57,22 +76,126 @@ async def create_persistent_session(user: str, role: str, ttl_s: int | None = No
         )
     return token
 
-async def create_user(username: str, password: str, role: str) -> dict[str, Any]:
-    if role not in {"ADMIN", "READONLY"}:
-        raise HTTPException(400, "invalid role")
+async def list_users() -> list[dict[str, Any]]:
     async with db.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT username, role, enabled, created_at
+            FROM users
+            ORDER BY username
+            """
+        )
+    return [
+        {
+            "username": row["username"],
+            "role": row["role"],
+            "enabled": bool(row["enabled"]),
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        }
+        for row in rows
+    ]
+
+async def create_user(username: str, password: str, role: str) -> dict[str, Any]:
+    username = _validate_username(username)
+    role = _validate_role(role)
+    _validate_password(password)
+    async with db.acquire() as conn:
+        existing = await conn.fetchrow("SELECT username FROM users WHERE username=$1", username)
+        if existing:
+            raise HTTPException(409, "user already exists")
         await conn.execute(
             """
             INSERT INTO users(username, role, password_hash, enabled)
             VALUES($1,$2,$3,true)
-            ON CONFLICT(username)
-            DO UPDATE SET role=EXCLUDED.role, password_hash=EXCLUDED.password_hash, enabled=true
             """,
             username,
             role,
             hash_password(password),
         )
-    return {"ok": True, "username": username, "role": role}
+    return {
+        "ok": True,
+        "username": username,
+        "role": role,
+        "enabled": True,
+        "created_at": None,
+    }
+
+async def update_user_role(username: str, role: str) -> dict[str, Any]:
+    username = _validate_username(username)
+    role = _validate_role(role)
+    async with db.acquire() as conn:
+        tx_factory = getattr(conn, "transaction", None)
+        if tx_factory is None:
+            row = await _update_user_role_locked(conn, username, role)
+        else:
+            async with tx_factory():
+                row = await _update_user_role_locked(conn, username, role)
+    return row
+
+async def _update_user_role_locked(conn, username: str, role: str) -> dict[str, Any]:
+    current = await conn.fetchrow("SELECT username, role, enabled FROM users WHERE username=$1 FOR UPDATE", username)
+    if not current or not current["enabled"]:
+        raise HTTPException(404, "user not found")
+    if current["role"] == "ADMIN" and role != "ADMIN":
+        admin_count = await conn.fetchval("SELECT count(*) FROM users WHERE role='ADMIN' AND enabled=true")
+        if int(admin_count or 0) <= 1:
+            raise HTTPException(409, "cannot demote final administrator")
+    row = await conn.fetchrow(
+        """
+        UPDATE users
+        SET role=$2
+        WHERE username=$1
+        RETURNING username, role, enabled, created_at
+        """,
+        username,
+        role,
+    )
+    await conn.execute("UPDATE user_sessions SET revoked_at=now() WHERE username=$1 AND revoked_at IS NULL", username)
+    return {
+        "ok": True,
+        "username": row["username"],
+        "role": row["role"],
+        "enabled": bool(row["enabled"]),
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "sessions_revoked": True,
+    }
+
+async def reset_user_password(username: str, password: str) -> dict[str, Any]:
+    username = _validate_username(username)
+    _validate_password(password)
+    async with db.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE users
+            SET password_hash=$2
+            WHERE username=$1 AND enabled=true
+            RETURNING username, role, enabled, created_at
+            """,
+            username,
+            hash_password(password),
+        )
+        if not row:
+            raise HTTPException(404, "user not found")
+        await conn.execute("UPDATE user_sessions SET revoked_at=now() WHERE username=$1 AND revoked_at IS NULL", username)
+    return {
+        "ok": True,
+        "username": row["username"],
+        "role": row["role"],
+        "enabled": bool(row["enabled"]),
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "sessions_revoked": True,
+    }
+
+async def change_own_password(username: str, current_password: str, new_password: str) -> dict[str, Any]:
+    username = _validate_username(username)
+    _validate_password(new_password)
+    async with db.acquire() as conn:
+        row = await conn.fetchrow("SELECT username, password_hash FROM users WHERE username=$1 AND enabled=true", username)
+        if not row or not verify_password(current_password, row["password_hash"]):
+            raise HTTPException(401, "invalid current password")
+        await conn.execute("UPDATE users SET password_hash=$2 WHERE username=$1", username, hash_password(new_password))
+        await conn.execute("UPDATE user_sessions SET revoked_at=now() WHERE username=$1 AND revoked_at IS NULL", username)
+    return {"ok": True, "username": username, "sessions_revoked": True}
 
 async def login_password(username: str, password: str) -> str:
     async with db.acquire() as conn:

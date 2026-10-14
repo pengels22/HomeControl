@@ -27,15 +27,22 @@ from .models import (
     SafetyRelayStateIn,
     SimNameIn,
     UserCreateIn,
+    UserPasswordChangeIn,
+    UserPasswordResetIn,
+    UserRoleUpdateIn,
 )
 from .auth import (
     create_login_challenge,
     create_pairing_key,
     create_session,
     create_user,
+    change_own_password,
+    list_users,
     list_pairing_keys,
     login_password,
     require_user,
+    reset_user_password,
+    update_user_role,
     verify_login_challenge,
     verify_pairing_key,
 )
@@ -70,10 +77,29 @@ async def auth_login(body: PasswordLoginIn):
 async def auth_session(user=Depends(require_user)):
     return user
 
+@router.get('/auth/users')
+async def auth_list_users(user=Depends(require_user)):
+    if user['role'] != 'ADMIN': raise HTTPException(403)
+    return {'users': await list_users(), 'roles': ['ADMIN', 'READONLY']}
+
 @router.post('/auth/users')
 async def auth_create_user(body: UserCreateIn, user=Depends(require_user)):
     if user['role'] != 'ADMIN': raise HTTPException(403)
     return await create_user(body.username, body.password, body.role)
+
+@router.patch('/auth/users/{username}/role')
+async def auth_update_user_role(username: str, body: UserRoleUpdateIn, user=Depends(require_user)):
+    if user['role'] != 'ADMIN': raise HTTPException(403)
+    return await update_user_role(username, body.role)
+
+@router.post('/auth/users/{username}/password')
+async def auth_reset_user_password(username: str, body: UserPasswordResetIn, user=Depends(require_user)):
+    if user['role'] != 'ADMIN': raise HTTPException(403)
+    return await reset_user_password(username, body.password)
+
+@router.post('/auth/password')
+async def auth_change_password(body: UserPasswordChangeIn, user=Depends(require_user)):
+    return await change_own_password(user['user'], body.current_password, body.new_password)
 
 @router.post('/auth/passkey/challenge')
 async def auth_challenge(body: AuthChallengeIn):
@@ -115,6 +141,10 @@ async def modules(user=Depends(require_user)):
 @router.get('/dashboard/status')
 async def dashboard_status(user=Depends(require_user)):
     return await management.dashboard_status()
+
+@router.get('/settings/network')
+async def settings_network(user=Depends(require_user)):
+    return await management.settings_network()
 
 @router.get('/modules/{identifier}')
 async def module_detail(identifier: str, user=Depends(require_user)):

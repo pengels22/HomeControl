@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 ROOT = Path(__file__).resolve().parents[1]
 WEB_ROOT = ROOT / "01_HCM" / "www"
 PREVIEW_TOKEN = "homecontrol-preview-token"
+PREVIEW_READONLY_TOKEN = "homecontrol-preview-readonly-token"
 CHANNELS = [f"{bank}{channel}" for bank in ("A", "B", "C", "D") for channel in range(1, 9)]
 LCM_LIGHT_CHANNELS = [f"A{channel}" for channel in range(1, 9)]
 LCM_DIMMER_CHANNELS = [f"10-{channel}" for channel in range(1, 11)] + [f"HV-{channel}" for channel in range(1, 5)]
@@ -100,6 +101,16 @@ class PreviewState:
             "SIM2": _module("SIM2", "SIM", "48b02d87dd20"),
             "RCM3": _module("RCM3", "RCM", "48b02d87db30", online=False),
         }
+        self.modules["LAB1"]["ip_address"] = None
+        self.modules["RCM1"]["ip_address"] = "192.168.20.31"
+        self.modules["RCM1"]["last_state"]["state"]["management"] = {"emergency_url": "http://192.168.20.31:8088/"}
+        self.modules["RCM2"]["ip_address"] = "192.168.20.32"
+        self.modules["LCM1"]["ip_address"] = "192.168.20.41"
+        self.modules["LCM1"]["last_state"]["state"]["management"] = {"emergency_url": "https://192.168.20.41:8443/"}
+        self.modules["LCM2"]["ip_address"] = "192.168.20.42"
+        self.modules["SIM1"]["ip_address"] = "192.168.20.51"
+        self.modules["SIM2"]["ip_address"] = "192.168.20.52"
+        self.modules["RCM3"]["ip_address"] = "192.168.20.33"
         self.rcm: dict[str, dict[str, dict[str, Any]]] = {}
         for hostname in ("RCM1", "RCM2", "RCM3"):
             self.rcm[hostname] = {
@@ -267,6 +278,10 @@ class PreviewState:
             "fan": False,
             "heat": False,
             "cool": False,
+        }
+        self.users = {
+            "preview-admin": {"username": "preview-admin", "role": "ADMIN", "enabled": True, "created_at": _now(), "password": "preview-admin-password"},
+            "household": {"username": "household", "role": "READONLY", "enabled": True, "created_at": _now(), "password": "household-password"},
         }
         self._sync_relays()
 
@@ -639,6 +654,114 @@ class PreviewState:
         self.hvac["cool"] = False
         return {"ok": True, "mode": normalized, "preview": True}
 
+    def dashboard_status(self) -> dict[str, Any]:
+        lockouts = []
+        for hostname, channels in {**self.rcm, **self.lcm}.items():
+            for channel, channel_state in channels.items():
+                if channel_state.get("maintenance_locked"):
+                    lockouts.append({
+                        "module": hostname,
+                        "module_type": self.modules[hostname]["module_type"],
+                        "logical_name": f"{hostname} {channel}",
+                        "channel_name": channel_state.get("name", f"{hostname} {channel}"),
+                        "channel": channel,
+                        "locked": True,
+                        "reason": "Preview maintenance task" if channel in {"A4", "10-2"} else None,
+                        "locked_at": _now() if channel == "A4" else None,
+                    })
+        faults = [
+            {"source": "module_supervision", "severity": "warning", "module": "RCM3", "component": "supervision", "code": "offline", "description": "Module supervision state is offline", "reported_at": None, "active": True},
+            {"source": "sim_rmc_state", "severity": "warning", "module": "SIM1", "component": "RMC:can2:4", "code": "ens160", "description": "ens160", "reported_at": _now(), "active": True},
+            {"source": "safety_events", "severity": "critical", "module": "HCM", "component": "safety", "code": "alarm_contact_fault", "description": "preview alarm contact diagnostic", "reported_at": _now(), "active": True},
+        ]
+        return {
+            "maintenance_lockouts": {"count": len(lockouts), "items": lockouts},
+            "active_faults": {
+                "count": len(faults),
+                "items": faults,
+                "unsupported_sources": ["Preview does not connect to Conflict or production safety services."],
+            },
+        }
+
+    def settings_network(self) -> dict[str, Any]:
+        modules = []
+        for module in self.modules.values():
+            emergency_url = module["last_state"]["state"].get("management", {}).get("emergency_url")
+            modules.append({
+                "hostname": module["hostname"],
+                "module_type": module["module_type"],
+                "effective_role": module["last_state"]["state"]["lab_role"],
+                "ip_address": module["ip_address"],
+                "address_source": "current" if module["online"] and module["ip_address"] else "last_known" if module["ip_address"] else "unknown",
+                "online": bool(module["online"]),
+                "status": "Online" if module["online"] else "Offline",
+                "last_seen": module["last_seen"] or module["supervision_last_seen"],
+                "emergency_interface": {
+                    "available": bool(emergency_url),
+                    "url": emergency_url,
+                    "reason": "Verified preview emergency URL" if emergency_url else "Emergency interface not verified",
+                },
+            })
+        return {
+            "host_interfaces": {
+                "available": True,
+                "reason": None,
+                "source": "preview_fixture",
+                "interfaces": [
+                    {"name": "eth0", "ipv4": ["192.168.20.27/24"], "ipv6": ["fe80::20:27/64"], "status": "Up", "network": "192.168.20.0/24"},
+                    {"name": "eth0.60", "ipv4": ["192.168.60.27/24"], "ipv6": [], "status": "Up", "network": "192.168.60.0/24"},
+                    {"name": "tailscale0", "ipv4": ["100.64.10.27/32"], "ipv6": ["fd7a:115c:a1e0::27/128"], "status": "Up", "network": "100.64.10.27/32"},
+                    {"name": "spare0", "ipv4": [], "ipv6": [], "status": "Down", "network": None},
+                ],
+            },
+            "modules": modules,
+        }
+
+    def list_users(self) -> list[dict[str, Any]]:
+        return [
+            {key: value for key, value in user.items() if key != "password"}
+            for user in sorted(self.users.values(), key=lambda item: item["username"])
+        ]
+
+    def create_user(self, body: dict[str, Any]) -> dict[str, Any]:
+        username = str(body.get("username", "")).strip()
+        password = str(body.get("password", ""))
+        role = str(body.get("role", "READONLY")).upper()
+        if not username:
+            raise HTTPException(400, "invalid username")
+        if username in self.users:
+            raise HTTPException(409, "user already exists")
+        if role not in {"ADMIN", "READONLY"}:
+            raise HTTPException(400, "invalid role")
+        if len(password) < 10:
+            raise HTTPException(400, "password must be at least 10 characters")
+        self.users[username] = {"username": username, "role": role, "enabled": True, "created_at": _now(), "password": password}
+        return {"ok": True, **{key: value for key, value in self.users[username].items() if key != "password"}}
+
+    def update_user_role(self, username: str, body: dict[str, Any]) -> dict[str, Any]:
+        user = self.users.get(username)
+        if not user:
+            raise HTTPException(404, "user not found")
+        role = str(body.get("role", "")).upper()
+        if role not in {"ADMIN", "READONLY"}:
+            raise HTTPException(400, "invalid role")
+        if user["role"] == "ADMIN" and role != "ADMIN":
+            admins = [item for item in self.users.values() if item["role"] == "ADMIN" and item["enabled"]]
+            if len(admins) <= 1:
+                raise HTTPException(409, "cannot demote final administrator")
+        user["role"] = role
+        return {"ok": True, **{key: value for key, value in user.items() if key != "password"}, "sessions_revoked": True}
+
+    def reset_user_password(self, username: str, body: dict[str, Any]) -> dict[str, Any]:
+        user = self.users.get(username)
+        if not user:
+            raise HTTPException(404, "user not found")
+        password = str(body.get("password", ""))
+        if len(password) < 10:
+            raise HTTPException(400, "password must be at least 10 characters")
+        user["password"] = password
+        return {"ok": True, **{key: value for key, value in user.items() if key != "password"}, "sessions_revoked": True}
+
     def _split_logical(self, logical_name: str) -> tuple[str, str]:
         parts = logical_name.split()
         if len(parts) != 2:
@@ -658,8 +781,14 @@ app.mount("/static", StaticFiles(directory=WEB_ROOT), name="static")
 
 
 def _require_preview_auth(authorization: str | None) -> None:
-    if authorization != f"Bearer {PREVIEW_TOKEN}":
+    if authorization not in {f"Bearer {PREVIEW_TOKEN}", f"Bearer {PREVIEW_READONLY_TOKEN}"}:
         raise HTTPException(401, "preview login required")
+
+
+def _require_preview_admin(authorization: str | None) -> None:
+    _require_preview_auth(authorization)
+    if authorization != f"Bearer {PREVIEW_TOKEN}":
+        raise HTTPException(403, "preview admin role required")
 
 
 @app.get("/api/v1/preview-mode")
@@ -670,13 +799,42 @@ async def preview_mode(authorization: str | None = Header(default=None)):
 
 @app.post("/api/v1/auth/login")
 async def login(body: dict[str, Any]):
+    username = str(body.get("username", ""))
+    if username == "household":
+        return {"token": PREVIEW_READONLY_TOKEN, "preview": True}
     return {"token": PREVIEW_TOKEN, "preview": True}
 
 
 @app.get("/api/v1/auth/session")
 async def session(authorization: str | None = Header(default=None)):
     _require_preview_auth(authorization)
+    if authorization == f"Bearer {PREVIEW_READONLY_TOKEN}":
+        return {"user": "household", "role": "READONLY"}
     return {"user": "preview-admin", "role": "ADMIN"}
+
+
+@app.get("/api/v1/auth/users")
+async def users(authorization: str | None = Header(default=None)):
+    _require_preview_admin(authorization)
+    return {"users": state.list_users(), "roles": ["ADMIN", "READONLY"]}
+
+
+@app.post("/api/v1/auth/users")
+async def create_user(body: dict[str, Any], authorization: str | None = Header(default=None)):
+    _require_preview_admin(authorization)
+    return state.create_user(body)
+
+
+@app.patch("/api/v1/auth/users/{username}/role")
+async def update_user_role(username: str, body: dict[str, Any], authorization: str | None = Header(default=None)):
+    _require_preview_admin(authorization)
+    return state.update_user_role(username, body)
+
+
+@app.post("/api/v1/auth/users/{username}/password")
+async def reset_user_password(username: str, body: dict[str, Any], authorization: str | None = Header(default=None)):
+    _require_preview_admin(authorization)
+    return state.reset_user_password(username, body)
 
 
 @app.get("/api/v1/health")
@@ -724,6 +882,18 @@ async def hvac_mode(body: dict[str, Any], authorization: str | None = Header(def
 async def modules(authorization: str | None = Header(default=None)):
     _require_preview_auth(authorization)
     return {"modules": [copy.deepcopy(module) for module in state.modules.values()]}
+
+
+@app.get("/api/v1/dashboard/status")
+async def dashboard_status(authorization: str | None = Header(default=None)):
+    _require_preview_auth(authorization)
+    return state.dashboard_status()
+
+
+@app.get("/api/v1/settings/network")
+async def settings_network(authorization: str | None = Header(default=None)):
+    _require_preview_auth(authorization)
+    return state.settings_network()
 
 
 @app.get("/api/v1/logical-devices")

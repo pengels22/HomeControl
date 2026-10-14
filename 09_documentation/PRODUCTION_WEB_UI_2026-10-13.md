@@ -124,6 +124,17 @@ stale; it does not infer health from saved configuration alone.
   arbitration that enforces mutual exclusion, minimum on/off timers, compressor
   short-cycle protection, safe transitions, verified equipment/temperature
   feedback, and hysteresis separate from the displayed five-degree target band.
+- Settings uses `GET /api/v1/settings/network` for read-only HCM/network
+  status. Registered module addresses come from the HCM module registry. HCM
+  host interfaces are shown only when a structured host-side network status
+  file is explicitly configured through `HCM_HOST_NETWORK_STATUS_FILE`; the UI
+  otherwise displays host interfaces as unavailable rather than mislabeling the
+  container network namespace as the controller host.
+- Users uses the existing HCM users table, PBKDF2 password hashing and
+  authenticated sessions. Admins can list users, create new users, change roles
+  and reset passwords through `/api/v1/auth/users` endpoints. Password resets
+  and role changes revoke existing sessions for that account. The backend
+  rejects demotion of the final active ADMIN.
 - The SIM UI enumerates ten requested physical analog input rows. The checked-in
   SIM firmware/config still defines eight Hexa AIO analog inputs (`A1`-`A8`) in
   `06_config/02_SIM/sim.yaml`; `AI-9` and `AI-10` have no verified module-local

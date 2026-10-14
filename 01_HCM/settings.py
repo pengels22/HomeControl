@@ -39,5 +39,6 @@ class Settings(BaseSettings):
     auth_rp_id: str = 'homecontrol.local'
     auth_challenge_ttl_s: int = ms_to_s(hcm_globals.Auth_Challenge_TTL)
     auth_session_ttl_s: int = ms_to_s(hcm_globals.Auth_Session_TTL)
+    host_network_status_file: Path | None = None
 
 settings = Settings()

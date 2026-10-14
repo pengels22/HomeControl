@@ -1041,6 +1041,32 @@ th {
   font-size: 0.9rem;
 }
 
+.button-link {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border: 1px solid #28a982;
+  border-radius: 8px;
+  background: #17382f;
+  color: #e8fff7;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.compact-button {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 0.82rem;
+}
+
+.actions-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 @media (max-width: 1080px) {
   .identity-grid, .rcm-grid, .summary-grid, .dashboard-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -97,6 +97,16 @@ class UserCreateIn(BaseModel):
     password: str = Field(min_length=10)
     role: Literal['ADMIN','READONLY'] = 'READONLY'
 
+class UserRoleUpdateIn(BaseModel):
+    role: Literal['ADMIN','READONLY']
+
+class UserPasswordResetIn(BaseModel):
+    password: str = Field(min_length=10)
+
+class UserPasswordChangeIn(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=10)
+
 class PairingKeyCreateIn(BaseModel):
     label: str
     target_type: Literal['HCM_SCREEN','PNL','RCM','LCM','SIM','RMC','OTHER']

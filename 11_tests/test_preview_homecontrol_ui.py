@@ -34,6 +34,7 @@ def test_preview_assets_load_from_real_www_directory(client):
     assert html.status_code == 200
     assert "HomeControl" in html.text
     assert "preview-banner" in html.text
+    assert 'href="/service"' not in html.text
     assert css.status_code == 200
     assert ".preview-banner" in css.text
     assert ".toggle-control" in css.text
@@ -45,6 +46,8 @@ def test_preview_assets_load_from_real_www_directory(client):
     assert "data-output-channel" in js.text
     assert "data-lock-channel" in js.text
     assert "data-open-hvac" in js.text
+    assert "data-add-user" in js.text
+    assert "/settings/network" in js.text
 
 
 def test_browser_route_refresh_serves_spa_for_device_detail(client):
@@ -97,6 +100,67 @@ def test_preview_health_and_logical_devices_support_dashboard_metrics(client):
     assert health["fire_life_safety"]["status"] == "Unavailable"
     assert health["active_fault_count"] == 2
     assert any(device["maintenance_locked"] for device in logical["logical_devices"])
+
+
+def test_settings_preview_reports_interfaces_modules_and_emergency_links(client):
+    data = client.get("/api/v1/settings/network", headers=headers()).json()
+
+    assert data["host_interfaces"]["available"] is True
+    interfaces = {item["name"]: item for item in data["host_interfaces"]["interfaces"]}
+    assert interfaces["eth0"]["ipv4"] == ["192.168.20.27/24"]
+    assert interfaces["eth0"]["ipv6"]
+    assert interfaces["spare0"]["status"] == "Down"
+
+    modules = {item["hostname"]: item for item in data["modules"]}
+    assert modules["RCM1"]["ip_address"] == "192.168.20.31"
+    assert modules["RCM1"]["address_source"] == "current"
+    assert modules["RCM3"]["address_source"] == "last_known"
+    assert modules["LAB1"]["ip_address"] is None
+    assert modules["LAB1"]["address_source"] == "unknown"
+    assert modules["RCM1"]["emergency_interface"]["available"] is True
+    assert modules["RCM1"]["emergency_interface"]["url"].startswith("http://192.168.20.31")
+    assert modules["RCM2"]["emergency_interface"]["available"] is False
+
+
+def test_users_preview_admin_crud_and_security_behaviors(client):
+    users = client.get("/api/v1/auth/users", headers=headers())
+    created = client.post(
+        "/api/v1/auth/users",
+        headers=headers(),
+        json={"username": "guest", "password": "preview guest password", "role": "READONLY"},
+    )
+    duplicate = client.post(
+        "/api/v1/auth/users",
+        headers=headers(),
+        json={"username": "guest", "password": "preview guest password", "role": "READONLY"},
+    )
+    role = client.patch("/api/v1/auth/users/guest/role", headers=headers(), json={"role": "ADMIN"})
+    reset = client.post("/api/v1/auth/users/guest/password", headers=headers(), json={"password": "new preview password"})
+    short = client.post("/api/v1/auth/users/guest/password", headers=headers(), json={"password": "short"})
+    readonly = {"Authorization": f"Bearer {preview.PREVIEW_READONLY_TOKEN}"}
+    forbidden = client.get("/api/v1/auth/users", headers=readonly)
+
+    assert users.status_code == 200
+    assert all("password" not in user and "password_hash" not in user for user in users.json()["users"])
+    assert created.status_code == 200
+    assert duplicate.status_code == 409
+    assert role.status_code == 200
+    assert role.json()["role"] == "ADMIN"
+    assert reset.status_code == 200
+    assert reset.json()["sessions_revoked"] is True
+    assert short.status_code == 400
+    assert forbidden.status_code == 403
+
+
+def test_users_preview_last_admin_protection(client):
+    response = client.patch(
+        "/api/v1/auth/users/preview-admin/role",
+        headers=headers(),
+        json={"role": "READONLY"},
+    )
+
+    assert response.status_code == 409
+    assert "final administrator" in response.text
 
 
 def test_hvac_preview_supports_modal_modes_and_threshold_contract(client):

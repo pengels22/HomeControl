@@ -414,6 +414,128 @@ function modalUnavailable(title, message) {
   </section>`);
 }
 
+function roleOptions(selected) {
+  return (window.__authRoles || ["ADMIN", "READONLY"]).map((role) => `<option value="${esc(role)}" ${role === selected ? "selected" : ""}>${esc(role)}</option>`).join("");
+}
+
+function openAddUserDialog() {
+  modal(`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="add-user-title">
+    <div class="modal-head">
+      <h3 id="add-user-title">Add User</h3>
+      <button type="button" class="secondary icon-button" data-close-dialog aria-label="Close">x</button>
+    </div>
+    <label>Username <input data-user-username autocomplete="off"></label>
+    <label>Password <input type="password" data-user-password autocomplete="new-password"></label>
+    <label>Confirm password <input type="password" data-user-password-confirm autocomplete="new-password"></label>
+    <label>Role <select data-user-role>${roleOptions("READONLY")}</select></label>
+    <div class="modal-error" role="status" aria-live="polite" data-user-modal-status></div>
+    <div class="modal-actions">
+      <button type="button" class="secondary" data-close-dialog>Cancel</button>
+      <button type="button" data-save-add-user>Create</button>
+    </div>
+  </section>`);
+}
+
+function openChangeRoleDialog(username) {
+  const user = (window.__lastUsers || []).find((item) => item.username === username);
+  if (!user) return;
+  modal(`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="role-title">
+    <div class="modal-head">
+      <h3 id="role-title">Change Role</h3>
+      <button type="button" class="secondary icon-button" data-close-dialog aria-label="Close">x</button>
+    </div>
+    <div class="diagnostic-grid">
+      ${kv("Username", user.username)}
+      ${kv("Current role", user.role)}
+    </div>
+    <label>New role <select data-user-role>${roleOptions(user.role)}</select></label>
+    <div class="modal-error" role="status" aria-live="polite" data-user-modal-status></div>
+    <div class="modal-actions">
+      <button type="button" class="secondary" data-close-dialog>Cancel</button>
+      <button type="button" data-save-role="${esc(user.username)}">Save</button>
+    </div>
+  </section>`);
+}
+
+function openResetPasswordDialog(username) {
+  const user = (window.__lastUsers || []).find((item) => item.username === username);
+  if (!user) return;
+  modal(`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="password-title">
+    <div class="modal-head">
+      <h3 id="password-title">Reset Password</h3>
+      <button type="button" class="secondary icon-button" data-close-dialog aria-label="Close">x</button>
+    </div>
+    <div class="diagnostic-grid">${kv("Username", user.username)}</div>
+    <label>New password <input type="password" data-user-password autocomplete="new-password"></label>
+    <label>Confirm new password <input type="password" data-user-password-confirm autocomplete="new-password"></label>
+    <div class="modal-error" role="status" aria-live="polite" data-user-modal-status></div>
+    <div class="modal-actions">
+      <button type="button" class="secondary" data-close-dialog>Cancel</button>
+      <button type="button" data-save-password="${esc(user.username)}">Save</button>
+    </div>
+  </section>`);
+}
+
+function userModalStatus(message) {
+  const status = activeDialog?.querySelector("[data-user-modal-status]");
+  if (status) status.textContent = message;
+}
+
+function matchingPasswords() {
+  const password = activeDialog?.querySelector("[data-user-password]")?.value || "";
+  const confirm = activeDialog?.querySelector("[data-user-password-confirm]")?.value || "";
+  if (password !== confirm) throw new Error("Passwords do not match");
+  return password;
+}
+
+async function saveAddUser() {
+  try {
+    const username = activeDialog.querySelector("[data-user-username]").value.trim();
+    const role = activeDialog.querySelector("[data-user-role]").value;
+    const password = matchingPasswords();
+    if (!username) throw new Error("Username is required");
+    await api("/auth/users", {
+      method: "POST",
+      body: JSON.stringify({username, password, role}),
+    });
+    closeDialog();
+    await renderUsers();
+    setError("User created.");
+  } catch (error) {
+    userModalStatus(error.message);
+  }
+}
+
+async function saveUserRole(username) {
+  try {
+    const role = activeDialog.querySelector("[data-user-role]").value;
+    await api(`/auth/users/${encodeURIComponent(username)}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({role}),
+    });
+    closeDialog();
+    await renderUsers();
+    setError("User role updated.");
+  } catch (error) {
+    userModalStatus(error.message);
+  }
+}
+
+async function saveUserPassword(username) {
+  try {
+    const password = matchingPasswords();
+    await api(`/auth/users/${encodeURIComponent(username)}/password`, {
+      method: "POST",
+      body: JSON.stringify({password}),
+    });
+    closeDialog();
+    await renderUsers();
+    setError("Password reset. Existing sessions for that user were revoked.");
+  } catch (error) {
+    userModalStatus(error.message);
+  }
+}
+
 function deviceTable(modules) {
   if (!modules.length) return `<div class="empty">No registered devices returned by HCM.</div>`;
   return `<div class="table-wrap"><table>
@@ -731,16 +853,110 @@ async function renderService() {
     <section class="panel"><h3>Diagnostics Foundation</h3><p class="muted">This page reports only live HCM diagnostics exposed by authenticated APIs. Watchdog, PostgreSQL, and host service controls are intentionally not exposed here.</p></section>`;
 }
 
-function renderSettings() {
+async function renderSettings() {
   setTitle("Configuration", "Settings");
-  $("content").innerHTML = `<section class="panel"><h3>Settings</h3><p class="muted">Configuration pages will be added here after their backend contracts are reviewed. No simulator state or unsafe replacement workflow is exposed.</p></section>`;
+  $("content").innerHTML = `<div class="loading">Loading network settings...</div>`;
+  const data = await api("/settings/network");
+  const interfaces = data.host_interfaces?.interfaces || [];
+  const modules = data.modules || [];
+  $("content").innerHTML = `
+    <section class="panel">
+      <div class="panel-head">
+        <h3>HCM Network Interfaces</h3>
+        <span class="muted">${data.host_interfaces?.available ? "Host provider" : "Unavailable"}</span>
+      </div>
+      ${data.host_interfaces?.available ? interfaceTable(interfaces) : `<div class="notice warn">${esc(data.host_interfaces?.reason || "Host interface data is unavailable")}</div>`}
+    </section>
+    <section class="panel">
+      <div class="panel-head">
+        <h3>Registered Module Network Access</h3>
+        <span class="muted">${modules.length} registered modules</span>
+      </div>
+      ${moduleNetworkTable(modules)}
+    </section>`;
 }
 
 async function renderUsers() {
   setTitle("Access", "Users");
   const session = currentUser || await api("/auth/session");
   currentUser = session;
-  $("content").innerHTML = `<section class="panel"><h3>User Management</h3><div class="identity-grid"><div><span>Signed in as</span><strong>${esc(session.user)}</strong></div><div><span>Role</span><strong>${esc(session.role)}</strong></div></div><p class="muted">Centralized user management remains tied to authenticated HCM APIs. Pairing-key administration has been removed from the production UI workflow.</p></section>`;
+  if (session.role !== "ADMIN") {
+    $("content").innerHTML = `<section class="panel"><h3>User Management</h3><div class="notice warn">Your account can view the current session, but user administration requires an ADMIN role.</div>${sessionBlock(session)}</section>`;
+    return;
+  }
+  $("content").innerHTML = `<div class="loading">Loading users...</div>`;
+  const data = await api("/auth/users");
+  window.__lastUsers = data.users || [];
+  window.__authRoles = data.roles || ["ADMIN", "READONLY"];
+  $("content").innerHTML = `
+    <section class="panel">
+      <div class="panel-head">
+        <h3>User Management</h3>
+        <button type="button" data-add-user>Add User</button>
+      </div>
+      ${sessionBlock(session)}
+      ${userTable(window.__lastUsers)}
+    </section>`;
+}
+
+function interfaceTable(interfaces) {
+  if (!interfaces.length) return `<div class="empty">No HCM host interfaces reported.</div>`;
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>Interface</th><th>IPv4</th><th>IPv6</th><th>Status</th><th>Network</th></tr></thead>
+    <tbody>${interfaces.map((item) => `<tr>
+      <td><code>${esc(item.name)}</code></td>
+      <td>${addressList(item.ipv4)}</td>
+      <td>${addressList(item.ipv6)}</td>
+      <td>${esc(item.status || "Unknown")}</td>
+      <td>${esc(item.network || "Unknown")}</td>
+    </tr>`).join("")}</tbody>
+  </table></div>`;
+}
+
+function addressList(addresses) {
+  const list = Array.isArray(addresses) ? addresses : addresses ? [addresses] : [];
+  return list.length ? list.map((item) => `<code>${esc(item)}</code>`).join("<br>") : "Unknown";
+}
+
+function moduleNetworkTable(modules) {
+  if (!modules.length) return `<div class="empty">No registered modules returned by HCM.</div>`;
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>Module</th><th>Type</th><th>IP Address</th><th>Status</th><th>Emergency UI</th></tr></thead>
+    <tbody>${modules.map((module) => `<tr>
+      <td><a href="/devices/${encodeURIComponent(module.hostname)}">${esc(module.hostname)}</a></td>
+      <td>${esc(module.effective_role || module.module_type || "UNASSIGNED")}</td>
+      <td>${module.ip_address ? `<code>${esc(module.ip_address)}</code><br><span>${esc(module.address_source || "unknown")}</span>` : "Unknown"}</td>
+      <td>${statusPill(module.online, module.status || (module.online ? "Online" : "Offline"))}</td>
+      <td>${emergencyLink(module.emergency_interface)}</td>
+    </tr>`).join("")}</tbody>
+  </table></div>`;
+}
+
+function emergencyLink(emergency) {
+  if (emergency?.available && emergency.url) {
+    return `<a class="button-link" href="${esc(emergency.url)}" target="_blank" rel="noopener noreferrer">Open</a>`;
+  }
+  return `<button type="button" class="secondary compact-button" disabled title="${esc(emergency?.reason || "Emergency interface unavailable")}">Unavailable</button>`;
+}
+
+function sessionBlock(session) {
+  return `<div class="identity-grid"><div><span>Signed in as</span><strong>${esc(session.user)}</strong></div><div><span>Role</span><strong>${esc(session.role)}</strong></div></div>`;
+}
+
+function userTable(users) {
+  if (!users.length) return `<div class="empty">No users returned by HCM.</div>`;
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
+    <tbody>${users.map((user) => `<tr>
+      <td>${esc(user.username)}</td>
+      <td>${esc(user.role)}</td>
+      <td>${user.enabled ? "Enabled" : "Disabled"}</td>
+      <td class="actions-cell">
+        <button type="button" class="secondary compact-button" data-change-role="${esc(user.username)}">Change Role</button>
+        <button type="button" class="secondary compact-button" data-reset-password="${esc(user.username)}">Reset Password</button>
+      </td>
+    </tr>`).join("")}</tbody>
+  </table></div>`;
 }
 
 function modal(html) {
@@ -1016,8 +1232,8 @@ async function renderRoute() {
     const parts = routeParts();
     if (parts[0] === "devices" && parts[1]) return await renderDeviceDetail(decodeURIComponent(parts.slice(1).join("/")));
     if (parts[0] === "devices") return await renderDevices();
-    if (parts[0] === "service") return await renderService();
-    if (parts[0] === "settings") return renderSettings();
+    if (parts[0] === "service") return go("/dashboard");
+    if (parts[0] === "settings") return await renderSettings();
     if (parts[0] === "users") return await renderUsers();
     return await renderDashboard();
   } catch (error) {
@@ -1051,6 +1267,21 @@ document.addEventListener("click", async (event) => {
   const faultsOpen = event.target.closest("[data-open-faults]");
   if (faultsOpen) {
     await openFaultsDialog();
+    return;
+  }
+  const addUser = event.target.closest("[data-add-user]");
+  if (addUser) {
+    openAddUserDialog();
+    return;
+  }
+  const changeRole = event.target.closest("[data-change-role]");
+  if (changeRole) {
+    openChangeRoleDialog(changeRole.dataset.changeRole);
+    return;
+  }
+  const resetPassword = event.target.closest("[data-reset-password]");
+  if (resetPassword) {
+    openResetPasswordDialog(resetPassword.dataset.resetPassword);
     return;
   }
   const output = event.target.closest("[data-output-channel]");
@@ -1130,6 +1361,21 @@ document.addEventListener("click", async (event) => {
   const saveHvac = event.target.closest("[data-save-hvac]");
   if (saveHvac) {
     await saveHvacSettings();
+    return;
+  }
+  const saveAdd = event.target.closest("[data-save-add-user]");
+  if (saveAdd) {
+    await saveAddUser();
+    return;
+  }
+  const saveRole = event.target.closest("[data-save-role]");
+  if (saveRole) {
+    await saveUserRole(saveRole.dataset.saveRole);
+    return;
+  }
+  const savePassword = event.target.closest("[data-save-password]");
+  if (savePassword) {
+    await saveUserPassword(savePassword.dataset.savePassword);
   }
 });
 

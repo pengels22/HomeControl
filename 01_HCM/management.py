@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from datetime import date, datetime
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import urlparse
 
 from homecontrol_identity import InvalidDeviceId, maybe_normalize_device_id
 
 from . import db
+from .settings import settings
 
 
 UNSET = object()
@@ -304,6 +307,73 @@ def _sim_rmc_fault_items(module: dict[str, Any]) -> list[dict[str, Any]]:
                 "active": True,
             })
     return items
+
+
+def _explicit_emergency_url(module: dict[str, Any]) -> str | None:
+    payloads = [
+        module.get("last_health"),
+        module.get("last_state"),
+        _nested_state(module),
+    ]
+    for payload in payloads:
+        data = _wire_value(payload or {})
+        if not isinstance(data, dict):
+            continue
+        candidates = [
+            data.get("emergency_interface_url"),
+            data.get("emergency_url"),
+            (data.get("emergency_interface") or {}).get("url") if isinstance(data.get("emergency_interface"), dict) else None,
+            (data.get("management") or {}).get("emergency_url") if isinstance(data.get("management"), dict) else None,
+        ]
+        for candidate in candidates:
+            if candidate:
+                return str(candidate)
+    return None
+
+
+def _validated_emergency_url(module: dict[str, Any]) -> tuple[str | None, str]:
+    candidate = _explicit_emergency_url(module)
+    if not candidate:
+        return None, "Emergency interface not verified"
+    parsed = urlparse(candidate)
+    if parsed.scheme not in {"http", "https"}:
+        return None, "Emergency URL scheme is not allowed"
+    host = parsed.hostname
+    if not host:
+        return None, "Emergency URL host is missing"
+    allowed_hosts = {str(module.get("ip_address") or ""), str(module.get("hostname") or "")}
+    allowed_hosts = {item.lower() for item in allowed_hosts if item}
+    if host.lower() not in allowed_hosts:
+        return None, "Emergency URL host does not match the registered module address"
+    return candidate, "Verified explicit module emergency URL"
+
+
+def _host_interfaces_from_status_file() -> tuple[list[dict[str, Any]], str | None]:
+    path = settings.host_network_status_file
+    if not path:
+        return [], "Host network status provider is not configured"
+    path = Path(path)
+    if not path.exists():
+        return [], "Configured host network status file is unavailable"
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return [], "Configured host network status file could not be read"
+    interfaces = data.get("interfaces") if isinstance(data, dict) else None
+    if not isinstance(interfaces, list):
+        return [], "Configured host network status file has no interface list"
+    normalized = []
+    for item in interfaces:
+        if not isinstance(item, dict):
+            continue
+        normalized.append({
+            "name": item.get("name") or item.get("interface") or "Unknown",
+            "ipv4": item.get("ipv4") or [],
+            "ipv6": item.get("ipv6") or [],
+            "status": item.get("status") or "Unknown",
+            "network": item.get("network") or item.get("prefix") or None,
+        })
+    return normalized, None
 
 
 def _capability_names(rows) -> set[str]:
@@ -1369,6 +1439,40 @@ async def dashboard_status() -> dict[str, Any]:
                 "Historical output-arbitration log entries are not treated as current active faults.",
             ],
         },
+    }
+
+
+async def settings_network() -> dict[str, Any]:
+    interfaces, unavailable_reason = _host_interfaces_from_status_file()
+    modules = await list_modules()
+    module_rows = []
+    for module in modules:
+        address = module.get("ip_address")
+        address_source = "current" if module.get("online") and address else "last_known" if address else "unknown"
+        emergency_url, emergency_reason = _validated_emergency_url(module)
+        module_rows.append({
+            "hostname": module["hostname"],
+            "module_type": module["module_type"],
+            "effective_role": _operational_role(module),
+            "ip_address": address,
+            "address_source": address_source,
+            "online": bool(module.get("online") or module.get("control_session_online")),
+            "status": "Online" if module.get("online") or module.get("control_session_online") else "Offline",
+            "last_seen": module.get("last_seen") or module.get("supervision_last_seen"),
+            "emergency_interface": {
+                "available": emergency_url is not None,
+                "url": emergency_url,
+                "reason": emergency_reason,
+            },
+        })
+    return {
+        "host_interfaces": {
+            "available": unavailable_reason is None,
+            "reason": unavailable_reason,
+            "interfaces": interfaces,
+            "source": "configured_host_status_file" if unavailable_reason is None else "unavailable",
+        },
+        "modules": module_rows,
     }
 
 
