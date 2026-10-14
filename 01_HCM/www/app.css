@@ -397,6 +397,17 @@ th {
   font-size: 0.95rem;
 }
 
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.inline-actions {
+  justify-content: flex-start;
+}
+
 .notice {
   margin-top: 14px;
   padding: 12px;

@@ -112,6 +112,21 @@ class PreviewState:
         self.modules["SIM2"]["ip_address"] = "192.168.20.52"
         self.modules["RCM3"]["ip_address"] = "192.168.20.33"
         self.role_transitions: dict[str, dict[str, Any]] = {}
+        self.git_settings = {
+            "storage_root": "runtime/preview-homecontrol",
+            "commit_name": "Preview Admin",
+            "commit_email": "preview@example.test",
+            "repo_url": "",
+            "remote_name": "origin",
+            "github_enabled": False,
+            "github_token_configured": False,
+            "status": {
+                "local_enabled": True,
+                "remote_configured": False,
+                "dirty": False,
+                "display": "Local Git enabled (no GitHub remote)",
+            },
+        }
         self.rcm: dict[str, dict[str, dict[str, Any]]] = {}
         for hostname in ("RCM1", "RCM2", "RCM3"):
             self.rcm[hostname] = {
@@ -798,6 +813,40 @@ class PreviewState:
             "modules": modules,
         }
 
+    def git_status(self) -> dict[str, Any]:
+        return copy.deepcopy(self.git_settings)
+
+    def update_git_settings(self, body: dict[str, Any]) -> dict[str, Any]:
+        repo_url = str(body.get("repo_url", self.git_settings["repo_url"])).strip()
+        if "@" in repo_url.split("//", 1)[-1].split("/", 1)[0]:
+            raise HTTPException(400, "Repository URL must not contain embedded credentials")
+        self.git_settings.update({
+            "commit_name": str(body.get("commit_name", self.git_settings["commit_name"])).strip(),
+            "commit_email": str(body.get("commit_email", self.git_settings["commit_email"])).strip(),
+            "repo_url": repo_url,
+            "github_enabled": bool(body.get("github_enabled", self.git_settings["github_enabled"])),
+        })
+        if body.get("github_pat"):
+            self.git_settings["github_token_configured"] = True
+        self.git_settings["status"] = {
+            "local_enabled": True,
+            "remote_configured": bool(self.git_settings["repo_url"] and self.git_settings["github_enabled"]),
+            "dirty": False,
+            "display": "Git Repository: Not Synced" if self.git_settings["github_enabled"] else "Local Git enabled (no GitHub remote)",
+        }
+        return self.git_status()
+
+    def disconnect_github(self) -> dict[str, Any]:
+        self.git_settings["github_enabled"] = False
+        self.git_settings["github_token_configured"] = False
+        self.git_settings["status"] = {
+            "local_enabled": True,
+            "remote_configured": False,
+            "dirty": False,
+            "display": "Local Git enabled (no GitHub remote)",
+        }
+        return self.git_status()
+
     def list_users(self) -> list[dict[str, Any]]:
         return [
             {key: value for key, value in user.items() if key != "password"}
@@ -993,6 +1042,24 @@ async def dashboard_status(authorization: str | None = Header(default=None)):
 async def settings_network(authorization: str | None = Header(default=None)):
     _require_preview_auth(authorization)
     return state.settings_network()
+
+
+@app.get("/api/v1/settings/git")
+async def settings_git(authorization: str | None = Header(default=None)):
+    _require_preview_admin(authorization)
+    return state.git_status()
+
+
+@app.put("/api/v1/settings/git")
+async def settings_git_update(body: dict[str, Any], authorization: str | None = Header(default=None)):
+    _require_preview_admin(authorization)
+    return state.update_git_settings(body)
+
+
+@app.delete("/api/v1/settings/github")
+async def settings_github_disconnect(authorization: str | None = Header(default=None)):
+    _require_preview_admin(authorization)
+    return state.disconnect_github()
 
 
 @app.get("/api/v1/logical-devices")

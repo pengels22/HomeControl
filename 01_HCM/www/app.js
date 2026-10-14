@@ -672,6 +672,40 @@ async function saveUserPassword(username) {
   }
 }
 
+async function saveGitSettings() {
+  const status = document.querySelector("[data-git-status]");
+  if (status) status.textContent = "Saving repository settings...";
+  try {
+    const result = await api("/settings/git", {
+      method: "PUT",
+      body: JSON.stringify({
+        commit_name: document.querySelector("[data-git-name]")?.value || "",
+        commit_email: document.querySelector("[data-git-email]")?.value || "",
+        repo_url: document.querySelector("[data-git-repo]")?.value || "",
+        github_pat: document.querySelector("[data-git-pat]")?.value || "",
+        github_enabled: Boolean(document.querySelector("[data-git-enabled]")?.checked),
+      }),
+    });
+    if (status) status.textContent = result.status?.display || "Git Repository: Not Synced";
+    const pat = document.querySelector("[data-git-pat]");
+    if (pat) pat.value = "";
+  } catch (error) {
+    if (status) status.textContent = `Save failed: ${error.message}`;
+  }
+}
+
+async function disconnectGithub() {
+  const status = document.querySelector("[data-git-status]");
+  if (status) status.textContent = "Disconnecting GitHub...";
+  try {
+    const result = await api("/settings/github", {method: "DELETE"});
+    if (status) status.textContent = result.status?.display || "Git Repository: Not Synced";
+    await renderSettings();
+  } catch (error) {
+    if (status) status.textContent = `Disconnect failed: ${error.message}`;
+  }
+}
+
 function deviceTable(modules) {
   if (!modules.length) return `<div class="empty">No registered devices returned by HCM.</div>`;
   return `<div class="table-wrap"><table>
@@ -1023,7 +1057,13 @@ async function renderService() {
 async function renderSettings() {
   setTitle("Configuration", "Settings");
   $("content").innerHTML = `<div class="loading">Loading network settings...</div>`;
-  const data = await api("/settings/network");
+  const [networkResult, gitResult] = await Promise.allSettled([
+    api("/settings/network"),
+    api("/settings/git"),
+  ]);
+  if (networkResult.status !== "fulfilled") throw networkResult.reason;
+  const data = networkResult.value;
+  const git = gitResult.status === "fulfilled" ? gitResult.value : null;
   const interfaces = data.host_interfaces?.interfaces || [];
   const modules = data.modules || [];
   $("content").innerHTML = `
@@ -1040,7 +1080,29 @@ async function renderSettings() {
         <span class="muted">${modules.length} registered modules</span>
       </div>
       ${moduleNetworkTable(modules)}
+    </section>
+    <section class="panel">
+      <div class="panel-head">
+        <h3>Configuration Repository</h3>
+        <span class="muted">${git ? esc(git.status?.display || "Git Repository: Not Synced") : "Unavailable"}</span>
+      </div>
+      ${git ? gitSettingsForm(git) : `<div class="notice warn">Git repository settings are unavailable for this account or HCM instance.</div>`}
     </section>`;
+}
+
+function gitSettingsForm(git) {
+  return `<div class="settings-grid">
+    <label>Commit name <input data-git-name value="${esc(git.commit_name || "")}" autocomplete="off"></label>
+    <label>Commit email <input data-git-email value="${esc(git.commit_email || "")}" autocomplete="off"></label>
+    <label>GitHub repository URL <input data-git-repo value="${esc(git.repo_url || "")}" placeholder="https://github.com/owner/repo.git" autocomplete="off"></label>
+    <label>Personal access token <input data-git-pat type="password" placeholder="${git.github_token_configured ? "Configured" : "Not configured"}" autocomplete="off"></label>
+  </div>
+  <label class="settings-check"><input type="checkbox" data-git-enabled ${git.github_enabled ? "checked" : ""}> Enable GitHub sync when configured</label>
+  <div class="modal-actions inline-actions">
+    <button type="button" class="secondary" data-disconnect-github ${git.github_enabled || git.github_token_configured ? "" : "disabled"}>Disconnect GitHub</button>
+    <button type="button" data-save-git-settings>Save Repository Settings</button>
+  </div>
+  <p class="muted" data-git-status>${esc(git.status?.display || "Git Repository: Not Synced")}</p>`;
 }
 
 async function renderUsers() {
@@ -1553,6 +1615,16 @@ document.addEventListener("click", async (event) => {
   const savePassword = event.target.closest("[data-save-password]");
   if (savePassword) {
     await saveUserPassword(savePassword.dataset.savePassword);
+    return;
+  }
+  const saveGit = event.target.closest("[data-save-git-settings]");
+  if (saveGit) {
+    await saveGitSettings();
+    return;
+  }
+  const disconnectGitHub = event.target.closest("[data-disconnect-github]");
+  if (disconnectGitHub) {
+    await disconnectGithub();
   }
 });
 

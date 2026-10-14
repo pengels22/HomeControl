@@ -51,6 +51,7 @@ from .hvac import Mode
 from . import management
 from . import role_switching
 from .settings import settings
+from . import storage
 from .updater import updater
 from .registry import registry
 
@@ -145,6 +146,27 @@ async def dashboard_status(user=Depends(require_user)):
 @router.get('/settings/network')
 async def settings_network(user=Depends(require_user)):
     return await management.settings_network()
+
+@router.get('/settings/git')
+async def settings_git(user=Depends(require_user)):
+    if user['role'] != 'ADMIN':
+        raise HTTPException(403)
+    return storage.get_git_settings()
+
+@router.put('/settings/git')
+async def settings_git_update(body: dict, user=Depends(require_user)):
+    if user['role'] != 'ADMIN':
+        raise HTTPException(403)
+    try:
+        return storage.update_git_settings(body)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+@router.delete('/settings/github')
+async def settings_github_disconnect(user=Depends(require_user)):
+    if user['role'] != 'ADMIN':
+        raise HTTPException(403)
+    return storage.disconnect_github()
 
 @router.get('/modules/{identifier}')
 async def module_detail(identifier: str, user=Depends(require_user)):

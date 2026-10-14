@@ -10,13 +10,14 @@ common_pinmap = import_module('07_servises.common.pinmap')
 common_io = import_module('07_servises.common.io')
 common_global_config = import_module('07_servises.common.global_config')
 common_safety = import_module('07_servises.common.safety_arbiter')
+common_infra = import_module('07_servises.common.module_infra')
 
 class RCMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
         super().__init__('RCM', config)
         self.global_config = common_global_config.load_global_config('RCM')
         relay_count = int(config.get('relay_count', self.global_config.RCM_Relay_Count))
-        names = [f'{bank}{ch}' for bank in 'ABCD' for ch in range(1, 9)][:relay_count]
+        names = common_infra.RCM_RELAY_CHANNELS[:relay_count]
         pinout_path = config.get(
             'pinout_path',
             str(Path(__file__).resolve().parents[1] / '06_config/04_RCM/Pinout.md'),
@@ -25,6 +26,7 @@ class RCMAgent(common_agent.ModuleAgent):
         common_pinmap.require_channels(self.pinout, names)
         self.io_mode = common_io.io_mode(config)
         self.relays = common_hw.DigitalBank(names)
+        self.relay_hardware_map = {ch: common_infra.RCM_RELAY_MAP[ch] for ch in names}
         default_on = bool(config.get('default_relay_on', self.global_config.RCM_Default_Relay_On))
         if default_on:
             for ch in names:
@@ -60,6 +62,11 @@ class RCMAgent(common_agent.ModuleAgent):
     async def collect_state(self):
         return {
             'relays': self.relays.snapshot(),
+            'relay_hardware_map': {
+                channel: {'component': component, 'index': index}
+                for channel, (component, index) in self.relay_hardware_map.items()
+            },
+            'state_confidence': 'commanded_only_no_contact_feedback',
             'io_mode': self.io_mode,
             'pinout': {
                 channel: {
@@ -95,6 +102,7 @@ class RCMAgent(common_agent.ModuleAgent):
                 'hardware_address': entry.hardware_address,
                 'value': self.relays.get(ch),
                 'requested_value': bool(payload['value']),
+                'state_confidence': 'commanded_only_no_contact_feedback',
                 'arbitration': decision.as_dict(),
             }
         if payload.get('op') == 'all_off':

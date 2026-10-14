@@ -9,33 +9,30 @@ common_hw = import_module('07_servises.common.hardware')
 common_io = import_module('07_servises.common.io')
 common_global_config = import_module('07_servises.common.global_config')
 common_safety = import_module('07_servises.common.safety_arbiter')
+common_infra = import_module('07_servises.common.module_infra')
 
 class LCMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
         super().__init__('LCM', config)
         self.global_config = common_global_config.load_global_config('LCM')
-        self.relay_map = {str(i): f'A{i}' for i in range(1, 9)}
-        self.relay_map.update({str(i): f'B{i - 8}' for i in range(9, 13)})
-        self.hv_dimmer_map = {str(i): f'HV-{i - 12}' for i in range(13, 17)}
-        self.lv_dimmer_map = {str(i): f'10-{i - 16}' for i in range(17, 25)}
+        self.relay_map = {str(i): channel for i, channel in enumerate(common_infra.LCM_RELAY_CHANNELS, start=1)}
+        self.lv_dimmer_map = {str(i): channel for i, channel in enumerate(common_infra.LCM_ANALOG_DIMMER_CHANNELS, start=9)}
+        self.hv_dimmer_map = {str(i): channel for i, channel in enumerate(common_infra.LCM_HV_DIMMER_CHANNELS, start=19)}
         self.io_mode = common_io.io_mode(config)
-        self.relays = common_hw.DigitalBank(sorted(set(self.relay_map.values())))
-        self.hv_dimmers = common_hw.AnalogOutputs(sorted(set(self.hv_dimmer_map.values())))
+        self.relays = common_hw.DigitalBank(common_infra.LCM_RELAY_CHANNELS)
+        self.lv_dimmers = common_hw.AnalogOutputs(common_infra.LCM_ANALOG_DIMMER_CHANNELS)
+        self.hv_dimmers = common_hw.AnalogOutputs(common_infra.LCM_HV_DIMMER_CHANNELS)
         self.i2c = config.get('i2c', {})
         self.i2c_bus = common_hw.I2CBus(
             int(self.i2c.get('bus', 1)),
             enabled=bool(self.i2c.get('enabled', False)) and common_io.real_io_enabled(config),
         )
-        lv_channels = self.i2c.get('lv_dimmers') or {
-            f'10-{i}': {'mux_channel': i - 1, 'dac_address': int(self.i2c.get('dac_address', 0x60))}
-            for i in range(1, 9)
-        }
-        self.lv_dimmers = common_hw.MultiplexedDACOutputs(
-            lv_channels,
-            self.i2c_bus,
-            mux_address=int(self.i2c.get('mux_address', 0x70)),
-            dac_address=int(self.i2c.get('dac_address', 0x60)),
-        )
+        self.peripherals.register('lcm_pwm_controller', name='0-10V PWM Controller', category='i2c', metadata={'real_output_enabled': False, 'model': None})
+        self.peripherals.components['lcm_pwm_controller'].status = 'not_configured'
+        self.peripherals.register('shelly_hv_1', name='Shelly Pro Dimmer 1', category='network_io', metadata={'real_output_enabled': False})
+        self.peripherals.components['shelly_hv_1'].status = 'not_configured'
+        self.peripherals.register('shelly_hv_2', name='Shelly Pro Dimmer 2', category='network_io', metadata={'real_output_enabled': False})
+        self.peripherals.components['shelly_hv_2'].status = 'not_configured'
         safety_cfg = config.get('safety', {})
         self.safety = common_safety.SafetyArbiter(
             emergency_lighting_channels=set(safety_cfg.get('emergency_lighting_channels', [])),
@@ -84,14 +81,22 @@ class LCMAgent(common_agent.ModuleAgent):
             'relays': self.relays.snapshot(),
             'hv_dimmers': self.hv_dimmers.snapshot(),
             'lv_dimmers': self.lv_dimmers.snapshot(),
+            'channel_inventory': {
+                'relays': common_infra.LCM_RELAY_CHANNELS,
+                'analog_dimmers': common_infra.LCM_ANALOG_DIMMER_CHANNELS,
+                'hv_dimmers': common_infra.LCM_HV_DIMMER_CHANNELS,
+            },
             'i2c': {
                 'enabled': bool(self.i2c.get('enabled', False)),
                 'io_mode': self.io_mode,
                 'real_bus_active': self.i2c_bus.enabled,
                 'bus': self.i2c_bus.bus_id,
-                'mux_address': self.lv_dimmers.mux.address,
-                'dac_address': self.lv_dimmers.dac.address,
-                'selected_mux_channel': self.lv_dimmers.mux.selected_channel,
+                'analog_pwm_contract': 'TBD',
+                'analog_real_output_enabled': False,
+            },
+            'network_io': {
+                'shelly_contract': 'TBD',
+                'shelly_real_output_enabled': False,
             },
             'safety': self.safety.snapshot(),
         }

@@ -41,5 +41,6 @@ class Settings(BaseSettings):
     auth_challenge_ttl_s: int = ms_to_s(hcm_globals.Auth_Challenge_TTL)
     auth_session_ttl_s: int = ms_to_s(hcm_globals.Auth_Session_TTL)
     host_network_status_file: Path | None = None
+    storage_root: Path = Path('/var/lib/homecontrol')
 
 settings = Settings()

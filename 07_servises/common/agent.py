@@ -14,6 +14,14 @@ from typing import Any
 import httpx
 from homecontrol_identity import InvalidDeviceId, normalize_device_id
 from . import global_config
+from .module_infra import (
+    I2C_COMPONENTS,
+    LocalConfigStore,
+    OfflineEventQueue,
+    PeripheralRegistry,
+    StructuredEventLogger,
+    compute_led_state,
+)
 from .protocol import read_frame, write_frame
 
 log = logging.getLogger(__name__)
@@ -46,6 +54,7 @@ class ModuleAgent:
         self.web = config.get('web', {})
         self.hcm_api_url = self.web.get('hcm_api_url', f'http://{self.hcm_host}:8080/api/v1').rstrip('/')
         self.hcm_connected = False
+        self.last_valid_ack_ts: float | None = None
         heartbeat_cfg = config.get('heartbeat_v3', {})
         self.heartbeat_socket_path = heartbeat_cfg.get(
             'socket_path',
@@ -53,7 +62,27 @@ class ModuleAgent:
         )
         self.heartbeat_watchdog_name = heartbeat_cfg.get('watchdog_name', f'{self.module_type.lower()}_app')
         self.heartbeat_status_name = heartbeat_cfg.get('status_name', f'{self.module_type.lower()}_app')
+        self.runtime_root = Path(config.get('runtime_root', './runtime/homecontrol'))
+        self.logical_id = str(self.identity.get('hostname') or self.identity.get('module_uuid') or self.module_type)
+        self.peripherals = PeripheralRegistry()
+        self._register_common_components()
+        self.event_logger = StructuredEventLogger(
+            self.logical_id,
+            self.runtime_root / 'logs' / self.logical_id,
+        )
+        self.event_queue = OfflineEventQueue(self.runtime_root / 'logs' / self.logical_id / 'pending-events.json')
+        self.config_store = LocalConfigStore(self.runtime_root, self.module_type, self.logical_id)
         self.running = True
+
+    def _register_common_components(self) -> None:
+        for key, item in I2C_COMPONENTS.items():
+            self.peripherals.register(
+                key,
+                name=item['name'],
+                category='i2c',
+                address=f"0x{int(item['address']):02X}",
+                metadata={'verified_contract': True},
+            )
 
     def _machine_id(self) -> str:
         for p in ('/etc/machine-id', '/var/lib/dbus/machine-id'):
@@ -138,6 +167,8 @@ class ModuleAgent:
         return {'ok': False, 'error': 'command_not_implemented'}
 
     async def web_status(self) -> dict[str, Any]:
+        active_faults = self.peripherals.active_faults()
+        heartbeat_ack_current = self.last_valid_ack_ts is not None and (time.time() - self.last_valid_ack_ts) <= max(self.heartbeat_s * 3, 15)
         return {
             'module_type': self.module_type,
             'identity': self.identity,
@@ -146,6 +177,23 @@ class ModuleAgent:
             'faults': self.faults,
             'hcm_host': self.hcm_host,
             'hcm_connected': self.hcm_connected,
+            'software_version': self.config.get('software_version', '0.1.0'),
+            'uptime_status': 'running' if self.running else 'stopped',
+            'hcm_heartbeat_health': {
+                'connected': self.hcm_connected,
+                'last_valid_ack_ts': self.last_valid_ack_ts,
+                'ack_current': heartbeat_ack_current,
+            },
+            'component_health': self.peripherals.grouped(),
+            'active_faults': active_faults,
+            'known_commanded_output_state': await self.collect_state(),
+            'pending_hcm_log_delivery_count': self.event_queue.count(),
+            'recent_logs': self.event_logger.recent(limit=20),
+            'led_state': compute_led_state(
+                initialized=True,
+                heartbeat_ack_current=heartbeat_ack_current,
+                active_faults=active_faults,
+            ),
         }
 
     def _public_config(self) -> dict[str, Any]:
@@ -207,6 +255,11 @@ class ModuleAgent:
     <button id="refresh">Refresh</button>
     <p id="status-error" class="error"></p>
   </section>
+  <section id="config-view" hidden>
+    <h2>Emergency Configuration</h2>
+    <p>Read-only local view. Configuration changes remain HCM-authorized.</p>
+    <pre id="config"></pre>
+  </section>
 </main>
 <script>
 let token = localStorage.getItem('homecontrol_token') || '';
@@ -222,12 +275,15 @@ async function api(path, opts={{}}) {{
 function showStatus(show) {{
   $('login-view').hidden = show;
   $('status-view').hidden = !show;
+  $('config-view').hidden = !show;
   $('logout').hidden = !show;
 }}
 async function refresh() {{
   $('status-error').textContent = '';
   const status = await api('/api/module/status');
   $('status').textContent = JSON.stringify(status, null, 2);
+  const config = await api('/api/module/config');
+  $('config').textContent = JSON.stringify(config, null, 2);
 }}
 $('login').onclick = async () => {{
   $('login-error').textContent = '';
@@ -293,13 +349,32 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
             data['user'] = user
             return data
 
+        @app.get('/api/module/health')
+        async def health(user=Depends(require_hcm_user)):
+            status = await self.web_status()
+            return {
+                'ok': not bool(status['active_faults']),
+                'component_health': status['component_health'],
+                'hcm_heartbeat_health': status['hcm_heartbeat_health'],
+                'pending_hcm_log_delivery_count': status['pending_hcm_log_delivery_count'],
+            }
+
+        @app.get('/api/module/config')
+        async def config(user=Depends(require_hcm_user)):
+            return {
+                'identity': self.identity,
+                'config': self._public_config(),
+                'persisted_config': self.config_store.load_json(),
+                'mode': 'read_only_hcm_authorized',
+            }
+
         return app
 
     async def _run_web(self) -> None:
         import uvicorn
 
         host = self.web.get('host', '0.0.0.0')
-        port = int(self.web.get('port', 8090))
+        port = int(self.web.get('port', 6010))
         config = uvicorn.Config(self._build_web_app(), host=host, port=port, log_level='info')
         server = uvicorn.Server(config)
         await server.serve()
@@ -311,6 +386,7 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
             # secret material are intentionally not provisioned through this channel.
             self.identity['heartbeat_supervisor'] = payload['heartbeat_supervisor']
         self.save_identity()
+        self.config_store.save_json({'identity': self.identity, 'payload': payload})
         return {'ok': True, 'config_version': self.identity['config_version']}
 
     async def apply_assignment(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -396,6 +472,7 @@ $('refresh').onclick = () => refresh().catch(e => $('status-error').textContent 
                 msg = await read_frame(reader)
                 typ = msg.get('type')
                 if typ == 'heartbeat_ack':
+                    self.last_valid_ack_ts = time.time()
                     continue
                 if typ == 'command':
                     result = await self.apply_command(msg.get('payload', {}))

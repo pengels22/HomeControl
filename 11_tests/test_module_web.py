@@ -14,6 +14,7 @@ def test_module_web_html_prompts_for_hcm_login_and_status_only():
     assert 'Sign in with HCM account' in html
     assert '/api/module/login' in html
     assert '/api/module/status' in html
+    assert '/api/module/config' in html
     assert '/device/command' not in html
 
 
@@ -29,6 +30,9 @@ async def test_module_web_status_includes_identity_and_hcm_connection_flag():
     assert status['hcm_connected'] is True
     assert status['config']['web']['enabled'] is True
     assert status['config']['tls']['key_file'] == '<redacted>'
+    assert status['component_health']['i2c']
+    assert status['pending_hcm_log_delivery_count'] == 0
+    assert status['hcm_heartbeat_health']['connected'] is True
 
 
 @pytest.mark.asyncio
@@ -53,3 +57,14 @@ async def test_module_agent_persists_heartbeat_supervisor_config(tmp_path):
     saved = json.loads(identity_path.read_text())
     assert result == {'ok': True, 'config_version': 4}
     assert saved['heartbeat_supervisor'] == payload['heartbeat_supervisor']
+
+
+@pytest.mark.asyncio
+async def test_module_web_status_tracks_valid_heartbeat_ack():
+    agent = agent_mod.ModuleAgent('LCM', {'web': {'enabled': True}, 'heartbeat_seconds': 5})
+    agent.last_valid_ack_ts = __import__('time').time()
+
+    status = await agent.web_status()
+
+    assert status['hcm_heartbeat_health']['ack_current'] is True
+    assert status['led_state']['LINK'] is True

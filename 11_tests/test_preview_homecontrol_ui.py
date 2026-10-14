@@ -50,6 +50,7 @@ def test_preview_assets_load_from_real_www_directory(client):
     assert "data-module-role-change" in js.text
     assert "/module-roles" in js.text
     assert "/settings/network" in js.text
+    assert "/settings/git" in js.text
 
 
 def test_browser_route_refresh_serves_spa_for_device_detail(client):
@@ -188,6 +189,37 @@ def test_settings_preview_reports_interfaces_modules_and_emergency_links(client)
     assert modules["RCM1"]["emergency_interface"]["available"] is True
     assert modules["RCM1"]["emergency_interface"]["url"].startswith("http://192.168.20.31")
     assert modules["RCM2"]["emergency_interface"]["available"] is False
+
+
+def test_settings_preview_git_controls_are_admin_only_and_redact_pat(client):
+    readonly = {"Authorization": f"Bearer {preview.PREVIEW_READONLY_TOKEN}"}
+    forbidden = client.get("/api/v1/settings/git", headers=readonly)
+    before = client.get("/api/v1/settings/git", headers=headers())
+    updated = client.put(
+        "/api/v1/settings/git",
+        headers=headers(),
+        json={
+            "commit_name": "Preview Operator",
+            "commit_email": "operator@example.test",
+            "repo_url": "https://github.com/example/homecontrol-preview.git",
+            "github_pat": "ghp_preview_secret",
+            "github_enabled": True,
+        },
+    )
+    rejected = client.put(
+        "/api/v1/settings/git",
+        headers=headers(),
+        json={"repo_url": "https://token@example.com/example/homecontrol-preview.git"},
+    )
+    disconnected = client.delete("/api/v1/settings/github", headers=headers())
+
+    assert forbidden.status_code == 403
+    assert before.status_code == 200
+    assert updated.status_code == 200
+    assert updated.json()["github_token_configured"] is True
+    assert "ghp_preview_secret" not in str(updated.json())
+    assert rejected.status_code == 400
+    assert disconnected.json()["github_enabled"] is False
 
 
 def test_users_preview_admin_crud_and_security_behaviors(client):
