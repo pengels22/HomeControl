@@ -201,6 +201,14 @@ def heartbeat_state(state: dict[str, Any], registered_module_type: str) -> dict[
         "simulation": True,
         "physical_outputs_enabled": False,
         "commissioned_local": bool(state.get("commissioned", False)),
+        "emergency_ui": {
+            "enabled": True,
+            "available": True,
+            "protocol": "http",
+            "port": 6010,
+            "config_path": "/config",
+            "health_path": "/health",
+        },
     }
 
 

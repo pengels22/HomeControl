@@ -482,6 +482,7 @@ class Lab1Adapter(BaseAdapter):
             AdapterStep("backup_lab_agent_components", self._lab1_backup_command(backup_dir), changes_system=True),
             AdapterStep("install_role_helper", f"sudo install -m 0755 {release_dir}/10_scripts/lab1_role_agent.py /opt/homecontrol-lab/lab1_role_agent.py", changes_system=True),
             AdapterStep("install_emergency_ui", self._lab1_emergency_install_command(release_dir), changes_system=True),
+            AdapterStep("install_emergency_advertisement", f"sudo install -m 0755 {release_dir}/10_scripts/lab1_emergency_advertisement.py /opt/homecontrol-lab/lab1_emergency_advertisement.py && sudo /usr/bin/python3 /opt/homecontrol-lab/lab1_emergency_advertisement.py", changes_system=True),
             AdapterStep("restart_lab_agent", "sudo systemctl restart homecontrol-lab.service", changes_system=True, timeout=60),
             AdapterStep("restart_emergency_ui", "sudo systemctl daemon-reload && sudo systemctl enable --now homecontrol-lab-emergency.service", changes_system=True, timeout=60),
             AdapterStep("verify_lab_state_safety", self._lab_state_safety_command(backup_dir), timeout=60),
@@ -564,6 +565,7 @@ class Lab1Adapter(BaseAdapter):
             "[ ! -e \"$b\" ] || { echo backup_exists:$b >&2; exit 1; }; "
             "install -d -m 0755 \"$b\"; "
             "cp -a /opt/homecontrol-lab/lab1_role_agent.py \"$b/lab1_role_agent.py\"; "
+            "cp -a /opt/homecontrol-lab/lab_agent.py \"$b/lab_agent.py\"; "
             "for f in /opt/homecontrol-lab/lab1_emergency.py /etc/systemd/system/homecontrol-lab-emergency.service; do if [ -e \"$f\" ]; then cp -a \"$f\" \"$b/$(basename \"$f\")\"; fi; done; "
             "if [ -f /opt/homecontrol-lab/module_infra.py ]; then cp -a /opt/homecontrol-lab/module_infra.py \"$b/module_infra.py\"; fi; "
             "if [ -d /opt/homecontrol-lab/state/homecontrol ]; then cp -a /opt/homecontrol-lab/state/homecontrol \"$b/homecontrol\"; fi; "
@@ -627,6 +629,7 @@ class Lab1Adapter(BaseAdapter):
             "[ -d \"$b\" ] || { echo missing_backup:$b >&2; exit 1; }; "
             "[ -f \"$b/lab1_role_agent.py\" ] || { echo missing_role_backup >&2; exit 1; }; "
             "cp -a \"$b/lab1_role_agent.py\" /opt/homecontrol-lab/lab1_role_agent.py; "
+            "cp -a \"$b/lab_agent.py\" /opt/homecontrol-lab/lab_agent.py; "
             "if [ -f \"$b/lab1_emergency.py\" ]; then cp -a \"$b/lab1_emergency.py\" /opt/homecontrol-lab/lab1_emergency.py; else rm -f /opt/homecontrol-lab/lab1_emergency.py; fi; "
             "if [ -f \"$b/homecontrol-lab-emergency.service\" ]; then cp -a \"$b/homecontrol-lab-emergency.service\" /etc/systemd/system/homecontrol-lab-emergency.service; else rm -f /etc/systemd/system/homecontrol-lab-emergency.service; fi; "
             "if [ -f \"$b/module_infra.py\" ]; then cp -a \"$b/module_infra.py\" /opt/homecontrol-lab/module_infra.py; else rm -f /opt/homecontrol-lab/module_infra.py; fi; "

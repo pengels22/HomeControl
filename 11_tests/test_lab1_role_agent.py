@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 lab1 = import_module("10_scripts.lab1_role_agent")
+lab1_advertisement = import_module("10_scripts.lab1_emergency_advertisement")
 
 OPERATION_ID = "11111111-2222-4333-8444-555555555555"
 
@@ -50,6 +51,32 @@ def test_lab1_role_command_updates_role_and_preserves_supervisor_fields():
     assert state["physical_outputs_enabled"] is False
     assert state["commissioned"] is False
     assert lab1.heartbeat_state(state, "RCM")["lab_role"] == "SIM"
+
+
+def test_lab1_heartbeat_state_advertises_local_emergency_service():
+    advertised = lab1.heartbeat_state(real_lab1_state(role="LCM"), "LCM")["emergency_ui"]
+
+    assert advertised == {
+        "enabled": True,
+        "available": True,
+        "protocol": "http",
+        "port": 6010,
+        "config_path": "/config",
+        "health_path": "/health",
+    }
+
+
+def test_lab1_advertisement_patch_is_atomic_and_idempotent(tmp_path):
+    target = tmp_path / "lab_agent.py"
+    target.write_text('''state = {\n    "registered_module_type": "RCM",\n    "physical_outputs_enabled": False,\n    "commissioned_local": False,\n}\n''')
+
+    lab1_advertisement.apply(target)
+    first = target.read_text()
+    lab1_advertisement.apply(target)
+
+    assert target.read_text() == first
+    assert '"registered_module_type": "LCM"' in first
+    assert '"emergency_ui"' in first
 
 
 def test_lab1_atomic_save_preserves_0644_permissions_after_repeated_changes(tmp_path):

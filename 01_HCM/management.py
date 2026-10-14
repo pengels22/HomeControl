@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 import json
 import re
 import time
@@ -520,6 +522,60 @@ def _validated_emergency_url(module: dict[str, Any]) -> tuple[str | None, str]:
     if host.lower() not in allowed_hosts:
         return None, "Emergency URL host does not match the registered module address"
     return candidate, "Verified explicit module emergency URL"
+
+
+def _emergency_capability(module: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    """Read only the authenticated module's structured emergency capability."""
+    payload = _state_payload(module)
+    candidates = [payload.get("emergency_ui"), _nested_state(module).get("emergency_ui")]
+    capability = next((item for item in candidates if isinstance(item, dict)), None)
+    if not capability:
+        return None, "Emergency service was not advertised"
+    if capability.get("enabled") is not True or capability.get("available") is not True:
+        return None, "Emergency service is advertised as unavailable"
+    try:
+        valid_port = int(capability.get("port", 0)) == 6010
+    except (TypeError, ValueError):
+        valid_port = False
+    if capability.get("protocol") != "http" or not valid_port:
+        return None, "Emergency service advertisement is invalid"
+    if capability.get("config_path") != "/config" or capability.get("health_path") != "/health":
+        return None, "Emergency service paths are not approved"
+    return capability, "Emergency service advertised"
+
+
+async def _probe_emergency_interface(module: dict[str, Any]) -> dict[str, Any]:
+    capability, reason = _emergency_capability(module)
+    result = {
+        "available": False,
+        "status": "unknown" if "not advertised" in reason else "unavailable",
+        "url": None,
+        "reason": reason,
+    }
+    address = str(module.get("ip_address") or "").strip()
+    if not capability or not address or not module.get("online"):
+        return result
+    try:
+        ipaddress.ip_address(address)
+    except ValueError:
+        return {**result, "reason": "Registered module address is invalid"}
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(1.5, connect=0.5), follow_redirects=False) as client:
+            response = await client.get(f"http://{address}:6010/health")
+        data = response.json()
+        identity = data.get("identity") if isinstance(data, dict) else None
+        if response.status_code != 200 or not isinstance(identity, dict):
+            raise ValueError("invalid health response")
+        if str(identity.get("device_id") or "").lower() != str(module.get("device_id") or "").lower():
+            raise ValueError("health identity mismatch")
+    except (httpx.HTTPError, ValueError, json.JSONDecodeError):
+        return {**result, "reason": "Emergency health probe failed"}
+    return {
+        "available": True,
+        "status": "available",
+        "url": f"http://{address}:6010{capability['config_path']}",
+        "reason": "Verified module-advertised emergency service",
+    }
 
 
 def _host_interfaces_from_status_file() -> tuple[list[dict[str, Any]], str | None]:
@@ -1632,11 +1688,11 @@ async def dashboard_status() -> dict[str, Any]:
 async def settings_network() -> dict[str, Any]:
     interfaces, unavailable_reason = _host_interfaces_from_status_file()
     modules = await list_modules()
+    emergency_interfaces = await asyncio.gather(*(_probe_emergency_interface(module) for module in modules))
     module_rows = []
-    for module in modules:
+    for module, emergency_interface in zip(modules, emergency_interfaces):
         address = module.get("ip_address")
         address_source = "current" if module.get("online") and address else "last_known" if address else "unknown"
-        emergency_url, emergency_reason = _validated_emergency_url(module)
         module_rows.append({
             "hostname": module["hostname"],
             "module_type": module["module_type"],
@@ -1646,11 +1702,7 @@ async def settings_network() -> dict[str, Any]:
             "online": bool(module.get("online") or module.get("control_session_online")),
             "status": "Online" if module.get("online") or module.get("control_session_online") else "Offline",
             "last_seen": module.get("last_seen") or module.get("supervision_last_seen"),
-            "emergency_interface": {
-                "available": emergency_url is not None,
-                "url": emergency_url,
-                "reason": emergency_reason,
-            },
+            "emergency_interface": emergency_interface,
         })
     return {
         "host_interfaces": {

@@ -656,6 +656,7 @@ $('login-form').addEventListener('submit',login);$('refresh').addEventListener('
                         'faults': self.faults,
                         'config_sync': dict(self.config_sync),
                         'pending_log_events': self.event_queue.count(),
+                        **self._emergency_ui_advertisement(),
                     }
                 })
                 await self._deliver_log_events(writer)
@@ -694,6 +695,20 @@ $('login-form').addEventListener('submit',login);$('refresh').addEventListener('
         if not batch:
             return
         await write_frame(writer, {'type': 'log_events', 'payload': {'events': batch}})
+
+    def _emergency_ui_advertisement(self) -> dict[str, Any]:
+        if not self.web.get('enabled') or int(self.web.get('port', 0)) != 6010:
+            return {}
+        return {
+            'emergency_ui': {
+                'enabled': True,
+                'available': True,
+                'protocol': 'http',
+                'port': 6010,
+                'config_path': '/config',
+                'health_path': '/health',
+            }
+        }
 
     async def run(self) -> None:
         web_task = None

@@ -34,6 +34,95 @@ def test_host_network_status_file_rejects_stale_provider_data(monkeypatch, tmp_p
     assert reason == 'Configured host network status is stale'
 
 
+def test_emergency_capability_rejects_unapproved_port_and_paths():
+    module = {
+        'device_id': '2ccf675d3414',
+        'online': True,
+        'ip_address': '192.168.20.36',
+        'last_state': {'state': {'emergency_ui': {
+            'enabled': True, 'available': True, 'protocol': 'http',
+            'port': 8080, 'config_path': '/config', 'health_path': '/health',
+        }}},
+    }
+
+    capability, reason = management._emergency_capability(module)
+
+    assert capability is None
+    assert 'invalid' in reason
+
+
+@pytest.mark.asyncio
+async def test_emergency_probe_binds_health_identity_and_constructs_config_url(monkeypatch):
+    module = {
+        'device_id': '2ccf675d3414',
+        'online': True,
+        'ip_address': '192.168.20.36',
+        'last_state': {'state': {'emergency_ui': {
+            'enabled': True, 'available': True, 'protocol': 'http',
+            'port': 6010, 'config_path': '/config', 'health_path': '/health',
+        }}},
+    }
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {'identity': {'device_id': '2ccf675d3414'}}
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, url):
+            assert url == 'http://192.168.20.36:6010/health'
+            return Response()
+
+    monkeypatch.setattr(management.httpx, 'AsyncClient', Client)
+
+    result = await management._probe_emergency_interface(module)
+
+    assert result == {
+        'available': True,
+        'status': 'available',
+        'url': 'http://192.168.20.36:6010/config',
+        'reason': 'Verified module-advertised emergency service',
+    }
+
+
+@pytest.mark.asyncio
+async def test_emergency_probe_rejects_wrong_health_identity(monkeypatch):
+    module = {
+        'device_id': '2ccf675d3414', 'online': True, 'ip_address': '192.168.20.36',
+        'last_state': {'emergency_ui': {
+            'enabled': True, 'available': True, 'protocol': 'http',
+            'port': 6010, 'config_path': '/config', 'health_path': '/health',
+        }},
+    }
+
+    class Response:
+        status_code = 200
+        def json(self):
+            return {'identity': {'device_id': '001122334455'}}
+
+    class Client:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): return False
+        async def get(self, url): return Response()
+
+    monkeypatch.setattr(management.httpx, 'AsyncClient', Client)
+    result = await management._probe_emergency_interface(module)
+
+    assert result['available'] is False
+    assert result['status'] == 'unavailable'
+
+
 class FakeTransaction:
     def __init__(self, conn):
         self.conn = conn
