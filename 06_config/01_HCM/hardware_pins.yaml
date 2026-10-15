@@ -1,0 +1,63 @@
+schema_version: 1
+module_type: HCM
+verification:
+  status: DESIGN_APPROVED
+  note: Jetson assignments are the approved working design and remain electrically uncommissioned.
+physical_output_enabled: false
+processor:
+  model: Jetson
+  revision: UNVERIFIED
+  header_pins: 40
+processor_header:
+  "1": {function: 3V3, verification: UNVERIFIED, exclusive: false}
+  "2": {function: 5V, verification: UNVERIFIED, exclusive: false}
+  "3": {function: I2C1_SDA, verification: UNVERIFIED}
+  "4": {function: 5V, verification: UNVERIFIED, exclusive: false}
+  "5": {function: I2C1_SCL, verification: UNVERIFIED}
+  "6": {function: GND, verification: UNVERIFIED, exclusive: false}
+  "7": {function: GPIO_SPARE, verification: UNVERIFIED}
+  "8": {function: UART1_TX, verification: UNVERIFIED}
+  "9": {function: GND, verification: UNVERIFIED, exclusive: false}
+  "10": {function: UART1_RX, verification: UNVERIFIED}
+  "11": {function: UART1_RTS_SPARE, verification: UNVERIFIED}
+  "12": {function: I2S0_SCLK, verification: UNVERIFIED}
+  "13": {function: SPI1_SCK_SPARE, verification: UNVERIFIED}
+  "14": {function: GND, verification: UNVERIFIED, exclusive: false}
+  "15": {function: GPIO_SPARE, verification: UNVERIFIED}
+  "16": {function: SPI1_CS1_SPARE, verification: UNVERIFIED}
+  "17": {function: LCD_POWER_3V3, verification: UNVERIFIED, exclusive: false}
+  "18": {function: LCD_RESET, verification: UNVERIFIED}
+  "19": {function: SPI0_MOSI, verification: UNVERIFIED}
+  "20": {function: GND, verification: UNVERIFIED, exclusive: false}
+  "21": {function: SPI0_MISO_RESERVED, verification: UNVERIFIED}
+  "22": {function: LCD_DC, verification: UNVERIFIED}
+  "23": {function: SPI0_SCK, verification: UNVERIFIED}
+  "24": {function: SPI0_CS0, verification: UNVERIFIED}
+  "25": {function: GND, verification: UNVERIFIED, exclusive: false}
+  "26": {function: SPI0_CS1_RESERVED, verification: UNVERIFIED}
+  "27": {function: TOUCH_SDA, verification: UNVERIFIED}
+  "28": {function: TOUCH_SCL, verification: UNVERIFIED}
+  "29": {function: GPIO_SPARE, verification: UNVERIFIED}
+  "30": {function: GND, verification: UNVERIFIED, exclusive: false}
+  "31": {function: GPIO_SPARE, verification: UNVERIFIED}
+  "32": {function: GPIO_SPARE, verification: UNVERIFIED}
+  "33": {function: FAULT_LED, gpio: GPIO13, verification: UNVERIFIED}
+  "34": {function: LED_GND, verification: UNVERIFIED, exclusive: false}
+  "35": {function: LINK_LED, gpio: I2S0_FS_GPIO, verification: UNVERIFIED}
+  "36": {function: STATUS_LED, gpio: UART1_CTS_GPIO, verification: UNVERIFIED}
+  "37": {function: SPI1_MOSI_RESERVED, verification: UNVERIFIED}
+  "38": {function: FIRE_INPUT, gpio: UNVERIFIED, verification: UNVERIFIED, active_level: high}
+  "39": {function: SAFETY_GROUND, verification: UNVERIFIED, exclusive: false}
+  "40": {function: AC_PRESENT_INPUT, gpio: UNVERIFIED, verification: UNVERIFIED}
+faceplate:
+  type: C
+  connector: J-FP1
+  verification: UNVERIFIED
+buses:
+  spi:
+    display: {controller: SPI0, chip_select: CS0, verification: UNVERIFIED}
+  i2c:
+    touch: {bus: I2C0, voltage: 3.3V, address: UNVERIFIED, verification: UNVERIFIED}
+signals:
+  FIRE_INPUT: {physical_pin: 38, normal_level: low, alarm_level: high, debounce_ms: 250, verification: UNVERIFIED}
+  AC_PRESENT_INPUT: {physical_pin: 40, verification: UNVERIFIED}

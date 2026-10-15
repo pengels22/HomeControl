@@ -22,6 +22,7 @@ services:
   - hcm-heartbeat.service
 configuration_files:
   - hcm.yaml
+  - hardware_pins.yaml
 persistent_data:
   - /var/lib/homecontrol
   - /mnt/homecontrol-postgres

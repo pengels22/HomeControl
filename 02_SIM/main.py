@@ -10,11 +10,18 @@ common_io = import_module('07_servises.common.io')
 common_global_config = import_module('07_servises.common.global_config')
 common_rmc_fw = import_module('07_servises.common.rmc_firmware')
 common_safety = import_module('07_servises.common.safety_arbiter')
+common_profiles = import_module('07_servises.common.hardware_profiles')
 
 class SIMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
         super().__init__('SIM', config)
         self.global_config = common_global_config.load_global_config('SIM')
+        self.hardware_profile = config.get('hardware_profile', {})
+        if not isinstance(self.hardware_profile, dict):
+            root = Path(__file__).resolve().parents[1]
+            self.hardware_profile = common_profiles.load_profile(
+                root / '06_config/02_SIM/hardware_pins.yaml', 'SIM'
+            ).data
         config.setdefault('can_bitrate', self.global_config.CAN_Bitrate)
         config.setdefault('can_enabled', self.global_config.CAN_Enabled)
         self.rmc_nodes = {}
@@ -402,7 +409,11 @@ class SIMAgent(common_agent.ModuleAgent):
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    cfg = common_cfg.load_yaml(Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+    root = Path(__file__).resolve().parents[1]
+    cfg = common_cfg.load_yaml(root / '06_config/02_SIM/sim.yaml')
+    cfg['hardware_profile'] = common_profiles.load_profile(
+        root / '06_config/02_SIM/hardware_pins.yaml', 'SIM'
+    ).data
     await SIMAgent(cfg).run()
 
 if __name__ == '__main__': asyncio.run(main())

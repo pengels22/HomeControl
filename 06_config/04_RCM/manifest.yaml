@@ -20,6 +20,7 @@ services:
   - homecontrol-update.service
 configuration_files:
   - rcm.yaml
+  - hardware_pins.yaml
   - global_config_RCM.py
 persistent_data:
   - /opt/HomeControl/runtime

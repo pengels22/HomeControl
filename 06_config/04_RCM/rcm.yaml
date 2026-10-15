@@ -1,4 +1,5 @@
 config_version: 1
+hardware_profile: hardware_pins.yaml
 hcm_host: 192.168.20.27
 hcm_port: 6501
 heartbeat_seconds: 5
@@ -25,7 +26,7 @@ io:
   mode: auto
 tls:
   enabled: false
-capabilities: [relay-32]
+capabilities: [relay-32, xl9535-relays, type-a-faceplate]
 identity_path: ./runtime/rcm_identity.json
 fail_actions: {}
 web:

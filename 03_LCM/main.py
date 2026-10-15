@@ -10,11 +10,18 @@ common_io = import_module('07_servises.common.io')
 common_global_config = import_module('07_servises.common.global_config')
 common_safety = import_module('07_servises.common.safety_arbiter')
 common_infra = import_module('07_servises.common.module_infra')
+common_profiles = import_module('07_servises.common.hardware_profiles')
 
 class LCMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
         super().__init__('LCM', config)
         self.global_config = common_global_config.load_global_config('LCM')
+        self.hardware_profile = config.get('hardware_profile', {})
+        if not isinstance(self.hardware_profile, dict):
+            root = Path(__file__).resolve().parents[1]
+            self.hardware_profile = common_profiles.load_profile(
+                root / '06_config/03_LCM/hardware_pins.yaml', 'LCM'
+            ).data
         self.relay_map = {str(i): channel for i, channel in enumerate(common_infra.LCM_RELAY_CHANNELS, start=1)}
         self.lv_dimmer_map = {str(i): channel for i, channel in enumerate(common_infra.LCM_ANALOG_DIMMER_CHANNELS, start=9)}
         self.hv_dimmer_map = {str(i): channel for i, channel in enumerate(common_infra.LCM_HV_DIMMER_CHANNELS, start=19)}
@@ -98,6 +105,10 @@ class LCMAgent(common_agent.ModuleAgent):
                 'shelly_contract': 'TBD',
                 'shelly_real_output_enabled': False,
             },
+            'hardware_profile': {
+                'verification': self.hardware_profile.get('verification', {}),
+                'physical_output_enabled': self.hardware_profile.get('physical_output_enabled', False),
+            },
             'safety': self.safety.snapshot(),
         }
 
@@ -159,7 +170,11 @@ class LCMAgent(common_agent.ModuleAgent):
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    cfg = common_cfg.load_yaml(Path(__file__).resolve().parents[1] / '06_config/03_LCM/lcm.yaml')
+    root = Path(__file__).resolve().parents[1]
+    cfg = common_cfg.load_yaml(root / '06_config/03_LCM/lcm.yaml')
+    cfg['hardware_profile'] = common_profiles.load_profile(
+        root / '06_config/03_LCM/hardware_pins.yaml', 'LCM'
+    ).data
     await LCMAgent(cfg).run()
 
 if __name__ == '__main__': asyncio.run(main())

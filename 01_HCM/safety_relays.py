@@ -12,8 +12,8 @@ common_global_config = import_module('07_servises.common.global_config')
 @dataclass
 class SafetyRelay:
     name: str
-    gpio: int
-    board_pin: int
+    gpio: int | str | None
+    board_pin: int | None
     direction: str
     lockout_exempt: bool
     active: bool = False
@@ -58,9 +58,11 @@ class HCMSafetyRelayController:
         self.globals = globals_ or common_global_config.load_global_config('HCM')
         self.backend = backend or SimulatedSafetyRelayBackend()
         self.relays = {
-            'alarm_contact': SafetyRelay('alarm_contact', gpio=393, board_pin=15, direction='input', lockout_exempt=True),
-            'door_request': SafetyRelay('door_request', gpio=256, board_pin=16, direction='output', lockout_exempt=True),
-            'auxiliary': SafetyRelay('auxiliary', gpio=344, board_pin=18, direction='output', lockout_exempt=True),
+            # The Jetson SOT assigns FIRE to physical pin 38. GPIO line numbers
+            # and the convenience outputs have no validated Linux mapping.
+            'alarm_contact': SafetyRelay('alarm_contact', gpio='UNVERIFIED', board_pin=38, direction='input', lockout_exempt=True),
+            'door_request': SafetyRelay('door_request', gpio='UNVERIFIED', board_pin=None, direction='output', lockout_exempt=True),
+            'auxiliary': SafetyRelay('auxiliary', gpio='UNVERIFIED', board_pin=None, direction='output', lockout_exempt=True),
         }
         self._pulse_tasks: dict[str, asyncio.Task] = {}
 
