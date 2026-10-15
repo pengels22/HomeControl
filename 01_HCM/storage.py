@@ -113,6 +113,19 @@ def _load_git_status(root: Path) -> dict[str, Any]:
     return _load_json(_status_path(root))
 
 
+def _ensure_git_identity(root: Path) -> None:
+    """Ensure local-only snapshots can commit without requiring GitHub setup."""
+    configured = _load_json(_git_config_path(root))
+    defaults = {
+        'user.name': str(configured.get('commit_name') or 'HomeControl HCM'),
+        'user.email': str(configured.get('commit_email') or 'hcm@localhost'),
+    }
+    for key, value in defaults.items():
+        current = _run_git(root, ['config', '--local', '--get', key])
+        if current.returncode != 0 or not current.stdout.strip():
+            _run_git(root, ['config', '--local', key, value])
+
+
 def get_git_settings(root: Path | None = None) -> dict[str, Any]:
     root = Path(root or storage_root())
     ensure_storage_layout(root)
@@ -354,6 +367,7 @@ class GitSyncManager:
 
     def _sync_once_blocking(self) -> dict[str, Any]:
         ensure_storage_layout(self.root)
+        _ensure_git_identity(self.root)
         update_recovery_manifest(self.root)
         status_before = repository_status(self.root)
         if status_before.get('diverged'):

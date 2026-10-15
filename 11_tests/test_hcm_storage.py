@@ -69,6 +69,24 @@ def test_git_sync_commits_only_tracked_paths_and_skips_no_change(tmp_path):
     assert '.secrets/do-not-track' not in tracked.stdout
 
 
+def test_git_sync_uses_safe_default_identity_for_local_only_storage(tmp_path):
+    storage.ensure_storage_layout(tmp_path)
+    (tmp_path / 'config' / 'system' / 'default-identity.json').write_text('{}')
+
+    result = storage.GitSyncManager(tmp_path)._sync_once_blocking()
+    identity = subprocess.run(
+        ['git', 'log', '-1', '--format=%an <%ae>'],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result['ok'] is True
+    assert result['committed'] is True
+    assert identity.stdout.strip() == 'HomeControl HCM <hcm@localhost>'
+
+
 def test_repository_status_local_only_and_dirty(tmp_path):
     storage.ensure_storage_layout(tmp_path)
     status = storage.repository_status(tmp_path)
