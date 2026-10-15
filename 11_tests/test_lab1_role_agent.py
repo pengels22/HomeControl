@@ -108,10 +108,11 @@ def test_lab1_user_sync_patcher_is_idempotent_and_normalizes_role_claims(tmp_pat
         "from pathlib import Path\n"
         "from lab1_user_sync import apply_config_payload\n"
         "        if reply.get(\"type\") != \"config\":\n"
-        "            raise RuntimeError(\n"
-        "                \"HCM did not return config; assignment refused\"\n"
-        "            )\n"
-        '"module_type": "RCM",\n'
+            "            raise RuntimeError(\n"
+            "                \"HCM did not return config; assignment refused\"\n"
+            "            )\n"
+            "        apply_config_payload(reply.get(\"payload\") or {})\n"
+            '"module_type": "RCM",\n'
         '"registered_module_type": "LCM",\n'
         + loop + loop
     )
@@ -141,6 +142,26 @@ def test_lab1_simulation_command_patcher_adds_only_safe_simulation_handler(tmp_p
     assert "physical_outputs_commanded" in patched
     lab1_simulation_patcher.main()
     assert target.read_text() == patched
+
+
+def test_lab1_module_config_payload_persists_rcm_csv_without_bindings(tmp_path, monkeypatch):
+    state_path = tmp_path / "module.json"
+    state_path.write_text(json.dumps(real_lab1_state("RCM")))
+    monkeypatch.setattr(lab1_user_sync, "STATE_PATH", state_path)
+    monkeypatch.setattr(lab1_user_sync, "CONFIG_ROOT", tmp_path / "homecontrol")
+
+    channels = lab1_user_sync.importlib.import_module("module_infra").default_rcm_config()
+    channels[0]["name"] = "A1 live test"
+    infra = lab1_user_sync.importlib.import_module("module_infra")
+    package = infra.build_config_package("RCM", "lab1", {"channels": channels}, revision="live-rev")
+
+    result = lab1_user_sync.apply_module_config_payload({"package": package})
+    store = infra.LocalConfigStore(tmp_path / "homecontrol", "RCM", "lab1")
+
+    assert result["ok"] is True
+    assert result["config_sync"]["current_local_revision"] == "live-rev"
+    assert store.load_rcm_csv()[0]["name"] == "A1 live test"
+    assert store.load_json()["config_sync"]["state"] == "synchronized"
 
 
 def test_lab1_advertisement_patch_is_atomic_and_idempotent(tmp_path):

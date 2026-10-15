@@ -482,6 +482,7 @@ class Lab1Adapter(BaseAdapter):
             AdapterStep("preflight_lab1_safety", self._lab_state_safety_command()),
             AdapterStep("backup_lab_agent_components", self._lab1_backup_command(backup_dir), changes_system=True),
             AdapterStep("install_role_helper", f"sudo install -m 0755 {release_dir}/10_scripts/lab1_role_agent.py /opt/homecontrol-lab/lab1_role_agent.py", changes_system=True),
+            AdapterStep("install_module_config_support", f"sudo install -m 0644 {release_dir}/07_servises/common/module_infra.py /opt/homecontrol-lab/module_infra.py", changes_system=True),
             AdapterStep("install_simulation_command_support", f"sudo install -m 0755 {release_dir}/10_scripts/lab1_simulation_command_patcher.py /opt/homecontrol-lab/lab1_simulation_command_patcher.py && sudo /usr/bin/python3 /opt/homecontrol-lab/lab1_simulation_command_patcher.py", changes_system=True),
             AdapterStep("install_emergency_ui", self._lab1_emergency_install_command(release_dir), changes_system=True),
             AdapterStep("install_emergency_advertisement", f"sudo install -m 0755 {release_dir}/10_scripts/lab1_emergency_advertisement.py /opt/homecontrol-lab/lab1_emergency_advertisement.py && sudo /usr/bin/python3 /opt/homecontrol-lab/lab1_emergency_advertisement.py", changes_system=True),
