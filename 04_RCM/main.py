@@ -81,6 +81,24 @@ class RCMAgent(common_agent.ModuleAgent):
         }
 
     async def apply_command(self, payload):
+        if payload.get('op') == 'simulate_relay':
+            if self.io_mode == 'real' or payload.get('simulation') is not True or payload.get('physical_outputs_enabled') is not False:
+                return {
+                    'ok': False,
+                    'error': 'simulation command rejected by physical-output safety gate',
+                    'simulation': False,
+                    'physical_outputs_commanded': False,
+                }
+            ch = payload['channel'].upper()
+            self.relays.set(ch, bool(payload['value']))
+            return {
+                'ok': True,
+                'channel': ch,
+                'value': self.relays.get(ch),
+                'simulation': True,
+                'physical_outputs_commanded': False,
+                'state_confidence': 'simulated_commanded_only',
+            }
         if payload.get('op') == 'safety_state':
             conditions = payload.get('conditions', {})
             self.safety.update_conditions(conditions)

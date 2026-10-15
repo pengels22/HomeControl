@@ -52,6 +52,10 @@ class DeviceBindingUpdateIn(BaseModel):
 class RcmChannelNameIn(BaseModel):
     name: str = Field(max_length=120)
 
+class RcmSimulationIn(BaseModel):
+    action: Literal['set_relay', 'set_lockout']
+    value: bool
+
 class LcmChannelSettingsIn(BaseModel):
     name: str = Field(max_length=120)
     emergency_lighting: bool = False

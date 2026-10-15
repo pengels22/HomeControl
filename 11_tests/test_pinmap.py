@@ -49,6 +49,45 @@ async def test_rcm_agent_reports_pinout_address_on_relay_command():
     assert result['arbitration']['effective_state']['energized'] is True
 
 
+@pytest.mark.asyncio
+async def test_rcm_simulation_command_never_uses_physical_output_path():
+    agent = rcm.RCMAgent({'io_mode': 'simulated'})
+
+    result = await agent.apply_command({
+        'op': 'simulate_relay',
+        'channel': 'A1',
+        'value': True,
+        'simulation': True,
+        'physical_outputs_enabled': False,
+    })
+
+    assert result == {
+        'ok': True,
+        'channel': 'A1',
+        'value': True,
+        'simulation': True,
+        'physical_outputs_commanded': False,
+        'state_confidence': 'simulated_commanded_only',
+    }
+
+
+@pytest.mark.asyncio
+async def test_rcm_simulation_command_is_rejected_in_real_io_mode():
+    agent = rcm.RCMAgent({'io_mode': 'real'})
+
+    result = await agent.apply_command({
+        'op': 'simulate_relay',
+        'channel': 'A1',
+        'value': True,
+        'simulation': True,
+        'physical_outputs_enabled': False,
+    })
+
+    assert result['ok'] is False
+    assert result['physical_outputs_commanded'] is False
+    assert agent.relays.get('A1') is False
+
+
 def test_rcm_uses_global_relay_count_and_default_state():
     agent = rcm.RCMAgent({'relay_count': 2, 'default_relay_on': True})
 

@@ -21,6 +21,7 @@ from .models import (
     PairingKeyVerifyIn,
     PasswordLoginIn,
     RcmChannelNameIn,
+    RcmSimulationIn,
     RmcFirmwareUpdateIn,
     RoomStateIn,
     SafetyRelayPulseIn,
@@ -228,6 +229,28 @@ async def device_admin_rcm_channel_name(
             identifier,
             channel,
             name=body.name,
+            actor=user['user'],
+        )
+    except management.NotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except management.ValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+@router.post('/device-admin/{identifier}/rcm-channels/{channel}/simulation')
+async def device_admin_rcm_channel_simulation(
+    identifier: str,
+    channel: str,
+    body: RcmSimulationIn,
+    user=Depends(require_user),
+):
+    if user['role'] != 'ADMIN':
+        raise HTTPException(403)
+    try:
+        return await management.simulate_rcm_channel(
+            identifier,
+            channel,
+            action=body.action,
+            value=body.value,
             actor=user['user'],
         )
     except management.NotFoundError as exc:

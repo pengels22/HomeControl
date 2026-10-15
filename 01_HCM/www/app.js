@@ -798,7 +798,7 @@ async function renderRcm(device) {
       </div>
       ${identityBlock(data.device)}
       ${roleManagementBlock(data.device)}
-      ${data.device.physical_outputs_enabled === false ? `<div class="notice warn">Physical outputs are disabled by the registered device state. Controls remain unavailable until HCM receives a safe, confirmed state.</div>` : ""}
+      ${data.simulation === true && data.physical_outputs_enabled === false ? `<div class="notice warn"><strong>SIMULATED</strong> Configuration edits and relay tests are software-only. Physical outputs remain disabled.</div>` : data.device.physical_outputs_enabled === false ? `<div class="notice warn">Physical outputs are disabled by the registered device state. Physical actuation remains unavailable; configuration editing is still permitted.</div>` : ""}
     </section>
     <section class="panel">
       <div class="panel-head">
@@ -1019,25 +1019,26 @@ function channelCard(channel) {
   const isPending = pending.has(pendingKey);
   const locked = channel.maintenance_locked;
   const value = channel.value === true;
-  const canName = Boolean(channel.bound);
-  const canControl = channel.control_enabled && !isPending;
+  const canName = channel.configuration_enabled !== false && !isPending;
+  const canControl = (channel.simulation_control_enabled || channel.control_enabled) && !isPending;
+  const simulated = channel.simulation === true;
   return `<article class="channel-card ${locked ? "locked" : ""}" data-channel="${esc(channel.channel)}">
     <div class="channel-top">
       <strong>${channel.number}</strong>
       <code>${esc(channel.channel)}</code>
     </div>
-    <input class="channel-name" data-name-channel="${esc(channel.channel)}" value="${esc(channel.name)}" placeholder="${channel.bound ? "Channel name" : "No binding"}" ${canName ? "" : "disabled"}>
+    <input class="channel-name" data-name-channel="${esc(channel.channel)}" value="${esc(channel.name)}" placeholder="${channel.bound ? "Channel name" : "Unbound channel name"}" ${canName ? "" : "disabled"} aria-label="${esc(channel.channel)} channel name">
     <label class="switch-row toggle-control ${locked ? "relay-locked" : ""}">
-      <span class="toggle-label">On</span>
-      <input class="toggle-input" type="checkbox" data-output-channel="${esc(channel.channel)}" aria-label="${esc(channel.channel)} relay output" ${value ? "checked" : ""} ${canControl ? "" : "disabled"}>
+      <span class="toggle-label">${simulated ? "Simulated" : "Physical"} On</span>
+      <input class="toggle-input" type="checkbox" data-output-channel="${esc(channel.channel)}" aria-label="${esc(channel.channel)} ${simulated ? "simulated" : "physical"} relay output" ${value ? "checked" : ""} ${canControl ? "" : "disabled"}>
       <span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
     </label>
     <label class="switch-row toggle-control maintenance-toggle">
       <span class="toggle-label">Maintenance</span>
-      <input class="toggle-input" type="checkbox" data-lock-channel="${esc(channel.channel)}" aria-label="${esc(channel.channel)} maintenance lockout" ${locked ? "checked" : ""} ${channel.bound && !isPending ? "" : "disabled"}>
+      <input class="toggle-input" type="checkbox" data-lock-channel="${esc(channel.channel)}" aria-label="${esc(channel.channel)} maintenance lockout" ${locked ? "checked" : ""} ${(channel.simulation === true || channel.bound) && !isPending ? "" : "disabled"}>
       <span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
     </label>
-    <p class="channel-state">${isPending ? "Pending backend acknowledgement" : esc(channel.disabled_reason || (channel.value == null ? "State unknown" : value ? "Acknowledged on" : "Acknowledged off"))}</p>
+    <p class="channel-state">${isPending ? "Pending backend acknowledgement" : simulated ? `SIMULATED / ${value ? "On" : "Off"}` : esc(channel.disabled_reason || (channel.value == null ? "State unknown" : value ? "Acknowledged on" : "Acknowledged off"))}</p>
   </article>`;
 }
 
@@ -1697,14 +1698,23 @@ async function setOutput(channel, value) {
   try {
     const channels = await currentRcmChannels();
     const item = channels.find((entry) => entry.channel === channel);
-    if (!item?.logical_name) throw new Error("Channel has no logical binding");
-    pending.add(item.logical_name);
+    if (!item) throw new Error("Channel is unavailable");
+    const pendingKey = item.logical_name || item.channel;
+    pending.add(pendingKey);
     await renderDeviceDetail(selectedDeviceIdentifier());
-    await api("/device/command", {
-      method: "POST",
-      body: JSON.stringify({logical_name: item.logical_name, command: {op: "set_relay", value}}),
-    });
-    pending.delete(item.logical_name);
+    if (item.simulation_control_enabled) {
+      await api(`/device-admin/${encodeURIComponent(selectedDeviceIdentifier())}/rcm-channels/${encodeURIComponent(channel)}/simulation`, {
+        method: "POST",
+        body: JSON.stringify({action: "set_relay", value}),
+      });
+    } else {
+      if (!item.logical_name) throw new Error("Channel has no logical binding");
+      await api("/device/command", {
+        method: "POST",
+        body: JSON.stringify({logical_name: item.logical_name, command: {op: "set_relay", value}}),
+      });
+    }
+    pending.delete(pendingKey);
     await renderDeviceDetail(selectedDeviceIdentifier());
   } catch (error) {
     pending.clear();
@@ -1717,14 +1727,23 @@ async function setLockout(channel, active) {
   try {
     const channels = await currentRcmChannels();
     const item = channels.find((entry) => entry.channel === channel);
-    if (!item?.logical_name) throw new Error("Channel has no logical binding");
-    pending.add(item.logical_name);
+    if (!item) throw new Error("Channel is unavailable");
+    const pendingKey = item.logical_name || item.channel;
+    pending.add(pendingKey);
     await renderDeviceDetail(selectedDeviceIdentifier());
-    await api("/safety/maintenance-lockout", {
-      method: "POST",
-      body: JSON.stringify({logical_name: item.logical_name, active}),
-    });
-    pending.delete(item.logical_name);
+    if (item.simulation === true) {
+      await api(`/device-admin/${encodeURIComponent(selectedDeviceIdentifier())}/rcm-channels/${encodeURIComponent(channel)}/simulation`, {
+        method: "POST",
+        body: JSON.stringify({action: "set_lockout", value: active}),
+      });
+    } else {
+      if (!item.logical_name) throw new Error("Channel has no logical binding");
+      await api("/safety/maintenance-lockout", {
+        method: "POST",
+        body: JSON.stringify({logical_name: item.logical_name, active}),
+      });
+    }
+    pending.delete(pendingKey);
     await renderDeviceDetail(selectedDeviceIdentifier());
   } catch (error) {
     pending.clear();

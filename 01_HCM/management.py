@@ -177,6 +177,14 @@ def rcm_config_from_channels(channels: list[dict[str, Any]]) -> dict[str, Any]:
     return {"channels": rows}
 
 
+def _stored_rcm_channels(hostname: str) -> list[dict[str, Any]]:
+    store = module_infra.LocalConfigStore(storage.storage_root(), "RCM", hostname)
+    try:
+        return store.load_rcm_csv()
+    except (OSError, ValueError):
+        return module_infra.default_rcm_config()
+
+
 def lcm_config_from_channels(channels: list[dict[str, Any]]) -> dict[str, Any]:
     by_channel = {item["channel"]: item for item in channels}
     rows = []
@@ -887,14 +895,17 @@ async def get_rcm_channels(identifier: str | int) -> dict[str, Any]:
             _rcm_channel_ids(),
         )
     by_channel = {row["channel"]: row for row in rows}
+    stored_by_channel = {row["channel"]: row for row in _stored_rcm_channels(module["module"]["hostname"])}
     online = bool(module["module"]["online"] or module["module"]["control_session_online"])
     control_online = bool(module["module"]["control_session_online"])
     physical_outputs_enabled = module.get("physical_outputs_enabled")
+    simulation = module.get("simulation") is True
     inhibited = physical_outputs_enabled is False
     last_state = _state_payload(module["module"])
     channels = []
     for index, channel in enumerate(_rcm_channel_ids(), start=1):
         row = by_channel.get(channel)
+        stored = stored_by_channel.get(channel) or {}
         disabled_reason = None
         if not row:
             disabled_reason = "No logical binding"
@@ -912,18 +923,27 @@ async def get_rcm_channels(identifier: str | int) -> dict[str, Any]:
             "binding_id": int(row["binding_id"]) if row else None,
             "logical_device_id": int(row["logical_device_id"]) if row else None,
             "logical_name": row["logical_name"] if row else None,
-            "name": _channel_display_name(row) if row else "",
+            "name": _channel_display_name(row) if row else stored.get("name", ""),
             "bound": row is not None,
             "enabled": bool(row and row["logical_enabled"] and row["binding_enabled"]),
-            "maintenance_locked": bool(row["maintenance_locked"]) if row else False,
+            "maintenance_locked": bool(row["maintenance_locked"]) if row else bool(stored.get("lockout")),
             "online": online,
             "control_session_online": control_online,
             "physical_outputs_enabled": physical_outputs_enabled,
-            "value": _relay_value(last_state, channel),
+            "value": _relay_value(last_state, channel) if _relay_value(last_state, channel) is not None else (bool(stored.get("on")) if stored else None),
             "control_enabled": disabled_reason is None,
             "disabled_reason": disabled_reason,
+            "configuration_enabled": True,
+            "simulation": simulation,
+            "simulation_control_enabled": simulation and control_online and not bool(row and row["maintenance_locked"]) and not bool(stored.get("lockout")),
         })
-    return {"device": module, "channels": channels}
+    return {
+        "device": module,
+        "channels": channels,
+        "simulation": simulation,
+        "physical_outputs_enabled": physical_outputs_enabled,
+        "configuration_enabled": True,
+    }
 
 
 async def update_rcm_channel_name(
@@ -953,32 +973,103 @@ async def update_rcm_channel_name(
                 module["module"]["id"],
                 normalized_channel,
             )
-            if not before_row:
-                raise NotFoundError(f"{module['module']['hostname']} {normalized_channel}")
-            before = _logical_device(before_row)
-            row = await conn.fetchrow(
-                """
-                UPDATE logical_devices
-                SET metadata=jsonb_set(metadata, '{channel_name}', to_jsonb($2::text), true)
-                WHERE id=$1
-                RETURNING *, NULL::text AS room
-                """,
-                before_row["id"],
-                name.strip(),
-            )
-            after = _logical_device(row)
-            await audit_event(
-                conn,
-                actor=actor,
-                action="rcm_channel.name_update",
-                target_type="logical_device",
-                target_id=str(row["id"]),
-                before_state=before,
-                after_state=after,
-                details={"module": module["module"]["hostname"], "channel": normalized_channel},
-            )
+            if before_row:
+                before = _logical_device(before_row)
+                row = await conn.fetchrow(
+                    """
+                    UPDATE logical_devices
+                    SET metadata=jsonb_set(metadata, '{channel_name}', to_jsonb($2::text), true)
+                    WHERE id=$1
+                    RETURNING *, NULL::text AS room
+                    """,
+                    before_row["id"],
+                    name.strip(),
+                )
+                after = _logical_device(row)
+                await audit_event(
+                    conn,
+                    actor=actor,
+                    action="rcm_channel.name_update",
+                    target_type="logical_device",
+                    target_id=str(row["id"]),
+                    before_state=before,
+                    after_state=after,
+                    details={"module": module["module"]["hostname"], "channel": normalized_channel},
+                )
     result = await get_rcm_channels(module["module"]["hostname"])
+    for item in result["channels"]:
+        if item["channel"] == normalized_channel:
+            item["name"] = name.strip()
+            break
     result["config_sync"] = await mirror_module_configuration("RCM", module["module"]["hostname"], rcm_config_from_channels(result["channels"]))
+    return result
+
+
+async def simulate_rcm_channel(
+    identifier: str | int,
+    channel: str,
+    *,
+    action: str,
+    value: bool,
+    actor: str,
+) -> dict[str, Any]:
+    normalized_channel = _normalize_channel(channel)
+    if normalized_channel not in _rcm_channel_ids():
+        raise ValidationError("invalid RCM channel")
+    module = await get_device_admin(identifier)
+    if module["effective_role"] != "RCM":
+        raise ValidationError(f"module {module['module']['hostname']} is not currently assigned the RCM role")
+    if module.get("simulation") is not True or module.get("physical_outputs_enabled") is not False:
+        raise ValidationError("simulation control requires simulation=true and physical_outputs_enabled=false")
+    if not module["module"]["control_session_online"]:
+        raise ValidationError("authenticated control session required")
+    from .registry import registry
+    result = await get_rcm_channels(module["module"]["hostname"])
+    item = next(channel_item for channel_item in result["channels"] if channel_item["channel"] == normalized_channel)
+    if action == "set_relay":
+        if value and item["maintenance_locked"]:
+            raise ValidationError("maintenance lockout prevents simulated ON")
+        ack = await registry.command_by_hostname(module["module"]["hostname"], {
+            "op": "simulate_relay",
+            "channel": normalized_channel,
+            "value": bool(value),
+            "simulation": True,
+            "physical_outputs_enabled": False,
+            "source": "hcm_simulation",
+        })
+        if not ack.get("ok") or ack.get("physical_outputs_commanded") is True:
+            raise ValidationError("simulation command was not safely acknowledged")
+        item["value"] = bool(value)
+    elif action == "set_lockout":
+        item["maintenance_locked"] = bool(value)
+        if value:
+            ack = await registry.command_by_hostname(module["module"]["hostname"], {
+                "op": "simulate_relay",
+                "channel": normalized_channel,
+                "value": False,
+                "simulation": True,
+                "physical_outputs_enabled": False,
+                "source": "hcm_simulation_lockout",
+            })
+            if not ack.get("ok") or ack.get("physical_outputs_commanded") is True:
+                raise ValidationError("simulation lockout could not safely force the relay off")
+            item["value"] = False
+    else:
+        raise ValidationError("unsupported simulation action")
+    result["config_sync"] = await mirror_module_configuration(
+        "RCM",
+        module["module"]["hostname"],
+        rcm_config_from_channels(result["channels"]),
+    )
+    result["simulation_ack"] = {
+        "ok": True,
+        "action": action,
+        "channel": normalized_channel,
+        "value": bool(value),
+        "simulation": True,
+        "physical_outputs_commanded": False,
+        "actor": actor,
+    }
     return result
 
 
