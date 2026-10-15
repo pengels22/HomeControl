@@ -114,8 +114,7 @@ def test_lab1_user_sync_patcher_is_idempotent_and_normalizes_role_claims(tmp_pat
             "        apply_config_payload(reply.get(\"payload\") or {})\n"
             '"module_type": "RCM",\n'
             '"registered_module_type": "LCM",\n'
-            "            while True:\n"
-            "                state = verified_state()\n\n"
+            "            await send_frame(writer, \"heartbeat\", {\n"
             + loop + loop
     )
     monkeypatch.setattr(lab1_user_sync_patcher, "TARGET", target)

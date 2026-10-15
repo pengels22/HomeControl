@@ -41,10 +41,10 @@ def main() -> None:
     while text.count(LOOP_REPLACEMENT) > 1:
         text = text.replace(LOOP_REPLACEMENT + LOOP_REPLACEMENT, LOOP_REPLACEMENT, 1)
     if "pending_claim = claim_pending_config()" not in text:
-        anchor = "            while True:\n                state = verified_state()\n\n"
+        anchor = "            await send_frame(writer, \"heartbeat\", {\n"
         if text.count(anchor) != 1:
             raise SystemExit("LAB1 heartbeat loop anchor did not match exactly")
-        text = text.replace(anchor, anchor + HEARTBEAT_SEND, 1)
+        text = text.replace(anchor, HEARTBEAT_SEND + anchor, 1)
     if "mark_config_update_ack(\"RCM\"" not in text:
         anchor = "                if kind == \"heartbeat_ack\":\n                    break\n"
         if text.count(anchor) != 1:
