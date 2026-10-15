@@ -164,6 +164,19 @@ def test_lab1_module_config_payload_persists_rcm_csv_without_bindings(tmp_path, 
     assert store.load_json()["config_sync"]["state"] == "synchronized"
 
 
+def test_lab1_module_config_payload_ignores_generic_bootstrap_package(tmp_path, monkeypatch):
+    state_path = tmp_path / "module.json"
+    state_path.write_text(json.dumps(real_lab1_state("RCM")))
+    monkeypatch.setattr(lab1_user_sync, "STATE_PATH", state_path)
+    monkeypatch.setattr(lab1_user_sync, "CONFIG_ROOT", tmp_path / "homecontrol")
+    infra = lab1_user_sync.importlib.import_module("module_infra")
+    package = infra.build_config_package("RCM", "lab1", {"config_version": 1}, revision="bootstrap")
+
+    result = lab1_user_sync.apply_module_config_payload({"package": package})
+
+    assert result == {"ok": True, "applied": False, "ignored": "module bootstrap configuration"}
+
+
 def test_lab1_advertisement_patch_is_atomic_and_idempotent(tmp_path):
     target = tmp_path / "lab_agent.py"
     target.write_text('''state = {\n    "registered_module_type": "RCM",\n    "physical_outputs_enabled": False,\n    "commissioned_local": False,\n}\n''')

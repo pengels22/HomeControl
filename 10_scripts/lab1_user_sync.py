@@ -49,6 +49,8 @@ def apply_module_config_payload(payload: dict) -> dict:
     infra.verify_config_package(package, module_type=role, logical_id="lab1")
     config = package.get("config")
     channels = config.get("channels") if isinstance(config, dict) else None
+    if channels is None:
+        return {"ok": True, "applied": False, "ignored": "module bootstrap configuration"}
     if not isinstance(channels, list) or len(channels) != 32:
         raise ValueError("RCM configuration must contain exactly 32 channels")
 
