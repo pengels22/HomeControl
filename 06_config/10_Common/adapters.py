@@ -482,6 +482,7 @@ class Lab1Adapter(BaseAdapter):
             AdapterStep("preflight_lab1_safety", self._lab_state_safety_command()),
             AdapterStep("backup_lab_agent_components", self._lab1_backup_command(backup_dir), changes_system=True),
             AdapterStep("install_role_helper", f"sudo install -m 0755 {release_dir}/10_scripts/lab1_role_agent.py /opt/homecontrol-lab/lab1_role_agent.py", changes_system=True),
+            AdapterStep("install_simulation_command_support", f"sudo install -m 0755 {release_dir}/10_scripts/lab1_simulation_command_patcher.py /opt/homecontrol-lab/lab1_simulation_command_patcher.py && sudo /usr/bin/python3 /opt/homecontrol-lab/lab1_simulation_command_patcher.py", changes_system=True),
             AdapterStep("install_emergency_ui", self._lab1_emergency_install_command(release_dir), changes_system=True),
             AdapterStep("install_emergency_advertisement", f"sudo install -m 0755 {release_dir}/10_scripts/lab1_emergency_advertisement.py /opt/homecontrol-lab/lab1_emergency_advertisement.py && sudo /usr/bin/python3 /opt/homecontrol-lab/lab1_emergency_advertisement.py", changes_system=True),
             AdapterStep("install_user_sync", f"sudo install -m 0755 {release_dir}/10_scripts/lab1_user_sync.py /opt/homecontrol-lab/lab1_user_sync.py && sudo install -m 0755 {release_dir}/10_scripts/lab1_user_sync_patcher.py /opt/homecontrol-lab/lab1_user_sync_patcher.py && sudo /usr/bin/python3 /opt/homecontrol-lab/lab1_user_sync_patcher.py", changes_system=True),
@@ -568,7 +569,7 @@ class Lab1Adapter(BaseAdapter):
             "install -d -m 0755 \"$b\"; "
             "cp -a /opt/homecontrol-lab/lab1_role_agent.py \"$b/lab1_role_agent.py\"; "
             "cp -a /opt/homecontrol-lab/lab_agent.py \"$b/lab_agent.py\"; "
-            "for f in /opt/homecontrol-lab/lab1_user_sync.py /opt/homecontrol-lab/lab1_user_sync_patcher.py; do if [ -e \"$f\" ]; then cp -a \"$f\" \"$b/$(basename \"$f\")\"; fi; done; "
+            "for f in /opt/homecontrol-lab/lab1_user_sync.py /opt/homecontrol-lab/lab1_user_sync_patcher.py /opt/homecontrol-lab/lab1_simulation_command_patcher.py; do if [ -e \"$f\" ]; then cp -a \"$f\" \"$b/$(basename \"$f\")\"; fi; done; "
             "for f in /opt/homecontrol-lab/lab1_emergency.py /etc/systemd/system/homecontrol-lab-emergency.service; do if [ -e \"$f\" ]; then cp -a \"$f\" \"$b/$(basename \"$f\")\"; fi; done; "
             "if [ -f /opt/homecontrol-lab/module_infra.py ]; then cp -a /opt/homecontrol-lab/module_infra.py \"$b/module_infra.py\"; fi; "
             "if [ -d /opt/homecontrol-lab/state/homecontrol ]; then cp -a /opt/homecontrol-lab/state/homecontrol \"$b/homecontrol\"; fi; "

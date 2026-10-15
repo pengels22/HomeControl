@@ -17,6 +17,7 @@ lab1_advertisement = import_module("10_scripts.lab1_emergency_advertisement")
 lab1_emergency = import_module("10_scripts.lab1_emergency")
 lab1_user_sync = import_module("10_scripts.lab1_user_sync")
 lab1_user_sync_patcher = import_module("10_scripts.lab1_user_sync_patcher")
+lab1_simulation_patcher = import_module("10_scripts.lab1_simulation_command_patcher")
 
 OPERATION_ID = "11111111-2222-4333-8444-555555555555"
 
@@ -125,6 +126,21 @@ def test_lab1_user_sync_patcher_is_idempotent_and_normalizes_role_claims(tmp_pat
     assert first.count("if kind == \"config\":") == 1
     assert '"module_type": active_module_type(),' in first
     assert '"registered_module_type": active_module_type(),' in first
+
+
+def test_lab1_simulation_command_patcher_adds_only_safe_simulation_handler(tmp_path, monkeypatch):
+    target = tmp_path / "lab_agent.py"
+    target.write_text(lab1_simulation_patcher.OLD)
+    monkeypatch.setattr(lab1_simulation_patcher, "TARGET", target)
+
+    lab1_simulation_patcher.main()
+    patched = target.read_text()
+
+    assert lab1_simulation_patcher.MARKER in patched
+    assert "physical_outputs_enabled" in patched
+    assert "physical_outputs_commanded" in patched
+    lab1_simulation_patcher.main()
+    assert target.read_text() == patched
 
 
 def test_lab1_advertisement_patch_is_atomic_and_idempotent(tmp_path):
