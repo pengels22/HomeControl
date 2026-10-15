@@ -114,7 +114,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             elif role == 'LCM': csv_result=role_store(role).save_lcm_csv(channels)
             else: self.send_json({'detail':'configuration is unavailable for this role'},409); return
         except (TypeError,ValueError,KeyError) as exc: self.send_json({'detail':str(exc)},400); return
-        saved=role_store(role).save_json({'config':{'channels':channels},'config_sync':{'state':'local_changes_pending_hcm_reconciliation'},'local_edit_by':user['username']}); audit('local_config_edit',user['username']); self.send_json({'ok':True,'revision':saved['revision'],'csv':csv_result})
+        sync=__import__('lab1_user_sync').queue_local_config_update(role, channels, user['username']); audit('local_config_edit',user['username']); self.send_json({'ok':True,'revision':sync['revision'],'csv':csv_result,'config_sync':sync})
 
 def main():
     RUNTIME_ROOT.mkdir(parents=True,exist_ok=True); http.server.ThreadingHTTPServer(('0.0.0.0',6010),Handler).serve_forever()

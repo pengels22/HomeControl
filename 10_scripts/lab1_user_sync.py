@@ -12,6 +12,74 @@ BOOTSTRAP_PATH = Path("/opt/homecontrol-lab/state/homecontrol/local-admin-bootst
 CONFIG_ROOT = Path("/opt/homecontrol-lab/state/homecontrol")
 
 
+def pending_config_path(role: str = "RCM") -> Path:
+    return CONFIG_ROOT / "config" / role.upper() / "lab1.pending.json"
+
+
+def queue_local_config_update(role: str, channels: list[dict], actor: str) -> dict:
+    """Persist a local edit and durable outbound package before it is sent."""
+    infra = importlib.import_module("module_infra")
+    role = role.upper()
+    store = infra.LocalConfigStore(CONFIG_ROOT, role, "lab1")
+    current = store.load_json()
+    current_sync = current.get("config_sync") if isinstance(current.get("config_sync"), dict) else {}
+    base_revision = current_sync.get("last_synchronized_revision")
+    config = {"channels": channels}
+    package = infra.build_config_package(role, "lab1", config)
+    sync = {
+        "state": "local_changes_pending_hcm_reconciliation",
+        "origin": "local_emergency_config",
+        "actor": actor,
+        "base_revision": base_revision,
+        "local_revision": package["revision"],
+        "checksum": package["checksum"],
+        "attempts": 0,
+    }
+    store.save_json({**package, "config_sync": sync, "local_edit_by": actor})
+    path = pending_config_path(role)
+    infra.atomic_write_text(path, json.dumps({"package": package, "base_revision": base_revision, "config_sync": sync}, indent=2, sort_keys=True))
+    return {"revision": package["revision"], "checksum": package["checksum"], "base_revision": base_revision, "state": sync["state"]}
+
+
+def pending_config_update(role: str = "RCM") -> dict | None:
+    path = pending_config_path(role)
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) and isinstance(value.get("package"), dict) else None
+
+
+def claim_pending_config(role: str = "RCM") -> tuple[dict, str] | None:
+    pending = pending_config_update(role)
+    if not pending or pending.get("request_id"):
+        return None
+    request_id = __import__("uuid").uuid4().hex
+    pending["request_id"] = request_id
+    pending["attempts"] = int(pending.get("attempts", 0)) + 1
+    infra = importlib.import_module("module_infra")
+    infra.atomic_write_text(pending_config_path(role), json.dumps(pending, indent=2, sort_keys=True))
+    return pending, request_id
+
+
+def mark_config_update_ack(role: str, ack: dict) -> None:
+    path = pending_config_path(role)
+    pending = pending_config_update(role)
+    if not pending:
+        return
+    infra = importlib.import_module("module_infra")
+    store = infra.LocalConfigStore(CONFIG_ROOT, role, "lab1")
+    current = store.load_json()
+    sync = current.get("config_sync") if isinstance(current.get("config_sync"), dict) else {}
+    if ack.get("ok"):
+        sync = {**sync, "state": "synchronized", "last_synchronized_revision": ack.get("revision") or pending["package"]["revision"], "checksum": ack.get("checksum") or pending["package"]["checksum"], "origin": "local_emergency_config"}
+        store.save_json({**current, "config_sync": sync})
+        path.unlink(missing_ok=True)
+    else:
+        sync = {**sync, "state": "local_changes_pending_hcm_reconciliation", "last_error": ack.get("error", "HCM rejected configuration")}
+        store.save_json({**current, "config_sync": sync})
+
+
 def active_module_type() -> str:
     """Return the last locally persisted, safety-validated operational role."""
     try:
@@ -51,6 +119,8 @@ def apply_module_config_payload(payload: dict) -> dict:
     channels = config.get("channels") if isinstance(config, dict) else None
     if channels is None:
         return {"ok": True, "applied": False, "ignored": "module bootstrap configuration"}
+    if pending_config_update(role):
+        return {"ok": True, "applied": False, "deferred": "local configuration pending HCM reconciliation"}
     if not isinstance(channels, list) or len(channels) != 32:
         raise ValueError("RCM configuration must contain exactly 32 channels")
 

@@ -5,7 +5,7 @@ import os
 import tempfile
 
 TARGET = Path("/opt/homecontrol-lab/lab_agent.py")
-IMPORT = "from lab1_user_sync import active_module_type, apply_config_payload, apply_module_config_payload\n"
+IMPORT = "from lab1_user_sync import active_module_type, apply_config_payload, apply_module_config_payload, claim_pending_config, mark_config_update_ack\n"
 INITIAL = "        if reply.get(\"type\") != \"config\":\n            raise RuntimeError(\n                \"HCM did not return config; assignment refused\"\n            )\n"
 INITIAL_REPLACEMENT = INITIAL + "\n        initial_payload = reply.get(\"payload\") or {}\n        apply_config_payload(initial_payload)\n        apply_module_config_payload(initial_payload)\n"
 INITIAL_SYNC = "        apply_config_payload(reply.get(\"payload\") or {})\n"
@@ -13,6 +13,8 @@ LOOP = "                if kind == \"heartbeat_ack\":\n                    break
 LEGACY_LOOP_REPLACEMENT = "                if kind == \"config\":\n                    applied = apply_config_payload(response.get(\"payload\") or {})\n                    await send_frame(writer, \"command_ack\", {\"ok\": True, \"user_sync\": applied}, response.get(\"request_id\"))\n                    continue\n\n" + LOOP
 LEGACY_HANDLER = "                if kind == \"config\":\n                    applied = apply_config_payload(response.get(\"payload\") or {})\n                    await send_frame(writer, \"command_ack\", {\"ok\": True, \"user_sync\": applied}, response.get(\"request_id\"))\n                    continue\n\n"
 LOOP_REPLACEMENT = "                if kind == \"config\":\n                    config_payload = response.get(\"payload\") or {}\n                    user_applied = apply_config_payload(config_payload)\n                    config_result = apply_module_config_payload(config_payload)\n                    await send_frame(writer, \"command_ack\", {\"ok\": config_result.get(\"ok\", True), \"user_sync\": user_applied, \"config_sync\": config_result}, response.get(\"request_id\"))\n                    continue\n\n" + LOOP
+HEARTBEAT_SEND = "            pending_claim = claim_pending_config()\n            if pending_claim:\n                pending_payload, pending_request_id = pending_claim\n                await send_frame(writer, \"config\", pending_payload, pending_request_id)\n\n"
+ACK_HANDLER = "                if kind == \"command_ack\":\n                    mark_config_update_ack(\"RCM\", response.get(\"payload\") or {})\n                    continue\n\n"
 DUPLICATE_LOOP = LOOP_REPLACEMENT + LOOP_REPLACEMENT
 
 
@@ -38,6 +40,16 @@ def main() -> None:
             text = text.replace(LOOP, LOOP_REPLACEMENT, 1)
     while text.count(LOOP_REPLACEMENT) > 1:
         text = text.replace(LOOP_REPLACEMENT + LOOP_REPLACEMENT, LOOP_REPLACEMENT, 1)
+    if "pending_claim = claim_pending_config()" not in text:
+        anchor = "            while True:\n                state = verified_state()\n\n"
+        if text.count(anchor) != 1:
+            raise SystemExit("LAB1 heartbeat loop anchor did not match exactly")
+        text = text.replace(anchor, anchor + HEARTBEAT_SEND, 1)
+    if "mark_config_update_ack(\"RCM\"" not in text:
+        anchor = "                if kind == \"heartbeat_ack\":\n                    break\n"
+        if text.count(anchor) != 1:
+            raise SystemExit("LAB1 command acknowledgment anchor did not match exactly")
+        text = text.replace(anchor, ACK_HANDLER + anchor, 1)
     text = text.replace('"module_type": "RCM",', '"module_type": active_module_type(),')
     text = text.replace('"registered_module_type": "LCM",', '"registered_module_type": active_module_type(),')
     mode = TARGET.stat().st_mode & 0o777

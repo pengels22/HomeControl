@@ -90,6 +90,7 @@ class ModuleConnection:
         self.reader = reader; self.writer = writer
         self.device_id: str | None = None
         self.module_uuid: str | None = None
+        self.module_type: str | None = None
         self.connection_key: str | None = None
         self.hostname: str | None = None
         self.last_heartbeat = 0.0
@@ -507,6 +508,49 @@ class ModuleRegistry:
     def _preserve_local_assignment(self, device_id: str | None) -> bool:
         return device_id == maybe_normalize_device_id(settings.lab1_device_id)
 
+    async def _accept_module_config_update(self, conn: ModuleConnection, payload: dict[str, Any]) -> dict[str, Any]:
+        package = payload.get('package') if isinstance(payload, dict) else None
+        if not isinstance(package, dict):
+            return {'ok': False, 'error': 'configuration package is required'}
+        module_type = str(conn.module_type or '').upper()
+        logical_id = str(conn.hostname or '')
+        if module_type not in {'RCM', 'LCM'} or not logical_id:
+            return {'ok': False, 'error': 'module configuration role is not authorized'}
+        module_infra.verify_config_package(package, module_type=module_type, logical_id=logical_id)
+        config = package.get('config')
+        channels = config.get('channels') if isinstance(config, dict) else None
+        if not isinstance(channels, list):
+            return {'ok': False, 'error': 'channel configuration is required'}
+        store = module_infra.LocalConfigStore(storage.storage_root(), module_type, logical_id)
+        current = store.load_json()
+        current_config = current.get('config') if isinstance(current.get('config'), dict) else {}
+        sync_path = storage.storage_root() / '.state' / 'config-sync' / f'{logical_id}.json'
+        try:
+            sync_state = json.loads(sync_path.read_text())
+        except (OSError, ValueError, json.JSONDecodeError):
+            sync_state = {}
+        current_revision = sync_state.get('revision')
+        base_revision = payload.get('base_revision')
+        if current_revision and base_revision != current_revision:
+            return {'ok': False, 'error': 'configuration_conflict', 'current_revision': current_revision, 'base_revision': base_revision}
+        merged, conflicts = module_infra.reconcile_lockouts(config, current_config)
+        if module_type == 'RCM':
+            csv_meta = store.save_rcm_csv(merged['channels'])
+        else:
+            csv_meta = store.save_lcm_csv(merged['channels'])
+        accepted = module_infra.build_config_package(module_type, logical_id, merged, revision=csv_meta['revision'])
+        sync = {
+            'state': 'conflict' if conflicts else 'synchronized',
+            'origin': 'local_emergency_config',
+            'revision': accepted['revision'],
+            'checksum': accepted['checksum'],
+            'conflicts': conflicts,
+            'updated_at': module_infra.utc_ts(),
+        }
+        store.save_json({**accepted, 'config_sync': sync})
+        module_infra.atomic_write_text(sync_path, json.dumps({**sync, 'module_type': module_type, 'logical_id': logical_id}, indent=2, sort_keys=True))
+        return {'ok': True, 'accepted': True, 'revision': accepted['revision'], 'checksum': accepted['checksum'], 'config_sync': sync}
+
     async def handle_client(self, reader, writer):
         conn = ModuleConnection(reader, writer)
         peer = writer.get_extra_info('peername')
@@ -518,6 +562,7 @@ class ModuleRegistry:
             ident = self._verified_ident(writer.get_extra_info('peercert'), ident)
             conn.device_id = self._device_id_from_ident(ident)
             conn.module_uuid = ident.get('module_uuid')
+            conn.module_type = str(ident.get('module_type') or '').upper()
             conn.connection_key = conn.device_id or conn.module_uuid
             assignment = await self._assign(ident)
             conn.hostname = assignment['hostname']
@@ -574,6 +619,12 @@ class ModuleRegistry:
                 elif typ == 'log_events':
                     event_ids = await self._ingest_log_events(conn, payload)
                     await conn.send('log_ack', {'event_ids': event_ids})
+                elif typ == 'config':
+                    try:
+                        ack = await self._accept_module_config_update(conn, payload)
+                    except (ValueError, KeyError) as exc:
+                        ack = {'ok': False, 'error': str(exc)}
+                    await conn.send('command_ack', ack, msg.get('request_id'))
                 elif typ == 'command_ack':
                     rid = msg.get('request_id')
                     fut = conn.pending.get(rid)
