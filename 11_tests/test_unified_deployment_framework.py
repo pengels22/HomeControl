@@ -454,6 +454,25 @@ def test_jetson_preflight_does_not_require_env_file_or_pipe_docker_json_to_hered
     assert "/run/secrets/postgres_password" in command
 
 
+def test_live_hcm_image_installs_git_and_deployment_smoke_tests_it_before_replace():
+    dockerfile = (ROOT / "06_config" / "01_HCM" / "Dockerfile.live").read_text()
+    assert "apt-get install -y --no-install-recommends git ca-certificates" in dockerfile
+
+    fake_artifact = artifact.ReleaseArtifact(
+        release="a" * 40,
+        path=Path("/tmp/homecontrol.tar.gz"),
+        sha256="abc123",
+        metadata_path=Path("/tmp/homecontrol.json"),
+    )
+    steps = adapters.adapter_for(inventory.inventory()["jetson"]).steps(fake_artifact, deployment_id="hc-git-test")
+    names = [step.name for step in steps]
+    smoke = next(step.command for step in steps if step.name == "verify_hcm_image_git")
+
+    assert "docker run --rm --user 10001:10001" in smoke
+    assert "git --version" in smoke
+    assert names.index("verify_hcm_image_git") < names.index("replace_hcm_container")
+
+
 def test_jetson_health_discovers_published_non_loopback_endpoint():
     command = adapters.adapter_for(inventory.inventory()["jetson"])._hcm_health_command()
 
