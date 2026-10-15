@@ -215,6 +215,24 @@ async def test_base_config_includes_conflict_heartbeat_supervisor(monkeypatch, t
     assert payload['package']['checksum']
 
 
+def test_stored_channel_config_payload_rebuilds_package_from_hcm_revision(monkeypatch, tmp_path):
+    reg = registry_mod.ModuleRegistry()
+    monkeypatch.setattr(registry_mod.storage, 'storage_root', lambda: tmp_path)
+    store = registry_mod.module_infra.LocalConfigStore(tmp_path, 'RCM', 'lab1')
+    config = {'channels': registry_mod.module_infra.default_rcm_config()}
+    csv_meta = store.save_rcm_csv(config['channels'])
+    package = registry_mod.module_infra.build_config_package('RCM', 'lab1', config, revision=csv_meta['revision'])
+    store.save_json(package)
+    sync_dir = tmp_path / '.state' / 'config-sync'
+    sync_dir.mkdir(parents=True)
+    (sync_dir / 'lab1.json').write_text(json.dumps({'revision': package['revision'], 'checksum': package['checksum']}))
+
+    payload = reg._stored_channel_config_payload('RCM', 'lab1')
+
+    assert payload['package']['revision'] == csv_meta['revision']
+    assert payload['package']['checksum'] == package['checksum']
+
+
 @pytest.mark.asyncio
 async def test_registry_ingests_module_logs_durably_and_deduplicates(monkeypatch, tmp_path):
     monkeypatch.setattr(registry_mod.storage.settings, 'storage_root', tmp_path)

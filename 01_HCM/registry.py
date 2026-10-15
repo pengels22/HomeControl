@@ -381,6 +381,25 @@ class ModuleRegistry:
                 log.warning('could not build user snapshot for %s', device_id, exc_info=True)
         return result
 
+    def _stored_channel_config_payload(self, module_type: str, logical_id: str) -> dict[str, Any] | None:
+        """Return the latest persisted channel package for reconnect replay."""
+        config_path = storage.storage_root() / "config" / module_type.upper() / f"{logical_id}.json"
+        sync_path = storage.storage_root() / ".state" / "config-sync" / f"{logical_id}.json"
+        try:
+            stored = json.loads(config_path.read_text())
+            sync = json.loads(sync_path.read_text())
+        except (OSError, ValueError, json.JSONDecodeError):
+            return None
+        config = stored.get("config")
+        revision = sync.get("revision")
+        if not isinstance(config, dict) or not isinstance(config.get("channels"), list) or not isinstance(revision, str):
+            return None
+        package = module_infra.build_config_package(module_type, logical_id, config, revision=revision)
+        if sync.get("checksum") and package["checksum"] != sync["checksum"]:
+            log.warning("stored configuration checksum mismatch for %s", logical_id)
+            return None
+        return {"package": package, "base_revision": None}
+
     def _capability_rows(self, ident: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
         rows: list[tuple[str, dict[str, Any]]] = []
         seen: set[str] = set()
@@ -517,6 +536,9 @@ class ModuleRegistry:
                 except TypeError:
                     config_payload = await self._base_config(ident['module_type'])
                 await conn.send('config', config_payload)
+                stored_payload = self._stored_channel_config_payload(ident['module_type'], assignment['hostname'])
+                if stored_payload:
+                    await conn.send('config', stored_payload)
 
             while True:
                 msg = await protocol.read_frame(reader)
