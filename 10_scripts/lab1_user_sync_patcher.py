@@ -10,6 +10,8 @@ INITIAL = "        if reply.get(\"type\") != \"config\":\n            raise Runt
 INITIAL_REPLACEMENT = INITIAL + "\n        initial_payload = reply.get(\"payload\") or {}\n        apply_config_payload(initial_payload)\n        apply_module_config_payload(initial_payload)\n"
 INITIAL_SYNC = "        apply_config_payload(reply.get(\"payload\") or {})\n"
 LOOP = "                if kind == \"heartbeat_ack\":\n                    break\n"
+LEGACY_LOOP_REPLACEMENT = "                if kind == \"config\":\n                    applied = apply_config_payload(response.get(\"payload\") or {})\n                    await send_frame(writer, \"command_ack\", {\"ok\": True, \"user_sync\": applied}, response.get(\"request_id\"))\n                    continue\n\n" + LOOP
+LEGACY_HANDLER = "                if kind == \"config\":\n                    applied = apply_config_payload(response.get(\"payload\") or {})\n                    await send_frame(writer, \"command_ack\", {\"ok\": True, \"user_sync\": applied}, response.get(\"request_id\"))\n                    continue\n\n"
 LOOP_REPLACEMENT = "                if kind == \"config\":\n                    config_payload = response.get(\"payload\") or {}\n                    user_applied = apply_config_payload(config_payload)\n                    config_result = apply_module_config_payload(config_payload)\n                    await send_frame(writer, \"command_ack\", {\"ok\": config_result.get(\"ok\", True), \"user_sync\": user_applied, \"config_sync\": config_result}, response.get(\"request_id\"))\n                    continue\n\n" + LOOP
 DUPLICATE_LOOP = LOOP_REPLACEMENT + LOOP_REPLACEMENT
 
@@ -26,6 +28,8 @@ def main() -> None:
         if text.count(INITIAL_SYNC) != 1:
             raise SystemExit("LAB1 agent initial config sync anchor did not match exactly")
         text = text.replace(INITIAL_SYNC, "        initial_payload = reply.get(\"payload\") or {}\n        apply_config_payload(initial_payload)\n        apply_module_config_payload(initial_payload)\n", 1)
+    text = text.replace(LEGACY_LOOP_REPLACEMENT, "")
+    text = text.replace(LEGACY_HANDLER, "")
     if "config_result = apply_module_config_payload(config_payload)" not in text:
         text = text.replace(DUPLICATE_LOOP, LOOP_REPLACEMENT)
         if "config_result = apply_module_config_payload(config_payload)" not in text:
