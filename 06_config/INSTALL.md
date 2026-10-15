@@ -169,24 +169,6 @@ curl -sS -X POST http://127.0.0.1:8088/api/pairing-glyph/compare \
 
 The response should include `ok: true` and a session token.
 
-## iOS Companion App
-
-The iOS project is in `12_IOS/Home Control`.
-
-The primary pairing path is:
-
-1. HCM displays the QR pairing code inside the circular pairing UI.
-2. The app scans the QR using the camera.
-3. The app extracts the opaque `HC2` payload from the pairing URL.
-4. The app posts that payload to HCM.
-5. HCM verifies/decrypts the payload using its local secret.
-6. HCM returns an app session token and the app loads the HCM configuration page.
-
-The HCM pairing secret is not stored in the iOS app. The iOS Simulator has no
-real camera; use the app's `Load Simulator` action while developing against
-the advertised simulator URL. A physical iPhone must point the HCM URL at the
-HCM or Mac simulator address reachable from the phone, not `127.0.0.1`.
-
 ## IO Mode
 
 Modules use the same code for real hardware and simulation. IO mode is selected

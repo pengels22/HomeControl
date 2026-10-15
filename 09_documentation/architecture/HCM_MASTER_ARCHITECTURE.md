@@ -208,7 +208,6 @@ Current user/admin interfaces:
 - HCM web UI scaffold under `01_HCM/www`.
 - macOS simulator on port 8088.
 - Module status-only web UIs on default ports 8092-8095.
-- iOS companion app prototype under `12_IOS/Home Control`.
 
 The UI should remain logical-device-oriented. Hardware channels should be
 binding/configuration details, not everyday automation targets.

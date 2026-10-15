@@ -36,7 +36,6 @@ HomeControl is the source repository for the HCM (House Control Module) system a
 - `09_documentation` — Architecture, wiring, networking, HVAC, commissioning, and build documentation
 - `10_scripts` — Local simulator, provisioning helpers, and admin tooling
 - `11_tests` — Python test coverage for shared services, module behavior, and simulator flows
-- `12_IOS` — archived iOS companion app prototype; not part of the active HCM production workflow
 
 ## Architecture baseline
 

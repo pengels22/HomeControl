@@ -31,7 +31,6 @@ Implemented in this pass:
 - RCM simulator controls for 32 relays, maintenance locks, and editable channel names
 - LCM simulator controls for relay names, low-voltage dimming fade targets, and high-voltage dimmer status
 - 3.3-inch HCM screen mockup with secure QR pairing code inside the circular pairing UI
-- iOS companion app prototype with standard-code scanning, circular-code camera scanning, HCM login, and simulator loading
 - secure circular pairing payloads using opaque `HC2` tokens verified by HCM
 - systemd unit templates
 - basic tests
