@@ -60,6 +60,18 @@ def test_rcm_bank_mapping_uses_numeric_positions_and_eight_relays_per_bank(clien
     ]
 
 
+def test_rcm_relays_display_numeric_bank_labels_and_assigned_names_only():
+    source = (touchscreen.ROOT / '10_scripts' / 'touchscreen_ui' / 'touchscreen.js').read_text()
+    for label in ('1–8', '9–16', '17–24', '25–32'):
+        assert f"'{label}'" in source
+    assert "A1–A8" not in source
+    assert "B1–B8" not in source
+    assert "C1–C8" not in source
+    assert "D1–D8" not in source
+    assert "isRcm?esc(x.position)" not in source
+    assert "!isRcm?`<small>${esc(x.channel)}</small>`:''" in source
+
+
 def test_touchscreen_bank_selection_updates_shared_effective_bank(client):
     response = client.post('/api/touchscreen/command', json={'kind': 'bank_select', 'bank': 2, 'role': 'RCM'})
     assert response.status_code == 200

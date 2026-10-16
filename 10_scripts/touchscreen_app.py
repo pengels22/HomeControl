@@ -60,7 +60,7 @@ class SimulatedTouchscreenAdapter:
             "LCM": [f"A{i}" for i in range(1, 9)],
         }
         relay_names = channels.get(self.role, [])
-        relays = [{"channel": ch, "position": index, "name": ch, "on": False, "lockout": False, "confirmed": True} for index, ch in enumerate(relay_names, start=1)]
+        relays = [{"channel": ch, "position": index, "name": (f"Relay {index}" if self.role == "RCM" else ch), "on": False, "lockout": False, "confirmed": True} for index, ch in enumerate(relay_names, start=1)]
         dimmers = []
         if self.role == "LCM":
             dimmers = [
