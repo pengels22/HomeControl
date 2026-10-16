@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import copy
 import importlib
+import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -40,6 +42,7 @@ class Command(BaseModel):
     channel: str | None = None
     value: float | bool | None = None
     bank: int | None = None
+    setting: str | None = None
     role: str = "RCM"
     authorized: bool = True
 
@@ -52,7 +55,19 @@ class SimulatedTouchscreenAdapter:
         if self.role not in ROLE_PAGES:
             raise ValueError(f"unsupported role {role}")
         self.profile = PROFILES.load_profile(PROFILES.profile_path(ROOT, self.role), self.role)
+        self.settings_path = Path(os.getenv("HOMECONTROL_TOUCHSCREEN_STATE_DIR", str(ROOT / "tmp" / "touchscreen-state"))) / f"{self.role.lower()}-settings.json"
         self.state = self._initial_state()
+
+    def _saved_timeout(self) -> int:
+        try:
+            value = json.loads(self.settings_path.read_text()).get("inactivity_seconds", 10)
+            return max(1, min(300, int(value)))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return 10
+
+    def _save_timeout(self, value: int) -> None:
+        self.settings_path.parent.mkdir(parents=True, exist_ok=True)
+        self.settings_path.write_text(json.dumps({"inactivity_seconds": value}) + "\n")
 
     def _initial_state(self) -> dict[str, Any]:
         channels = {
@@ -67,7 +82,7 @@ class SimulatedTouchscreenAdapter:
                 {"channel": f"10-{i}", "name": f"10-{i}", "type": "0-10V", "percent": 0, "confirmed": True, "lockout": False}
                 for i in range(1, 11)
             ] + [
-                {"channel": f"HV-{i}", "name": f"HV-{i}", "type": "110V", "percent": 0, "confirmed": True, "lockout": False}
+                {"channel": f"HV-{i}", "name": f"HV-{i}", "type": "110V", "driver": "shelly", "percent": 0, "confirmed": True, "lockout": False}
                 for i in range(1, 5)
             ]
         rooms = []
@@ -83,13 +98,14 @@ class SimulatedTouchscreenAdapter:
             "module": {"role": self.role, "name": f"{self.role}-01", "device_id": f"sim-{self.role.lower()}-preview", "simulation": True, "physical_outputs_enabled": False},
             "health": {"status": "SIMULATED", "heartbeat": "Unavailable", "config_sync": "Preview only", "faults": []},
             "network": {"hostname": f"{self.role.lower()}-preview", "ipv4": "Unavailable", "mac": "Unavailable", "link": "Simulated", "hcm": "Unavailable", "last_sync": "Unavailable"},
-            "settings": {"display_brightness": 70, "inactivity_seconds": 10, "local_admin": "Enabled", "role": self.role, "simulation": "Enabled", "hardware_profile": self.profile.verification_status},
+            "settings": {"display_brightness": 70, "inactivity_seconds": self._saved_timeout(), "local_admin": "Enabled", "role": self.role, "simulation": "Enabled", "hardware_profile": self.profile.verification_status},
             "relays": relays,
             "dimmers": dimmers,
             "rooms": rooms,
             "external_sensors": external,
             "last_ack": None,
             "bank_selector": {"touchscreen_bank": 0, "physical_bank": None, "physical_selector_authoritative": False, "effective_bank": 0, "source": "touchscreen"},
+            "state_revision": 0,
         }
 
     def snapshot(self) -> dict[str, Any]:
@@ -103,6 +119,21 @@ class SimulatedTouchscreenAdapter:
             raise HTTPException(status_code=403, detail="authorized touchscreen session required")
         if command.role.upper() != self.role:
             raise HTTPException(status_code=409, detail="module role does not match touchscreen session")
+        if command.kind == "setting":
+            if command.setting != "screen_timeout":
+                raise HTTPException(status_code=403, detail="only screen timeout is editable")
+            try:
+                timeout = int(command.value)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail="screen timeout must be an integer") from exc
+            if not 1 <= timeout <= 300:
+                raise HTTPException(status_code=422, detail="screen timeout must be between 1 and 300 seconds")
+            self.state["settings"]["inactivity_seconds"] = timeout
+            self._save_timeout(timeout)
+            self.state["state_revision"] += 1
+            ack = {"ok": True, "simulated": True, "setting": command.setting, "value": timeout, "state_revision": self.state["state_revision"]}
+            self.state["last_ack"] = ack
+            return ack
         if command.kind == "bank_select":
             if self.role != "RCM" or command.bank not in range(4):
                 raise HTTPException(status_code=400, detail="invalid RCM bank selection")
@@ -114,6 +145,7 @@ class SimulatedTouchscreenAdapter:
             else:
                 selector["effective_bank"] = command.bank
                 selector["source"] = "touchscreen"
+            self.state["state_revision"] += 1
             return {"ok": True, "simulated": True, "physical_output_commanded": False, "bank": selector["effective_bank"], "source": selector["source"]}
         if command.kind not in {"relay", "dimmer"}:
             raise HTTPException(status_code=400, detail="unsupported simulated command")
@@ -133,7 +165,8 @@ class SimulatedTouchscreenAdapter:
             if item["lockout"]:
                 raise HTTPException(status_code=409, detail="maintenance lockout prevents dimmer command")
             requested = max(0, min(100, round(float(command.value))))
-            item["percent"] = 0 if requested <= 5 else requested
+            item["percent"] = 0 if requested < 5 else requested
+        self.state["state_revision"] += 1
         ack = {"ok": True, "simulated": True, "physical_output_commanded": False, "channel": command.channel, "value": item.get("on", item.get("percent")), "acknowledged_at": time.time()}
         self.state["last_ack"] = ack
         return ack

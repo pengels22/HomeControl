@@ -5,4 +5,5 @@
 .bank-button{min-height:64px;padding:10px 14px;border:1px solid var(--line);border-radius:16px;background:#092641;color:var(--white);font-weight:800;font-size:clamp(18px,2.5vw,30px)}
 .bank-button.selected,.bank-button:focus-visible,.bank-button:hover{border-color:var(--cyan);background:#0d5075;box-shadow:0 0 16px #00c6ff66;outline:none}
 .bank-source{margin-top:0}
+.timeout-setting input{width:110px;min-height:42px;padding:6px 10px;border:1px solid var(--line);border-radius:10px;background:#092641;color:var(--white);text-align:center}
 @media(max-width:800px){.bank-select{gap:7px}.bank-button{min-height:58px;padding:8px 4px;font-size:17px}}

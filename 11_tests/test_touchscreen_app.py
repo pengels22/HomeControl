@@ -33,11 +33,34 @@ def test_each_role_has_shared_state_and_simulation_safety(client, role):
 def test_lcm_exposes_fourteen_dimmers_and_threshold_normalization(client):
     state = client.get('/api/touchscreen/state', params={'role': 'LCM'}).json()
     assert [item['channel'] for item in state['dimmers']] == [f'10-{i}' for i in range(1, 11)] + [f'HV-{i}' for i in range(1, 5)]
-    for value, expected in [(0, 0), (1, 0), (5, 0), (6, 6), (100, 100)]:
+    for value, expected in [(0, 0), (1, 0), (4, 0), (5, 5), (6, 6), (100, 100)]:
         response = client.post('/api/touchscreen/command', json={'kind': 'dimmer', 'channel': '10-1', 'value': value, 'role': 'LCM'})
         assert response.status_code == 200
         assert response.json()['value'] == expected
         assert response.json()['physical_output_commanded'] is False
+
+
+def test_lcm_dimmer_state_persists_across_polling_cycles_and_repeated_adjustments(client):
+    adapter = touchscreen.adapters['LCM']
+    for value in (12, 48, 5, 72):
+        response = client.post('/api/touchscreen/command', json={'kind': 'dimmer', 'channel': '10-1', 'value': value, 'role': 'LCM'})
+        assert response.status_code == 200
+        assert client.get('/api/touchscreen/state', params={'role': 'LCM'}).json()['dimmers'][0]['percent'] == value
+    assert adapter.state['dimmers'][0]['percent'] == 72
+    assert client.get('/api/touchscreen/state', params={'role': 'LCM'}).json()['state_revision'] >= 4
+    assert adapter.state['dimmers'][-4]['driver'] == 'shelly'
+    response = client.post('/api/touchscreen/command', json={'kind': 'dimmer', 'channel': 'HV-1', 'value': 5, 'role': 'LCM'})
+    assert response.status_code == 200
+    assert adapter.state['dimmers'][-4]['percent'] == 5
+
+
+def test_stale_state_revision_cannot_replace_newer_dimmer_state(client):
+    adapter = touchscreen.adapters['LCM']
+    stale = adapter.snapshot()
+    client.post('/api/touchscreen/command', json={'kind': 'dimmer', 'channel': 'HV-1', 'value': 65, 'role': 'LCM'})
+    fresh = adapter.snapshot()
+    assert fresh['state_revision'] > stale['state_revision']
+    assert fresh['dimmers'][-4]['percent'] == 65
 
 
 def test_relay_ack_is_simulated_and_lockout_is_enforced(client):
@@ -138,3 +161,29 @@ def test_lcm_control_markup_hides_hardware_identifiers():
     assert "<strong>${esc(item.name)}</strong><div class=\"range-wrap\"" in source
     assert "${esc(item.type)} · ${item.channel}" not in source
     assert "<small>${esc(item.channel)}</small>" not in source
+
+
+@pytest.mark.parametrize('role', ['HCM', 'RCM', 'LCM', 'SIM'])
+def test_only_screen_timeout_is_editable_and_persists(client, role):
+    adapter = touchscreen.adapters[role]
+    timeout_file = adapter.settings_path
+    response = client.post('/api/touchscreen/command', json={'kind': 'setting', 'setting': 'screen_timeout', 'value': 24, 'role': role})
+    assert response.status_code == 200
+    assert client.get('/api/touchscreen/state', params={'role': role}).json()['settings']['inactivity_seconds'] == 24
+    assert touchscreen.SimulatedTouchscreenAdapter(role).state['settings']['inactivity_seconds'] == 24
+    assert timeout_file.exists()
+    denied = client.post('/api/touchscreen/command', json={'kind': 'setting', 'setting': 'display_brightness', 'value': 100, 'role': role})
+    assert denied.status_code == 403
+    invalid = client.post('/api/touchscreen/command', json={'kind': 'setting', 'setting': 'screen_timeout', 'value': 301, 'role': role})
+    assert invalid.status_code == 422
+    timeout_file.unlink(missing_ok=True)
+
+
+def test_control_sync_uses_revision_guards_and_releases_dimmer_on_change():
+    source = (touchscreen.ROOT / '10_scripts' / 'touchscreen_ui' / 'touchscreen.js').read_text()
+    assert 'state_revision' in source
+    assert 'latestMutationSequence' in source
+    assert "setInterval(() => load({renderPage: false}).catch(() => {}), 3000)" in source
+    assert "input.addEventListener('change'" in source
+    assert 'input.setPointerCapture' in source
+    assert 'input.releasePointerCapture' in source
