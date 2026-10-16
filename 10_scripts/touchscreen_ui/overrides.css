@@ -1,0 +1,3 @@
+.identity{width:100%}
+.metric{align-items:center}
+.metric>span{display:flex;flex-direction:column;gap:4px;min-width:0}
