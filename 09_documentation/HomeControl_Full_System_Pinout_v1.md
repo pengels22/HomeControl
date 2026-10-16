@@ -229,7 +229,7 @@ Both relay boards use 5V coil supply, active-low input scheme, built-in flyback 
 OPi `eth0` = house VLAN20; `eth0.512` = private subnet 10.42.1.1/24 running interface-bound dnsmasq DHCP; no IP forwarding/routing to house IoT. Switch regulated 5V from branch, matching purchased revision connector/polarity. This assumes house uplink is VLAN20 **untagged** at port 1.
 
 ## 7. SIM (2U, Type B) field interface
-- OPi Zero 3 1GB main header per §1. Type B panel POWER = regulated 3.3V rail (current-limited LED assembly); LINK = pin11/PC6; STATUS = pin13/PC5; FAULT = pin15/PC8; SPI1 display pins 19/21/23/24 plus GPIO pins 18/22; touchscreen I²C3 pins 3/5; no MCPs solely for the panel.
+- OPi Zero 3 1GB main header per §1. Type B panel POWER = regulated 3.3V rail (current-limited LED assembly); LINK = pin15/PC8; STATUS = pin16/PC15; FAULT = pin22/PC7; SPI1 display pins 19/21/23/24 plus LCD D/C pin11 and unmanaged reset line pin18; touchscreen I²C3 pins 3/5 with reset pin13; no MCPs solely for the panel.
 - Main field supply **12V**; 5V control regulation as specified by the final SIM power design. FYSETC Hexa, three CAN zones feeding up to 18 RMC room clusters (12V / GND / CAN-H / CAN-L) in the established system concept. **No verified connector pin-by-pin Hexa schedule or finalized analog channel count is present in the agreed accessible material.** Do not invent GPIO, CAN transceiver, or ADC pin assignments.
 - RMC sensor input fields, analog input physical terminals, 12V PSU exact selected part and Hexa board pin mapping: **TBD**. SIM's 2U chassis change supersedes historic 1U outline.
 

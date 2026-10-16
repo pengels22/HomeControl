@@ -55,17 +55,33 @@ apply them automatically.
 ## Browser UI boundary
 
 `browser_bridge.py` provides a reproducible 480x320 kiosk command for the
-existing role-aware browser UI. The browser remains the UI source of truth;
-there is no duplicate native relay/dimmer interface. A production panel still
-needs a separately tested browser/WebView input bridge that forwards FT6336U
-touch events to browser pointer events. That bridge is intentionally not
-enabled until the panel, pinmux, permissions, and touch coordinate transform
-are bench-verified.
+existing role-aware browser UI. `input_bridge.py` provides the corresponding
+optional Linux `uinput` consumer. It forwards the Travel_Laser event lifecycle
+as a single virtual touch contact:
+
+```text
+FT6336U poll -> TouchEventBridge -> uinput down/move/up -> compositor -> Chromium DOM
+```
+
+This is the necessary adaptation from Travel_Laser. Travel_Laser consumes the
+same events in `_apply_touch()` against its own raster UI, including custom
+scroll offsets and delayed button activation. HomeControl does not reproduce
+that raster hit-testing layer: the existing HTML/JavaScript UI remains the
+source of truth, so Chromium performs native scrolling, swipe recognition,
+button activation, slider pointer capture, and release handling. HomeControl's
+existing inactivity and command-synchronization JavaScript remains unchanged.
+
+The bridge is still commissioning-only. It is not enabled by the preview
+server and is not claimed as physically validated until an Orange Pi confirms
+`/dev/uinput` delivery to the selected kiosk compositor.
 
 ## Outstanding verification
 
 No live device, Jetson, LAB1, Conflict service, physical relay, dimmer, or
 sensor was modified. Before enabling the physical adapter, verify display
 orientation, backlight requirements, touch coordinates, device permissions,
-SPI/I2C electrical levels, startup behavior, and that browser input is routed
-only through the existing authenticated application paths.
+SPI/I2C electrical levels, `/dev/uinput` creation, compositor delivery,
+startup behavior, and that browser input is routed only through the existing
+authenticated application paths. Exercise taps, release events, vertical
+scrolling, swipes, repeated relay presses, and continuous dimmer drags on
+each RCM, LCM, and SIM role.

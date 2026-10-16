@@ -12,9 +12,26 @@ commissioning-only mode for `/dev/spidev1.1`, `/dev/i2c-2`, and gpiochip1
 lines 70/69. It is not enabled by the preview server and is not invoked by
 automated tests.
 
-The browser-to-RGB565 deployment approach is intentionally a separate future
-integration step: run the existing local UI in a kiosk-capable browser or
-WebView on the panel, then connect its local touch bridge to this service.
-This keeps HTML/CSS/JavaScript as the UI source and avoids a duplicate,
-hard-coded physical UI. No live device-tree, GPIO, SPI, or I2C changes are
-performed by this repository change.
+The browser input bridge is implemented as an optional Linux `uinput` sink in
+`input_bridge.py`. It forwards the validated single-contact `down`, `move`,
+and `up` lifecycle to the compositor, where the kiosk browser delivers normal
+DOM pointer/touch events. Chromium therefore owns hit testing, scrolling,
+swipes, pointer capture, and slider interaction; the bridge does not duplicate
+the HTML UI or issue HomeControl commands itself.
+
+Install the Linux-only dependency separately on a bench Orange Pi:
+
+```sh
+python -m pip install -r 10_scripts/touchscreen_hardware/requirements.txt
+```
+
+Then start the existing browser using the command from `browser_bridge.py` and
+run the input consumer explicitly, for example:
+
+```sh
+./.venv/bin/python 10_scripts/touchscreen_input_bridge.py --role RCM --mode orange_pi
+```
+
+The default remains simulated and opens no hardware. The `uinput` device
+requires appropriate `/dev/uinput` permissions and compositor acceptance; no
+live device-tree, GPIO, SPI, or I2C changes are performed by this repository.
