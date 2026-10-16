@@ -66,7 +66,7 @@ def dependencies_ready(results: dict[str, dict[str, object]]) -> bool:
 
 def restore_commands(state: dict[str, object]) -> list[str]:
     commands = [
-        "if test -s /tmp/homecontrol-touchscreen-test.pids; then xargs -r sudo -n kill < /tmp/homecontrol-touchscreen-test.pids || true; fi",
+        "if test -s /tmp/homecontrol-touchscreen-test.pids; then while read -r pid; do sudo -n kill -TERM \"$pid\" 2>/dev/null || true; sudo -n pkill -TERM -P \"$pid\" 2>/dev/null || true; done < /tmp/homecontrol-touchscreen-test.pids; sleep 2; while read -r pid; do sudo -n kill -KILL \"$pid\" 2>/dev/null || true; sudo -n pkill -KILL -P \"$pid\" 2>/dev/null || true; done < /tmp/homecontrol-touchscreen-test.pids; fi",
         "rm -f /tmp/homecontrol-touchscreen-test.pids",
     ]
     if state.get("service_active") == "active":
