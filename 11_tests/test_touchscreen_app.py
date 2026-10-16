@@ -69,7 +69,7 @@ def test_rcm_relays_display_numeric_bank_labels_and_assigned_names_only():
     assert "C1–C8" not in source
     assert "D1–D8" not in source
     assert "isRcm?esc(x.position)" not in source
-    assert "!isRcm?`<small>${esc(x.channel)}</small>`:''" in source
+    assert "<small>${esc(item.channel)}</small>" not in source
 
 
 def test_touchscreen_bank_selection_updates_shared_effective_bank(client):
@@ -120,3 +120,21 @@ def test_static_preview_assets_are_available(client):
     assert client.get('/').status_code == 200
     assert client.get('/assets/touchscreen.css').status_code == 200
     assert client.get('/assets/touchscreen.js').status_code == 200
+
+
+def test_touch_controls_reconcile_in_place_and_preserve_interactions():
+    source = (touchscreen.ROOT / '10_scripts' / 'touchscreen_ui' / 'touchscreen.js').read_text()
+    assert 'await load()' not in source
+    assert "load({renderPage: false})" in source
+    assert 'setPointerCapture' in source
+    assert 'releasePointerCapture' in source
+    assert "document.addEventListener('scroll', resetIdle" in source
+    assert "input.addEventListener('input'" in source
+    assert "input.addEventListener('change'" in source
+
+
+def test_lcm_control_markup_hides_hardware_identifiers():
+    source = (touchscreen.ROOT / '10_scripts' / 'touchscreen_ui' / 'touchscreen.js').read_text()
+    assert "<strong>${esc(item.name)}</strong><div class=\"range-wrap\"" in source
+    assert "${esc(item.type)} · ${item.channel}" not in source
+    assert "<small>${esc(item.channel)}</small>" not in source
