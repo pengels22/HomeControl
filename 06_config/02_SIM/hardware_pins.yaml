@@ -15,35 +15,35 @@ processor_header:
   "4": {function: 5V_RESERVED, verification: UNVERIFIED, exclusive: false}
   "5": {function: I2C3_SCL_TOUCH, verification: UNVERIFIED}
   "6": {function: GND, verification: UNVERIFIED, exclusive: false}
-  "7": {function: TOUCH_INT, verification: UNVERIFIED}
+  "7": {function: TOUCH_INT_UNUSED, verification: UNVERIFIED}
   "8": {function: UNUSED, verification: UNVERIFIED}
   "9": {function: GND, verification: UNVERIFIED, exclusive: false}
   "10": {function: UNUSED, verification: UNVERIFIED}
-  "11": {function: LINK_LED, soc: PC6, verification: UNVERIFIED}
+  "11": {function: LCD_DC, soc: PC6, verification: VALIDATED_TRAVEL_LASER_REFERENCE}
   "12": {function: UNUSED, verification: UNVERIFIED}
-  "13": {function: STATUS_LED, soc: PC5, verification: UNVERIFIED}
+  "13": {function: TOUCH_RESET, soc: PC5, verification: VALIDATED_TRAVEL_LASER_REFERENCE}
   "14": {function: GND, verification: UNVERIFIED, exclusive: false}
-  "15": {function: FAULT_LED, soc: PC8, verification: UNVERIFIED}
-  "16": {function: UNUSED, verification: UNVERIFIED}
+  "15": {function: LINK_LED, soc: PC8, verification: VALIDATED_TRAVEL_LASER_REFERENCE}
+  "16": {function: STATUS_LED, soc: PC15, verification: VALIDATED_TRAVEL_LASER_REFERENCE}
   "17": {function: 3V3_AUX, verification: UNVERIFIED, exclusive: false}
-  "18": {function: LCD_RESET, soc: PC14, verification: UNVERIFIED}
+  "18": {function: LCD_RESET_UNMANAGED, soc: PC14, verification: VALIDATED_TRAVEL_LASER_REFERENCE}
   "19": {function: SPI1_MOSI, soc: PH7, verification: UNVERIFIED}
   "20": {function: GND, verification: UNVERIFIED, exclusive: false}
   "21": {function: SPI1_MISO_RESERVED, soc: PH8, verification: UNVERIFIED}
-  "22": {function: LCD_DC, soc: PC7, verification: UNVERIFIED}
+  "22": {function: FAULT_LED, soc: PC7, verification: VALIDATED_TRAVEL_LASER_REFERENCE}
   "23": {function: SPI1_CLK, soc: PH6, verification: UNVERIFIED}
-  "24": {function: SPI1_CS0_LCD, soc: PH9, verification: UNVERIFIED}
+  "24": {function: SPI1_CS1_LCD, soc: PH9, verification: VALIDATED_TRAVEL_LASER_REFERENCE}
   "25": {function: GND, verification: UNVERIFIED, exclusive: false}
-  "26": {function: TOUCH_RESET, soc: PC10, verification: UNVERIFIED}
+  "26": {function: UNUSED, soc: PC10, verification: UNVERIFIED}
 faceplate:
   type: B
   connector: J-FP1
   verification: UNVERIFIED
 buses:
   spi:
-    display: {controller: SPI1, chip_select: CS0, verification: UNVERIFIED}
+    display: {controller: SPI1, chip_select: CS1, device: /dev/spidev1.1, speed_hz: 10000000, verification: VALIDATED_TRAVEL_LASER_REFERENCE}
   i2c:
-    touch: {bus: I2C3, voltage: 3.3V, address: UNVERIFIED, verification: UNVERIFIED}
+    touch: {bus: I2C3, device: /dev/i2c-2, voltage: 3.3V, address: 0x38, verification: VALIDATED_TRAVEL_LASER_REFERENCE}
     ads_ai_1: {bus: I2C3, address: 0x48, voltage: 3.3V, verification: UNVERIFIED}
     ads_ai_2: {bus: I2C3, address: 0x49, voltage: 3.3V, verification: UNVERIFIED}
     ads_loop_monitor: {bus: I2C3, address: 0x4A, voltage: 3.3V, verification: UNVERIFIED}

@@ -1,7 +1,7 @@
 # HomeControl — Full System Hardware Pinout
 **Revision:** Working design baseline, 2026-10-15  
 **Modules:** HCM (Type C), RCM (Type A), LCM (Type A), SIM (Type B)  
-**Status:** Proposed GPIO and harness schedule; not electrically bench-validated. Physical header numbers, NOT Linux GPIO line numbers.
+**Status:** Orange Pi touchscreen mapping follows the validated Travel Laser reference; physical header numbers, NOT Linux GPIO line numbers. Remaining panel wiring and startup behavior still require bench verification.
 
 ## 0. Rules and conventions
 - All enclosures are **2U**. Front panel A: LCD/touch, POWER/LINK/STATUS/FAULT LEDs, eight SPDT center-off override switches, two bank-select switches. B: LCD/touch and four LEDs (SIM). C: electrically Jetson-specific version of B (HCM).
@@ -20,16 +20,16 @@ Source: Orange Pi Zero 3 H618 user manual, 26-pin interface section. SPI periphe
   3.3V / faceplate power           [ 1] [ 2]     5V (do not feed display from here)
   PH5 / I2C3 SDA (touch+LV shift)   [ 3] [ 4]     5V
   PH4 / I2C3 SCL (touch+LV shift)   [ 5] [ 6]     GND
-  PC9 / TOUCH INT (proposed)       [ 7] [ 8]     PH2 / LCM 4CH relay IN1 (GPIO/UART5 TX)
+  PC9 / TOUCH INT UNUSED            [ 7] [ 8]     PH2 / LCM 4CH relay IN1 (GPIO/UART5 TX)
   GND                               [ 9] [10]     PH3 / LCM 4CH relay IN2 (GPIO/UART5 RX)
-  PC6 / SIM LINK LED               [11] [12]     PC11 / LCM 4CH relay IN3
-  PC5 / SIM STATUS LED             [13] [14]     GND
-  PC8 / SIM FAULT LED              [15] [16]     PC15 / LCM 4CH relay IN4
-  3.3V (secondary supply)          [17] [18]     PC14 / LCD RESET
+  PC6 / LCD D/C                    [11] [12]     PC11 / LCM 4CH relay IN3
+  PC5 / TOUCH RESET                [13] [14]     GND
+  PC8 / SIM LINK LED               [15] [16]     PC15 / LCM 4CH relay IN4
+  3.3V (secondary supply)          [17] [18]     PC14 / LCD RESET (unmanaged)
   PH7 / SPI1 MOSI                  [19] [20]     GND
-  PH8 / SPI1 MISO (reserved)       [21] [22]     PC7 / LCD D-C
-  PH6 / SPI1 CLK                   [23] [24]     PH9 / SPI1 CS0 (LCD)
-  GND                               [25] [26]     PC10 / TOUCH RESET (only if required)
+  PH8 / SPI1 MISO (reserved)       [21] [22]     PC7 / SIM FAULT LED
+  PH6 / SPI1 CLK                   [23] [24]     PH9 / SPI1 CS1 (LCD)
+  GND                               [25] [26]     PC10 / UNUSED
 ```
 
 | Physical | SoC signal | Common assignment | Type A RCM | Type A LCM | Type B SIM |
@@ -40,26 +40,26 @@ Source: Orange Pi Zero 3 H618 user manual, 26-pin interface section. SPI periphe
 | 4 | 5V | control rail access only | optional | optional | unused |
 | 5 | PH4 / TWI3 SCL | touchscreen + level shifter LV SCL | same | same | touch SCL |
 | 6 | GND | panel signal return | GND | GND | GND |
-| 7 | PC9 | TP_INT, if required | TP_INT | TP_INT | TP_INT |
+| 7 | PC9 | touch interrupt unused | unused | unused | unused |
 | 8 | PH2 / UART5_TX alt | free | free | Shelly relay IN1 | free |
 | 9 | GND | return | GND | GND | GND |
 | 10 | PH3 / UART5_RX alt | free | free | Shelly relay IN2 | free |
-| 11 | PC6 | GPIO | available | available | LINK LED |
+| 11 | PC6 | LCD D/C | LCD D/C | LCD D/C | LCD D/C |
 | 12 | PC11 | GPIO | available | Shelly relay IN3 | available |
-| 13 | PC5 | GPIO | available | available | STATUS LED |
+| 13 | PC5 | touch reset | touch reset | touch reset | touch reset |
 | 14 | GND | return | GND | GND | GND |
-| 15 | PC8 | GPIO | available | available | FAULT LED |
+| 15 | PC8 | GPIO | available | available | LINK LED |
 | 16 | PC15 | GPIO | available | Shelly relay IN4 | available |
 | 17 | 3.3V | optional auxiliary 3.3V feed | optional | optional | optional |
-| 18 | PC14 | LCD RESET | LCD RESET | LCD RESET | LCD RESET |
+| 18 | PC14 | LCD reset electrical line, unmanaged by driver | unmanaged | unmanaged | unmanaged |
 | 19 | PH7 / SPI1 MOSI | LCD MOSI | LCD | LCD | LCD |
 | 20 | GND | SPI return | GND | GND | GND |
 | 21 | PH8 / SPI1 MISO | SPI readback reserved | reserve | reserve | reserve |
-| 22 | PC7 | LCD D/C | LCD D/C | LCD D/C | LCD D/C |
+| 22 | PC7 | GPIO | available | available | FAULT LED |
 | 23 | PH6 / SPI1 CLK | LCD clock | LCD | LCD | LCD |
-| 24 | PH9 / SPI1 CS | LCD CS | LCD | LCD | LCD |
+| 24 | PH9 / SPI1 CS1 | LCD CS1 | LCD | LCD | LCD |
 | 25 | GND | return | GND | GND | GND |
-| 26 | PC10 | touch reset if needed | optional | optional | optional |
+| 26 | PC10 | unused | unused | unused | unused |
 
 **Notes:** UART5 must be disabled/re-pinned before PH2 and PH3 are used as LCM relay GPIOs. The exact LCD board connectors, backlight enable and touchscreen interrupt/reset requirements have not been mapped from a board schematic. 3.3V header capacity must be checked against display/backlight load. The 5V I²C rail on Type A is not wired directly to the Orange Pi's SDA/SCL.
 
@@ -123,18 +123,18 @@ This describes **front-panel connector pins**, not direct processor header pins.
 | 4 | LCD_MOSI | OPi 19 | OPi 19 | Jetson 19 |
 | 5 | LCD_MISO/RESERVE | OPi 21 | OPi 21 | Jetson 21 |
 | 6 | LCD_CLK | OPi 23 | OPi 23 | Jetson 23 |
-| 7 | LCD_CS | OPi 24 | OPi 24 | Jetson 24 |
-| 8 | LCD_DC | OPi 22 | OPi 22 | Jetson 22 |
-| 9 | LCD_RST | OPi 18 | OPi 18 | Jetson 18 |
+| 7 | LCD_CS | OPi 24 (SPI1 CS1) | OPi 24 (SPI1 CS1) | Jetson 24 |
+| 8 | LCD_DC | OPi 11 | OPi 11 | Jetson 22 |
+| 9 | LCD_RST | OPi 18, unmanaged by driver | OPi 18, unmanaged by driver | Jetson 18 |
 | 10 | TP_SDA_3V3 | OPi 3 | OPi 3 | Jetson 27 |
 | 11 | TP_SCL_3V3 | OPi 5 | OPi 5 | Jetson 28 |
-| 12 | TP_INT | OPi 7 if fitted | OPi 7 if fitted | TBD if fitted |
-| 13 | TP_RST | OPi 26 if fitted | OPi 26 if fitted | TBD if fitted |
+| 12 | TP_INT | unused in validated driver | unused in validated driver | TBD if fitted |
+| 13 | TP_RST | OPi 13 | OPi 13 | TBD if fitted |
 | 14 | LCD_BL / EN | TBD board requirement | TBD | TBD |
 | 15 | POWER_LED_FEED | MCP2 GPA4 on Type A | 3.3V | 3.3V |
-| 16 | LINK_LED | MCP2 GPA5 | OPi 11 | Jetson 35 |
-| 17 | STATUS_LED | MCP2 GPA6 | OPi 13 | Jetson 36 |
-| 18 | FAULT_LED | MCP2 GPA7 | OPi 15 | Jetson 33 |
+| 16 | LINK_LED | MCP2 GPA5 | OPi 15 | Jetson 35 |
+| 17 | STATUS_LED | MCP2 GPA6 | OPi 16 | Jetson 36 |
+| 18 | FAULT_LED | MCP2 GPA7 | OPi 22 | Jetson 33 |
 | 19 | LED_GND | common GND | common GND | Jetson 34 |
 | 20 | GND | OPi 20/25 | OPi 20/25 | Jetson 25 |
 | 21 | MCP_LOGIC_5V (A only) | regulated 5V | NC | NC |
