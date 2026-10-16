@@ -1,0 +1,355 @@
+#!/usr/bin/env python3
+"""Native HomeControl touchscreen renderer.
+
+This keeps the HomeControl API as the authority while rendering the shared
+touchscreen UI directly to the validated ST7796U RGB565 display.  It avoids a
+browser, screenshot capture, and a compositor in the control path.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import importlib
+import json
+import logging
+import signal
+import time
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+LOGGER = logging.getLogger("homecontrol.native_touchscreen")
+
+BLACK, WHITE = 0x0000, 0xFFFF
+PANEL, CARD, LINE = 0x10A3, 0x1968, 0x05DF
+CYAN, MUTED, GOOD, WARN, BAD = 0x67DF, 0x6D9B, 0x37EA, 0xFD20, 0xF2EA
+
+GLYPHS = {
+    " ": (".....",) * 7,
+    "-": (".....", ".....", ".....", "#####", ".....", ".....", "....."),
+    ".": (".....",) * 5 + ("..#..", "..#.."),
+    ":": (".....", "..#..", "..#..", ".....", "..#..", "..#..", "....."),
+    "/": ("....#", "...#.", "..#..", ".#...", "#....", "#....", "....."),
+    "%": ("##..#", "##.#.", "...#.", "..#..", ".#...", ".#.##", "#..##"),
+    "?": (".###.", "#...#", "....#", "...#.", "..#..", ".....", "..#.."),
+}
+for letter, rows in {
+    "A": (".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"),
+    "B": ("####.", "#...#", "#...#", "####.", "#...#", "#...#", "####."),
+    "C": (".###.", "#...#", "#....", "#....", "#....", "#...#", ".###."),
+    "D": ("####.", "#...#", "#...#", "#...#", "#...#", "#...#", "####."),
+    "E": ("#####", "#....", "#....", "####.", "#....", "#....", "#####"),
+    "F": ("#####", "#....", "#....", "####.", "#....", "#....", "#...."),
+    "G": (".###.", "#...#", "#....", "#.###", "#...#", "#...#", ".###."),
+    "H": ("#...#", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"),
+    "I": (".###.", "..#..", "..#..", "..#..", "..#..", "..#..", ".###."),
+    "J": ("..###", "...#.", "...#.", "...#.", "...#.", "#..#.", ".##.."),
+    "K": ("#...#", "#..#.", "#.#..", "##...", "#.#..", "#..#.", "#...#"),
+    "L": ("#....", "#....", "#....", "#....", "#....", "#....", "#####"),
+    "M": ("#...#", "##.##", "#.#.#", "#.#.#", "#...#", "#...#", "#...#"),
+    "N": ("#...#", "##..#", "#.#.#", "#..##", "#..##", "#...#", "#...#"),
+    "O": (".###.", "#...#", "#...#", "#...#", "#...#", "#...#", ".###."),
+    "P": ("####.", "#...#", "#...#", "####.", "#....", "#....", "#...."),
+    "R": ("####.", "#...#", "#...#", "####.", "#.#..", "#..#.", "#...#"),
+    "S": (".####", "#....", "#....", ".###.", "....#", "....#", "####."),
+    "T": ("#####", "..#..", "..#..", "..#..", "..#..", "..#..", "..#.."),
+    "U": ("#...#", "#...#", "#...#", "#...#", "#...#", "#...#", ".###."),
+    "V": ("#...#", "#...#", "#...#", "#...#", ".#.#.", ".#.#.", "..#.."),
+    "W": ("#...#", "#...#", "#...#", "#.#.#", "#.#.#", "##.##", "#...#"),
+    "X": ("#...#", "#...#", ".#.#.", "..#..", ".#.#.", "#...#", "#...#"),
+    "Y": ("#...#", "#...#", ".#.#.", "..#..", "..#..", "..#..", "..#.."),
+    "Z": ("#####", "....#", "...#.", "..#..", ".#...", "#....", "#####"),
+}.items():
+    GLYPHS[letter] = rows
+for number, rows in {
+    "0": (".###.", "#...#", "#..##", "#.#.#", "##..#", "#...#", ".###."),
+    "1": ("..#..", ".##..", "..#..", "..#..", "..#..", "..#..", ".###."),
+    "2": (".###.", "#...#", "....#", "...#.", "..#..", ".#...", "#####"),
+    "3": ("####.", "....#", "....#", ".###.", "....#", "....#", "####."),
+    "4": ("...#.", "..##.", ".#.#.", "#..#.", "#####", "...#.", "...#."),
+    "5": ("#####", "#....", "#....", "####.", "....#", "....#", "####."),
+    "6": (".###.", "#....", "#....", "####.", "#...#", "#...#", ".###."),
+    "7": ("#####", "....#", "...#.", "..#..", ".#...", ".#...", ".#..."),
+    "8": (".###.", "#...#", "#...#", ".###.", "#...#", "#...#", ".###."),
+    "9": (".###.", "#...#", "#...#", ".####", "....#", "....#", ".###."),
+}.items():
+    GLYPHS[number] = rows
+
+
+class Frame:
+    def __init__(self, width: int = 480, height: int = 320, color: int = BLACK):
+        self.width, self.height = width, height
+        self.data = bytearray(width * height * 2)
+        self.fill(color)
+
+    def fill(self, color: int) -> None:
+        self.data[:] = color.to_bytes(2, "big") * (self.width * self.height)
+
+    def rect(self, x: int, y: int, w: int, h: int, color: int) -> None:
+        self.fill_rect(x, y, w, 1, color); self.fill_rect(x, y + h - 1, w, 1, color)
+        self.fill_rect(x, y, 1, h, color); self.fill_rect(x + w - 1, y, 1, h, color)
+
+    def fill_rect(self, x: int, y: int, w: int, h: int, color: int) -> None:
+        if w <= 0 or h <= 0: return
+        pixel = color.to_bytes(2, "big")
+        for row in range(max(0, y), min(self.height, y + h)):
+            left, right = max(0, x), min(self.width, x + w)
+            start, end = (row * self.width + left) * 2, (row * self.width + right) * 2
+            self.data[start:end] = pixel * ((end - start) // 2)
+
+    def circle(self, cx: int, cy: int, radius: int, color: int) -> None:
+        for y in range(cy - radius, cy + radius + 1):
+            for x in range(cx - radius, cx + radius + 1):
+                if (x - cx) ** 2 + (y - cy) ** 2 <= radius ** 2:
+                    self.fill_rect(x, y, 1, 1, color)
+
+    def rounded_rect(self, x: int, y: int, w: int, h: int, radius: int, color: int, outline: int | None = None) -> None:
+        radius = max(1, min(radius, w // 2, h // 2))
+        self.fill_rect(x + radius, y, w - 2 * radius, h, color)
+        self.fill_rect(x, y + radius, w, h - 2 * radius, color)
+        for cx, cy in ((x + radius, y + radius), (x + w - radius - 1, y + radius),
+                       (x + radius, y + h - radius - 1), (x + w - radius - 1, y + h - radius - 1)):
+            self.circle(cx, cy, radius, color)
+        if outline is not None:
+            self.rect(x + radius, y, w - 2 * radius, 1, outline)
+            self.rect(x + radius, y + h - 1, w - 2 * radius, 1, outline)
+            self.rect(x, y + radius, 1, h - 2 * radius, outline)
+            self.rect(x + w - 1, y + radius, 1, h - 2 * radius, outline)
+
+    def pill(self, x: int, y: int, w: int, h: int, color: int) -> None:
+        radius = h // 2
+        self.fill_rect(x + radius, y, max(0, w - 2 * radius), h, color)
+        self.circle(x + radius, y + radius, radius, color)
+        self.circle(x + w - radius - 1, y + radius, radius, color)
+
+    def text(self, x: int, y: int, value: Any, color: int = WHITE, scale: int = 1, limit: int = 50) -> None:
+        cursor = x
+        for char in str(value)[:limit].upper():
+            glyph = GLYPHS.get(char, GLYPHS["?"])
+            for row, pixels in enumerate(glyph):
+                for col, pixel in enumerate(pixels):
+                    if pixel == "#": self.fill_rect(cursor + col * scale, y + row * scale, scale, scale, color)
+            cursor += 6 * scale
+
+
+def inside(x: int, y: int, box: tuple[int, int, int, int]) -> bool:
+    bx, by, bw, bh = box
+    return bx <= x < bx + bw and by <= y < by + bh
+
+
+@dataclass
+class ApiClient:
+    base_url: str = "http://127.0.0.1:8765"
+
+    def request(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        data = None if payload is None else json.dumps(payload).encode()
+        request = urllib.request.Request(self.base_url + path, data=data, headers={"Content-Type": "application/json"}, method="POST" if data else "GET")
+        with urllib.request.urlopen(request, timeout=4) as response:
+            return json.loads(response.read().decode())
+
+
+class NativeUI:
+    def __init__(self, role: str, display, api: ApiClient | None = None):
+        self.role, self.display, self.api = role.upper(), display, api or ApiClient()
+        self.width, self.height = display.width, display.height
+        self.page, self.bank, self.scroll = "home", 0, 0
+        self.state: dict[str, Any] = {}
+        self.drag_channel: str | None = None
+        self.drag_percent = 0
+        self.pending: set[str] = set()
+        self.last_touch = time.monotonic()
+        self.timeout_seconds = 10
+
+    async def refresh(self) -> None:
+        try:
+            self.state = await asyncio.to_thread(self.api.request, f"/api/touchscreen/state?role={self.role}")
+            self.timeout_seconds = max(1, min(300, int(self.state.get("settings", {}).get("inactivity_seconds", 10))))
+            selector = self.state.get("bank_selector", {})
+            self.bank = int(selector.get("effective_bank", self.bank))
+        except Exception as exc:
+            LOGGER.warning("native state refresh failed: %s", exc)
+
+    async def command(self, payload: dict[str, Any]) -> None:
+        try:
+            await asyncio.to_thread(self.api.request, "/api/touchscreen/command", {**payload, "role": self.role})
+            await self.refresh()
+        except Exception as exc:
+            LOGGER.warning("native command failed: %s", exc)
+        await self.draw()
+
+    async def draw(self) -> None:
+        frame = Frame(self.width, self.height)
+        self._header(frame)
+        if self.page == "home": self._home(frame)
+        elif self.page == "status": self._status(frame)
+        elif self.page == "relays": self._relays(frame)
+        elif self.page == "lights": self._lights(frame)
+        elif self.page == "dimmers": self._dimmers(frame)
+        elif self.page == "non-dimmers": self._relays(frame, title="NON-DIMMERS", items=self.state.get("relays", [])[:8])
+        elif self.page == "network": self._network(frame)
+        elif self.page == "settings": self._settings(frame)
+        elif self.page == "rmc-data": self._rooms(frame)
+        else: self._status(frame)
+        await self.display.draw_rgb565(0, 0, self.width, self.height, bytes(frame.data))
+
+    def _header(self, frame: Frame) -> None:
+        frame.fill_rect(0, 0, self.width, self.height, BLACK)
+        frame.rounded_rect(8, 8, self.width - 16, self.height - 16, 14, BLACK, LINE)
+        frame.text(18, 16, "HOMECONTROL", WHITE, 2)
+        frame.text(380, 18, time.strftime("%I:%M"), CYAN, 1)
+        if self.page != "home":
+            frame.rounded_rect(12, 45, 74, 28, 7, PANEL, LINE); frame.text(26, 55, "BACK", WHITE, 1)
+
+    def _home(self, frame: Frame) -> None:
+        module = self.state.get("module", {}); health = self.state.get("health", {})
+        frame.rounded_rect(16, 52, 448, 92, 14, CARD, LINE)
+        name = str(module.get("name", "MODULE")); frame.text(max(20, (480 - len(name) * 18) // 2), 68, name, WHITE, 3)
+        status = str(health.get("status", "UNAVAILABLE")); status_color = GOOD if status == "SIMULATED" else WARN
+        frame.circle(176, 119, 7, status_color); frame.text(192, 113, status, status_color, 2)
+        labels = ["STATUS", "RELAYS" if self.role == "RCM" else "LIGHTS", "NETWORK", "SETTINGS"]
+        pages = ["status", "relays" if self.role == "RCM" else ("lights" if self.role == "LCM" else "rmc-data"), "network", "settings"]
+        for i, (label, page) in enumerate(zip(labels, pages, strict=True)):
+            x, y = 16 + (i % 2) * 232, 154 + (i // 2) * 72
+            frame.rounded_rect(x, y, 216, 62, 12, CARD, LINE); frame.text(x + 52, y + 26, label, WHITE, 2)
+
+    def _status(self, frame: Frame) -> None:
+        module, health, settings = self.state.get("module", {}), self.state.get("health", {}), self.state.get("settings", {})
+        frame.text(12, 78, module.get("name", "MODULE"), CYAN, 2); frame.text(12, 105, health.get("status", "UNAVAILABLE"), WARN, 2)
+        rows = [("ROLE", module.get("role", "UNKNOWN")), ("IDENTITY", module.get("device_id", "UNKNOWN")), ("HEARTBEAT", health.get("heartbeat", "UNKNOWN")), ("SIMULATION", module.get("simulation", "UNKNOWN")), ("OUTPUTS", module.get("physical_outputs_enabled", "UNKNOWN")), ("PROFILE", settings.get("hardware_profile", "UNKNOWN"))]
+        for i, (label, value) in enumerate(rows):
+            y = 140 + i * 27; frame.text(16, y, label, MUTED); frame.text(180, y, str(value), WHITE)
+
+    def _relays(self, frame: Frame, title: str = "RELAYS", items: list[dict[str, Any]] | None = None) -> None:
+        frame.text(12, 75, title, CYAN, 2); items = items if items is not None else self.state.get("relays", [])
+        if title == "RELAYS" and self.role == "RCM":
+            for index, label in enumerate(("1-8", "9-16", "17-24", "25-32")):
+                x = 10 + index * 117; color = CYAN if index == self.bank else CARD; frame.fill_rect(x, 100, 110, 28, color); frame.text(x + 29, 110, label, BLACK if index == self.bank else WHITE)
+            items = [item for item in items if (int(item.get("position", 1)) - 1) // 8 == self.bank]
+            start = 138
+        else: start = 102
+        for index, item in enumerate(items[:8]):
+            y = start + index * 22
+            frame.fill_rect(10, y, 460, 19, CARD)
+            frame.text(18, y + 6, item.get("name", "UNNAMED"), WHITE)
+            locked = bool(item.get("lockout"))
+            if locked:
+                frame.text(300, y + 6, "LOCKED", WARN)
+            track = GOOD if item.get("on") and not locked else MUTED
+            frame.pill(420, y + 3, 38, 13, track)
+            frame.circle(426 if item.get("on") and not locked else 451, y + 9, 5, WHITE)
+
+    def _lights(self, frame: Frame) -> None:
+        frame.text(12, 78, "LIGHTS", CYAN, 2)
+        for i, label in enumerate(("DIMMERS", "NON-DIMMERS")):
+            x = 16 + i * 232; frame.fill_rect(x, 120, 216, 64, CARD); frame.rect(x, 120, 216, 64, LINE); frame.text(x + 34, 145, label, WHITE, 2)
+
+    def _dimmers(self, frame: Frame) -> None:
+        frame.text(12, 75, "DIMMERS", CYAN, 2)
+        for index, item in enumerate(self.state.get("dimmers", [])):
+            y = 104 + index * 26
+            percent = self.drag_percent if self.drag_channel == item.get("channel") else int(item.get("percent", 0))
+            frame.text(12, y + 6, item.get("name", "UNNAMED"), WHITE)
+            frame.fill_rect(145, y + 8, 260, 6, MUTED)
+            frame.fill_rect(145, y + 8, int(260 * percent / 100), 6, CYAN)
+            frame.circle(145 + int(260 * percent / 100), y + 11, 7, WHITE)
+            frame.text(420, y + 6, f"{percent}%", WHITE)
+
+    def _network(self, frame: Frame) -> None:
+        frame.text(12, 78, "NETWORK", CYAN, 2); network = self.state.get("network", {})
+        for i, (label, key) in enumerate((("HOST", "hostname"), ("IPV4", "ipv4"), ("LINK", "link"), ("HCM", "hcm"), ("SYNC", "last_sync"))):
+            y = 118 + i * 28; frame.text(18, y, label, MUTED); frame.text(150, y, network.get(key, "UNKNOWN"), WHITE)
+
+    def _settings(self, frame: Frame) -> None:
+        frame.text(12, 78, "SETTINGS", CYAN, 2); settings = self.state.get("settings", {})
+        rows = [("TIMEOUT", f"{settings.get('inactivity_seconds', 10)} SEC"), ("BRIGHTNESS", f"{settings.get('display_brightness', 'UNKNOWN')}%"), ("ROLE", settings.get("role", "UNKNOWN")), ("SIMULATION", settings.get("simulation", "UNKNOWN")), ("PROFILE", settings.get("hardware_profile", "UNKNOWN"))]
+        for i, (label, value) in enumerate(rows):
+            y = 120 + i * 30
+            frame.text(18, y, label, MUTED)
+            if i == 0:
+                frame.fill_rect(190, y - 5, 58, 24, CARD); frame.rect(190, y - 5, 58, 24, LINE); frame.text(202, y + 2, value, WHITE)
+                frame.fill_rect(258, y - 5, 32, 24, PANEL); frame.rect(258, y - 5, 32, 24, LINE); frame.text(270, y + 2, "-", WHITE)
+                frame.fill_rect(298, y - 5, 32, 24, PANEL); frame.rect(298, y - 5, 32, 24, LINE); frame.text(310, y + 2, "+", WHITE)
+            else:
+                frame.text(190, y, value, WHITE)
+        frame.text(18, 275, "TIMEOUT ONLY", WARN)
+
+    def _rooms(self, frame: Frame) -> None:
+        frame.text(12, 78, "RMC DATA", CYAN, 2)
+        for index, room in enumerate(self.state.get("rooms", [])[:5]):
+            y = 112 + index * 32; frame.text(16, y, room.get("name", "ROOM"), WHITE); frame.text(180, y, f"T {room.get('temperature_f', 'UNAVAILABLE')}", MUTED); frame.text(330, y, f"H {room.get('humidity_pct', 'UNAVAILABLE')}", MUTED)
+
+    async def touch(self, event: Any) -> None:
+        if not event.points: return
+        self.last_touch = time.monotonic()
+        point = event.points[0]; x, y = point.x, point.y
+        if event.kind == "down":
+            if self.page != "home" and y < 66: self.page = "home"; await self.draw(); return
+            if self.page == "dimmers":
+                index = (y - 104) // 26
+                items = self.state.get("dimmers", [])
+                if 0 <= index < len(items): self.drag_channel = items[index].get("channel"); self.drag_percent = max(0, min(100, int((x - 145) * 100 / 260))); await self.draw(); return
+            await self._tap(x, y)
+        elif event.kind == "move" and self.drag_channel:
+            self.drag_percent = max(0, min(100, int((x - 145) * 100 / 260))); await self.draw()
+        elif event.kind in {"up", "cancel"} and self.drag_channel:
+            channel, percent = self.drag_channel, self.drag_percent; self.drag_channel = None; await self.command({"kind": "dimmer", "channel": channel, "value": percent})
+
+    async def _tap(self, x: int, y: int) -> None:
+        if self.page == "home":
+            if y >= 144: self.page = ("status", "relays" if self.role == "RCM" else ("lights" if self.role == "LCM" else "rmc-data"), "network", "settings")[0 if x < 240 and y < 216 else 1 if x >= 240 and y < 216 else 2 if x < 240 else 3]
+        elif self.page == "relays":
+            if self.role == "RCM" and 100 <= y < 128:
+                self.bank = max(0, min(3, (x - 10) // 117)); await self.command({"kind": "bank_select", "bank": self.bank}); return
+            items = [i for i in self.state.get("relays", []) if self.role != "RCM" or (int(i.get("position", 1)) - 1) // 8 == self.bank]
+            index = (y - (138 if self.role == "RCM" else 102)) // 22
+            if 0 <= index < len(items) and not items[index].get("lockout"): await self.command({"kind": "relay", "channel": items[index].get("channel"), "value": not items[index].get("on", False)}); return
+        elif self.page == "lights": self.page = "dimmers" if x < 240 else "non-dimmers"
+        elif self.page == "settings" and 110 <= y < 150:
+            current = int(self.state.get("settings", {}).get("inactivity_seconds", 10))
+            if 258 <= x < 298: current = max(1, current - 1)
+            elif 298 <= x < 340: current = min(300, current + 1)
+            else: return
+            await self.command({"kind": "setting", "setting": "screen_timeout", "value": current})
+        await self.draw()
+
+
+async def run(role: str, mode: str) -> None:
+    hardware = importlib.import_module("10_scripts.touchscreen_hardware")
+    service = hardware.create_service(role, mode)
+    display = touch = None
+    ui = None
+    stop = asyncio.Event(); loop = asyncio.get_running_loop()
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        try: loop.add_signal_handler(signum, stop.set)
+        except NotImplementedError: pass
+    try:
+        display = service.create_display(); touch = service.create_touch(); ui = NativeUI(role, display)
+        await display.initialize(); await touch.initialize(); await ui.refresh(); await ui.draw()
+
+        async def poll() -> None:
+            while not stop.is_set():
+                await asyncio.sleep(3)
+                await ui.refresh()
+                if ui.page != "home" and time.monotonic() - ui.last_touch >= ui.timeout_seconds:
+                    ui.page, ui.bank, ui.scroll = "home", 0, 0
+                await ui.draw()
+
+        poll_task = asyncio.create_task(poll())
+        while not stop.is_set():
+            event = await touch.read_event()
+            if event: await ui.touch(event)
+    finally:
+        if "poll_task" in locals():
+            poll_task.cancel()
+        if touch is not None:
+            await touch.close()
+        if display is not None:
+            await display.close()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(); parser.add_argument("--role", choices=("RCM", "LCM", "SIM"), default="SIM"); parser.add_argument("--mode", choices=("simulated", "orange_pi"), default="simulated")
+    args = parser.parse_args(); asyncio.run(run(args.role, args.mode))

@@ -25,6 +25,20 @@ all state in memory. It performs no GPIO, SPI, I2C, CAN, Shelly, or live HCM
 calls. Simulated acknowledgments explicitly report
 `physical_output_commanded: false`.
 
+## Native Orange Pi renderer
+
+`10_scripts/touchscreen_native.py` is the preferred Orange Pi bench renderer.
+It sends RGB565 frames directly to the validated ST7796U adapter and consumes
+FT6336U events directly, while using the same touchscreen API, role manifests,
+logical command routing, lockouts, and simulated-output safeguards as the HTML
+preview. This removes Chromium capture and compositor latency from the physical
+control path. The Chromium bridge remains available for comparison and legacy
+bench work, but is not required by the native path.
+
+The native renderer is currently a bench implementation. Its visual fidelity
+is aligned with the shared HTML layout, but physical display and touch
+validation must still be recorded separately for each Orange Pi target.
+
 ## Shared behavior
 
 - One router, theme, state model, and adapter boundary serves all four roles.

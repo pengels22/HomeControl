@@ -11,6 +11,7 @@ import asyncio
 import base64
 import json
 import subprocess
+import threading
 import time
 import urllib.request
 from dataclasses import dataclass, field
@@ -27,11 +28,20 @@ class BrowserRendererConfig:
     width: int = 480
     height: int = 320
     capture_interval: float = 0.20
+    output_scale: float = 0.5
     user_data_dir: Path = Path("tmp/touchscreen-chromium")
 
     @property
     def debug_url(self) -> str:
         return f"http://127.0.0.1:{self.debug_port}"
+
+    @property
+    def viewport_width(self) -> int:
+        return round(self.width / self.output_scale)
+
+    @property
+    def viewport_height(self) -> int:
+        return round(self.height / self.output_scale)
 
     def command(self) -> list[str]:
         return [
@@ -45,7 +55,7 @@ class BrowserRendererConfig:
             f"--remote-debugging-address=127.0.0.1",
             f"--remote-debugging-port={self.debug_port}",
             f"--user-data-dir={self.user_data_dir}",
-            f"--window-size={self.width},{self.height}",
+            f"--window-size={self.viewport_width},{self.viewport_height}",
             self.url,
         ]
 
@@ -80,6 +90,11 @@ class CdpClient:
         self.websocket_url = websocket_url
         self._socket = None
         self._next_id = 0
+        # The renderer and touch bridge use the same synchronous CDP socket
+        # from separate asyncio worker threads. Keep each request/response
+        # exchange together so concurrent callers cannot consume each other's
+        # responses.
+        self._command_lock = threading.Lock()
 
     def connect(self) -> None:
         try:
@@ -89,18 +104,19 @@ class CdpClient:
         self._socket = websocket.create_connection(self.websocket_url, timeout=5)
 
     def command(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        if self._socket is None:
-            raise RuntimeError("CDP client is not connected")
-        self._next_id += 1
-        request_id = self._next_id
-        self._socket.send(json.dumps({"id": request_id, "method": method, "params": params or {}}))
-        while True:
-            response = json.loads(self._socket.recv())
-            if response.get("id") != request_id:
-                continue
-            if "error" in response:
-                raise RuntimeError(f"CDP {method} failed: {response['error']}")
-            return response.get("result", {})
+        with self._command_lock:
+            if self._socket is None:
+                raise RuntimeError("CDP client is not connected")
+            self._next_id += 1
+            request_id = self._next_id
+            self._socket.send(json.dumps({"id": request_id, "method": method, "params": params or {}}))
+            while True:
+                response = json.loads(self._socket.recv())
+                if response.get("id") != request_id:
+                    continue
+                if "error" in response:
+                    raise RuntimeError(f"CDP {method} failed: {response['error']}")
+                return response.get("result", {})
 
     def close(self) -> None:
         if self._socket is not None:
@@ -133,9 +149,9 @@ class BrowserRenderer:
         await asyncio.to_thread(self.client.connect)
         await self._command("Page.enable")
         await self._command("Emulation.setDeviceMetricsOverride", {
-            "width": self.config.width,
-            "height": self.config.height,
-            "deviceScaleFactor": 1,
+            "width": self.config.viewport_width,
+            "height": self.config.viewport_height,
+            "deviceScaleFactor": self.config.output_scale,
             "mobile": True,
         })
 
@@ -143,8 +159,21 @@ class BrowserRenderer:
         if self.client is None:
             raise RuntimeError("browser renderer is not started")
         started = time.perf_counter()
-        result = await self._command("Page.captureScreenshot", {"format": "png", "fromSurface": True})
+        result = await self._command("Page.captureScreenshot", {
+            "format": "png",
+            "fromSurface": True,
+            "optimizeForSpeed": True,
+        })
         image = _decode_rgb(result["data"])
+        expected = self.config.width * self.config.height * 3
+        if len(image) != expected:
+            image = _resize_rgb(
+                image,
+                self.config.viewport_width,
+                self.config.viewport_height,
+                self.config.width,
+                self.config.height,
+            )
         elapsed = time.perf_counter() - started
         self.metrics.frames_captured += 1
         self.metrics.capture_seconds += elapsed
@@ -206,6 +235,18 @@ def _decode_rgb(encoded_png: str) -> bytes:
         raise RuntimeError("Chromium renderer requires Pillow for PNG decoding") from exc
     with Image.open(BytesIO(base64.b64decode(encoded_png))) as image:
         return image.convert("RGB").tobytes()
+
+
+def _resize_rgb(rgb: bytes, source_width: int, source_height: int, target_width: int, target_height: int) -> bytes:
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise RuntimeError("Chromium renderer requires Pillow for PNG resizing") from exc
+    expected = source_width * source_height * 3
+    if len(rgb) != expected:
+        raise ValueError(f"source RGB data must be {source_width}x{source_height}")
+    image = Image.frombytes("RGB", (source_width, source_height), rgb)
+    return image.resize((target_width, target_height), Image.Resampling.LANCZOS).tobytes()
 
 
 def rgb888_to_rgb565(rgb: bytes) -> bytes:

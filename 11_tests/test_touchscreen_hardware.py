@@ -13,6 +13,7 @@ input_bridge = import_module("10_scripts.touchscreen_hardware.input_bridge")
 renderer = import_module("10_scripts.touchscreen_hardware.browser_renderer")
 profiles = import_module("07_servises.common.hardware_profiles")
 bench = import_module("10_scripts.travel_laser_bench")
+native = import_module("10_scripts.touchscreen_native")
 
 ROOT = Path(__file__).parents[1]
 
@@ -40,6 +41,87 @@ def test_simulated_service_never_opens_hardware_nodes():
     assert service.mode == "simulated"
     assert service.create_display() is None
     assert service.create_touch() is None
+
+
+def test_native_renderer_draws_shared_frame_without_browser():
+    class Display:
+        width = 480
+        height = 320
+
+        async def draw_rgb565(self, x, y, width, height, data):
+            self.frame = (x, y, width, height, data)
+
+    display = Display()
+    ui = native.NativeUI("SIM", display)
+    ui.state = {
+        "module": {"name": "SIM-01", "role": "SIM", "simulation": True, "physical_outputs_enabled": False},
+        "health": {"status": "SIMULATED"},
+        "settings": {"inactivity_seconds": 10, "hardware_profile": "SIMULATED"},
+    }
+    asyncio.run(ui.draw())
+    assert display.frame[:4] == (0, 0, 480, 320)
+    assert len(display.frame[4]) == 480 * 320 * 2
+
+
+def test_native_rcm_bank_selection_filters_eight_channels_and_preserves_mapping():
+    class Display:
+        width = 480
+        height = 320
+
+        async def draw_rgb565(self, *args):
+            pass
+
+    class Api:
+        def __init__(self):
+            self.calls = []
+
+        def request(self, path, payload=None):
+            previous_command = next((item[1] for item in reversed(self.calls) if item[1] is not None), None)
+            self.calls.append((path, payload))
+            return {"ok": True, "bank": payload.get("bank", 0)} if payload else {
+                "module": {"name": "RCM-01"}, "health": {"status": "SIMULATED"},
+                "settings": {"inactivity_seconds": 10},
+                    "bank_selector": {"effective_bank": previous_command.get("bank", 0) if previous_command else 0},
+                "relays": [{"channel": f"{bank}{number}", "position": index, "name": f"Relay {index}", "on": False, "lockout": False}
+                            for index, (bank, number) in enumerate(((b, n) for b in "ABCD" for n in range(1, 9)), 1)],
+            }
+
+    api = Api()
+    ui = native.NativeUI("RCM", Display(), api)
+    ui.page = "relays"
+    ui.state = {"settings": {"inactivity_seconds": 10}, "bank_selector": {"effective_bank": 0}, "relays": [
+        {"channel": f"{bank}{number}", "position": index, "name": f"Relay {index}", "on": False, "lockout": False}
+        for index, (bank, number) in enumerate(((b, n) for b in "ABCD" for n in range(1, 9)), 1)
+    ]}
+    asyncio.run(ui._tap(10 + 2 * 117 + 10, 110))
+    assert ui.bank == 2
+    command = next(payload for _, payload in api.calls if payload and payload.get("kind") == "bank_select")
+    assert command["bank"] == 2
+    assert [item["channel"] for item in ui.state["relays"] if (item["position"] - 1) // 8 == ui.bank] == ["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8"]
+
+
+def test_native_lockout_does_not_send_relay_command_and_timeout_is_editable_only():
+    class Display:
+        width = 480
+        height = 320
+
+        async def draw_rgb565(self, *args):
+            pass
+
+    class Api:
+        def __init__(self): self.calls = []
+        def request(self, path, payload=None):
+            self.calls.append((path, payload))
+            if payload and payload["kind"] == "setting": return {"ok": True}
+            return {"settings": {"inactivity_seconds": 10}, "bank_selector": {"effective_bank": 0}}
+
+    api = Api(); ui = native.NativeUI("RCM", Display(), api)
+    ui.page = "relays"; ui.state = {"settings": {"inactivity_seconds": 10}, "relays": [{"channel": "A1", "position": 1, "name": "Locked", "on": False, "lockout": True}]}
+    asyncio.run(ui._tap(440, 145))
+    assert not any(call[1] and call[1].get("kind") == "relay" for call in api.calls)
+    ui.page = "settings"
+    asyncio.run(ui._tap(310, 120))
+    assert next(payload for _, payload in api.calls if payload and payload.get("kind") == "setting") == {"kind": "setting", "setting": "screen_timeout", "value": 11, "role": "RCM"}
 
 
 def test_jetson_adapter_is_separate_from_orange_pi_profile():
@@ -250,10 +332,27 @@ def test_cdp_touch_sink_uses_same_touch_lifecycle_as_uinput_sink():
     assert client.calls[3][1]["type"] == "touchEnd"
 
 
+def test_cdp_touch_sink_scales_physical_coordinates_to_virtual_viewport():
+    class FakeClient:
+        def __init__(self):
+            self.calls = []
+
+        def command(self, method, params=None):
+            self.calls.append((method, params))
+
+    client = FakeClient()
+    sink = input_bridge.CdpTouchSink(client, coordinate_scale=2.0)
+    sink.press(interfaces.TouchPoint(0, 12, 18))
+
+    point = client.calls[-1][1]["touchPoints"][0]
+    assert (point["x"], point["y"]) == (24, 36)
+
+
 def test_browser_renderer_config_is_exactly_480x320_and_headless():
     config = renderer.BrowserRendererConfig()
     command = config.command()
     assert (config.width, config.height) == (480, 320)
+    assert (config.viewport_width, config.viewport_height) == (960, 640)
     assert "--headless=new" in command
     assert "--no-sandbox" in command
     assert "--remote-allow-origins=*" in command
@@ -280,8 +379,8 @@ def test_preflight_reports_ssh_or_remote_check_failures():
 
 
 def test_bench_handover_requires_renderer_dependencies_but_not_uinput_for_cdp():
-    missing = {"dependencies": {"stdout": "chromium=missing\nPIL=missing\nwebsocket=missing\n"}}
-    ready = {"dependencies": {"stdout": "chromium=/usr/bin/chromium\nPIL=available\nwebsocket=available\nevdev=missing\n"}}
+    missing = {"dependencies": {"stdout": "spidev=missing\ngpiod=missing\nsmbus2=missing\n"}}
+    ready = {"dependencies": {"stdout": "spidev=available\ngpiod=available\nsmbus2=available\nevdev=missing\n"}}
     assert not bench.dependencies_ready(missing)
     assert bench.dependencies_ready(ready)
 
@@ -335,6 +434,7 @@ async def test_browser_renderer_start_capture_and_shutdown_are_reversible(tmp_pa
     browser = renderer.BrowserRenderer(display, config, make_process, make_client)
     monkeypatch.setattr(browser, "_wait_for_page", lambda: {"webSocketDebuggerUrl": "ws://fake"})
     monkeypatch.setattr(renderer, "_decode_rgb", lambda encoded: bytes([255, 0, 0, 0, 0, 0]))
+    monkeypatch.setattr(renderer, "_resize_rgb", lambda rgb, *_sizes: rgb)
 
     await browser.start()
     assert client.connected is True

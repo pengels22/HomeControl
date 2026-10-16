@@ -153,8 +153,9 @@ class UInputTouchSink:
 class CdpTouchSink:
     """CDP equivalent for headless Chromium without a compositor."""
 
-    def __init__(self, client):
+    def __init__(self, client, coordinate_scale: float = 1.0):
         self.client = client
+        self.coordinate_scale = coordinate_scale
         self.dispatch_count = 0
         self.dispatch_seconds = 0.0
 
@@ -186,11 +187,16 @@ class CdpTouchSink:
 
     def _dispatch(self, action: str, point: TouchPoint) -> None:
         started = time.perf_counter()
+        scaled = TouchPoint(
+            point.id,
+            round(point.x * self.coordinate_scale),
+            round(point.y * self.coordinate_scale),
+        )
         result = self.client.command("Input.dispatchTouchEvent", {
             "type": action,
             "touchPoints": [{
-                "x": point.x,
-                "y": point.y,
+                "x": scaled.x,
+                "y": scaled.y,
                 "radiusX": 1,
                 "radiusY": 1,
                 "force": 1,

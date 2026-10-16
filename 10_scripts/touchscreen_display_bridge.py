@@ -55,6 +55,7 @@ async def _run_attempt(service, renderer_module, input_module, role: str, url: s
     display = service.create_display()
     renderer = None
     sink = None
+    touch_client = None
     tasks: list[asyncio.Task] = []
     started = time.monotonic()
     reason = "unknown"
@@ -66,7 +67,11 @@ async def _run_attempt(service, renderer_module, input_module, role: str, url: s
             renderer_module.BrowserRendererConfig(url=url, width=display.width, height=display.height),
         )
         await renderer.start()
-        sink = input_module.CdpTouchSink(renderer.client)
+        # Keep touch traffic on a separate CDP session. Screenshot capture can
+        # be slow on the Orange Pi and must never delay an active touch.
+        touch_client = renderer_module.CdpClient(renderer.client.websocket_url)
+        await asyncio.to_thread(touch_client.connect)
+        sink = input_module.CdpTouchSink(touch_client, coordinate_scale=1 / renderer.config.output_scale)
         tasks = [
             asyncio.create_task(renderer.run(stop), name="renderer"),
             asyncio.create_task(input_module.run_touch_input(service.create_touch(), sink, stop), name="touch-reader"),
@@ -97,6 +102,8 @@ async def _run_attempt(service, renderer_module, input_module, role: str, url: s
             await asyncio.gather(*tasks, return_exceptions=True)
         if renderer is not None:
             await renderer.stop()
+        if touch_client is not None:
+            touch_client.close()
         await display.close()
         metrics = {
             "reason": reason,

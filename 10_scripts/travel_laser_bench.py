@@ -27,10 +27,10 @@ READ_ONLY_CHECKS = {
     "identity": "hostname; uname -a; cat /etc/os-release",
     "devices": "for p in /dev/spidev1.1 /dev/i2c-2 /dev/gpiochip1 /dev/uinput; do printf '%s ' \"$p\"; test -e \"$p\" && echo present || echo missing; done",
     "service": "systemctl is-active travel-laser-ui.service || true; systemctl is-enabled travel-laser-ui.service || true; systemctl show -p MainPID travel-laser-ui.service",
-    "processes": "pgrep -af 'travel-laser-ui|chromium|homecontrol-touchscreen' || true",
+    "processes": "pgrep -af 'travel-laser-ui|homecontrol-touchscreen' || true",
     "owners": "fuser -v /dev/spidev1.1 /dev/i2c-2 /dev/gpiochip1 /dev/uinput 2>&1 || true",
     "resources": "free -h; df -h / /tmp",
-    "dependencies": "printf 'chromium='; command -v chromium || echo missing; /opt/travel-laser-controller/.venv/bin/python - <<'PY'\nfor name in ('spidev', 'gpiod', 'smbus2', 'evdev', 'PIL', 'websocket'):\n    try:\n        __import__(name); print(name + '=available')\n    except Exception:\n        print(name + '=missing')\nPY\nprintf 'uinput='; stat -c 'mode=%a owner=%U group=%G' /dev/uinput 2>/dev/null || echo missing",
+    "dependencies": "/opt/travel-laser-controller/.venv/bin/python - <<'PY'\nfor name in ('spidev', 'gpiod', 'smbus2'):\n    try:\n        __import__(name); print(name + '=available')\n    except Exception:\n        print(name + '=missing')\nPY\nprintf 'uinput='; stat -c 'mode=%a owner=%U group=%G' /dev/uinput 2>/dev/null || echo missing",
 }
 
 
@@ -42,7 +42,7 @@ def remote_status(target: str = TARGET) -> subprocess.CompletedProcess[str]:
     command = (
         "printf 'service='; systemctl is-active travel-laser-ui.service || true; "
         "printf ' enabled='; systemctl is-enabled travel-laser-ui.service || true; echo; "
-        "printf 'processes\\n'; pgrep -af 'homecontrol-touchscreen-test|touchscreen_app|touchscreen_display_bridge|chromium' || true; "
+        "printf 'processes\\n'; pgrep -af 'homecontrol-touchscreen-test|touchscreen_app|touchscreen_native' || true; "
         "printf 'owners\\n'; fuser -v /dev/spidev1.1 /dev/i2c-2 /dev/gpiochip1 /dev/uinput 2>&1 || true; "
         "printf 'api\\n'; curl -fsS http://127.0.0.1:8765/api/touchscreen/state?role=SIM 2>/dev/null || true; echo"
     )
@@ -69,8 +69,8 @@ def _state_for_start(target: str) -> dict[str, object]:
 def _start_command(role: str, remote_root: str) -> str:
     return (
         f"nohup setsid env PYTHONPATH={REMOTE_PYTHONPATH} {REMOTE_PYTHON} {remote_root}/10_scripts/touchscreen_app.py > {REMOTE_LOG} 2>&1 & app=$!; "
-        f"nohup setsid sudo -n env HOMECONTROL_TOUCH_LOG=/tmp/homecontrol-touchscreen-events.log PYTHONPATH={REMOTE_PYTHONPATH} {REMOTE_PYTHON} {remote_root}/10_scripts/touchscreen_display_bridge.py --role {shlex.quote(role)} --mode orange_pi >> {REMOTE_LOG} 2>&1 & "
-        f"sleep 1; bridge=; for candidate in $(pgrep -f {shlex.quote(remote_root + '/10_scripts/touchscreen_display_bridge.py')} || true); do "
+        f"nohup setsid sudo -n env PYTHONPATH={REMOTE_PYTHONPATH} {REMOTE_PYTHON} {remote_root}/10_scripts/touchscreen_native.py --role {shlex.quote(role)} --mode orange_pi >> {REMOTE_LOG} 2>&1 & "
+        f"sleep 1; bridge=; for candidate in $(pgrep -f {shlex.quote(remote_root + '/10_scripts/touchscreen_native.py')} || true); do "
         "if test \"$candidate\" != \"$$\"; then bridge=$(ps -o pgid= -p \"$candidate\" | tr -d ' '); test -n \"$bridge\" && break; fi; done; "
         "test -n \"$bridge\" || { echo 'bridge process group was not found' >&2; exit 1; }; "
         "printf '%s\\n%s\\n' \"$app\" \"$bridge\" > /tmp/homecontrol-touchscreen-test.pids"
@@ -98,7 +98,7 @@ def start_handover(target: str, role: str) -> None:
     existing = ssh_command(target, "test -s /tmp/homecontrol-touchscreen-test.pids", check=False)
     if existing.returncode == 0:
         raise SystemExit("HomeControl bench already has recorded processes; use restart or switch-role")
-    for executable in ("touchscreen_app.py", "touchscreen_display_bridge.py"):
+    for executable in ("touchscreen_app.py", "touchscreen_native.py"):
         path = f"{REMOTE_ROOT}/10_scripts/{executable}"
         running = ssh_command(target, f"for pid in $(pgrep -f {shlex.quote(path)} || true); do comm=$(ps -o comm= -p \"$pid\" 2>/dev/null || true); case \"$comm\" in python|python3) echo \"$pid\";; esac; done", check=False)
         if running.stdout.strip():
@@ -119,8 +119,8 @@ def stop_handover(target: str) -> None:
 def switch_role(target: str, role: str) -> None:
     ssh_command(target, _stop_command(bridge_only=True))
     ssh_command(target, (
-        f"nohup setsid sudo -n env HOMECONTROL_TOUCH_LOG=/tmp/homecontrol-touchscreen-events.log PYTHONPATH={REMOTE_PYTHONPATH} {REMOTE_PYTHON} {REMOTE_ROOT}/10_scripts/touchscreen_display_bridge.py --role {shlex.quote(role)} --mode orange_pi >> {REMOTE_LOG} 2>&1 & "
-        "sleep 1; bridge=; for candidate in $(pgrep -f /tmp/homecontrol-touchscreen-test/10_scripts/touchscreen_display_bridge.py || true); do "
+        f"nohup setsid sudo -n env PYTHONPATH={REMOTE_PYTHONPATH} {REMOTE_PYTHON} {REMOTE_ROOT}/10_scripts/touchscreen_native.py --role {shlex.quote(role)} --mode orange_pi >> {REMOTE_LOG} 2>&1 & "
+        "sleep 1; bridge=; for candidate in $(pgrep -f /tmp/homecontrol-touchscreen-test/10_scripts/touchscreen_native.py || true); do "
         "if test \"$candidate\" != \"$$\"; then bridge=$(ps -o pgid= -p \"$candidate\" | tr -d ' '); test -n \"$bridge\" && break; fi; done; "
         "test -n \"$bridge\" || { echo 'bridge process group was not found' >&2; exit 1; }; app=$(head -1 /tmp/homecontrol-touchscreen-test.pids); printf '%s\\n%s\\n' \"$app\" \"$bridge\" > /tmp/homecontrol-touchscreen-test.pids"
     ))
@@ -150,7 +150,7 @@ def preflight_ok(results: dict[str, dict[str, object]]) -> bool:
 
 def dependencies_ready(results: dict[str, dict[str, object]]) -> bool:
     output = str(results.get("dependencies", {}).get("stdout", ""))
-    return all(marker in output for marker in ("chromium=/usr", "PIL=available", "websocket=available"))
+    return all(marker in output for marker in ("spidev=available", "gpiod=available", "smbus2=available"))
 
 
 def restore_commands(state: dict[str, object]) -> list[str]:
@@ -174,6 +174,7 @@ def stage(source_root: Path, target: str, remote_root: str) -> None:
     files = [
         "10_scripts/touchscreen_app.py",
         "10_scripts/touchscreen_display_bridge.py",
+        "10_scripts/touchscreen_native.py",
         "10_scripts/touchscreen_hardware",
         "10_scripts/touchscreen_ui",
         "06_config/01_HCM/hardware_pins.yaml",
@@ -201,7 +202,7 @@ def test_handover(target: str, remote_root: str, role: str, dry_run: bool = Fals
             "remote_root": remote_root,
             "dependencies_ready": dependencies_ready(results),
             "would_stop": "travel-laser-ui.service",
-            "would_start": ["touchscreen_app.py", "touchscreen_display_bridge.py"],
+            "would_start": ["touchscreen_app.py", "touchscreen_native.py"],
             "would_restore": restore_commands({"service_active": "active", "service_enabled": "enabled"}),
         }, indent=2))
         return
