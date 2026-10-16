@@ -380,7 +380,8 @@ class NativeUI:
         self.last_touch = time.monotonic()
         point = event.points[0]; x, y = point.x, point.y
         if event.kind == "down":
-            if self.page != "home" and y < 66: self.page = "home"; await self.draw(); return
+            if self.page != "home" and x < 100 and 40 <= y < 80:
+                self.page = "home"; self.scroll = 0; await self.draw(); return
             if self.page == "dimmers":
                 index = (y - 82) // 26
                 items = self.state.get("dimmers", [])

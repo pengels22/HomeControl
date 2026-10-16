@@ -124,6 +124,21 @@ def test_native_lockout_does_not_send_relay_command_and_timeout_is_editable_only
     assert next(payload for _, payload in api.calls if payload and payload.get("kind") == "setting") == {"kind": "setting", "setting": "screen_timeout", "value": 11, "role": "RCM"}
 
 
+def test_native_back_button_returns_from_any_subpage_to_home():
+    class Display:
+        width = 480
+        height = 320
+
+        async def draw_rgb565(self, *args):
+            pass
+
+    ui = native.NativeUI("SIM", Display())
+    ui.page = "settings"
+    event = interfaces.TouchEvent("down", (interfaces.TouchPoint(0, 40, 72),))
+    asyncio.run(ui.touch(event))
+    assert ui.page == "home"
+
+
 def test_jetson_adapter_is_separate_from_orange_pi_profile():
     adapter = import_module("10_scripts.touchscreen_hardware.jetson_adapter")
     config = adapter.create_jetson_adapter_config()
