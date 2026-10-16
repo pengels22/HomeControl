@@ -28,8 +28,8 @@ except ImportError:  # The simulated test environment does not need Pillow.
 ROOT = Path(__file__).resolve().parents[1]
 LOGGER = logging.getLogger("homecontrol.native_touchscreen")
 FONT_PATHS = (
-    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
 )
 
 BLACK, WHITE = 0x0000, 0xFFFF
@@ -156,7 +156,7 @@ class Frame:
             if font is None:
                 font_path = next((path for path in FONT_PATHS if Path(path).exists()), None)
                 if font_path:
-                    font = ImageFont.truetype(font_path, max(9, scale * 8))
+                    font = ImageFont.truetype(font_path, max(11, scale * 9))
                     self._font_cache[scale] = font
             if font is not None:
                 self._smooth_text(x, y, value, color, font)
