@@ -110,6 +110,20 @@ class Frame:
             start, end = (row * self.width + left) * 2, (row * self.width + right) * 2
             self.data[start:end] = pixel * ((end - start) // 2)
 
+    def line(self, x0: int, y0: int, x1: int, y1: int, color: int) -> None:
+        dx, sx = abs(x1 - x0), 1 if x0 < x1 else -1
+        dy, sy = -abs(y1 - y0), 1 if y0 < y1 else -1
+        error = dx + dy
+        while True:
+            self.fill_rect(x0, y0, 1, 1, color)
+            if x0 == x1 and y0 == y1:
+                return
+            double = 2 * error
+            if double >= dy:
+                error += dy; x0 += sx
+            if double <= dx:
+                error += dx; y0 += sy
+
     def circle(self, cx: int, cy: int, radius: int, color: int) -> None:
         for y in range(cy - radius, cy + radius + 1):
             for x in range(cx - radius, cx + radius + 1):
@@ -253,15 +267,33 @@ class NativeUI:
 
     def _home(self, frame: Frame) -> None:
         module = self.state.get("module", {}); health = self.state.get("health", {})
-        frame.rounded_rect(16, 52, 448, 92, 14, CARD, LINE)
+        frame.rounded_rect(16, 50, 448, 98, 14, CARD, LINE)
         name = str(module.get("name", "MODULE")); frame.text(max(20, (480 - len(name) * 18) // 2), 68, name, WHITE, 3)
         status = str(health.get("status", "UNAVAILABLE")); status_color = GOOD if status == "SIMULATED" else WARN
         frame.circle(176, 119, 7, status_color); frame.text(192, 113, status, status_color, 2)
         labels = ["STATUS", "RELAYS" if self.role == "RCM" else "LIGHTS", "NETWORK", "SETTINGS"]
         pages = ["status", "relays" if self.role == "RCM" else ("lights" if self.role == "LCM" else "rmc-data"), "network", "settings"]
         for i, (label, page) in enumerate(zip(labels, pages, strict=True)):
-            x, y = 16 + (i % 2) * 232, 154 + (i // 2) * 72
-            frame.rounded_rect(x, y, 216, 62, 12, CARD, LINE); frame.text(x + 52, y + 26, label, WHITE, 2)
+            x, y = 16 + (i % 2) * 232, 154 + (i // 2) * 68
+            frame.rounded_rect(x, y, 216, 58, 12, CARD, LINE)
+            self._home_icon(frame, x + 108, y + 17, i)
+            frame.text(x + max(20, (216 - len(label) * 12) // 2), y + 36, label, WHITE, 2)
+        frame.text(134, 294, "RETURN HOME AFTER 10 SEC", MUTED, 1)
+
+    def _home_icon(self, frame: Frame, cx: int, cy: int, index: int) -> None:
+        if index == 0:
+            frame.circle(cx, cy, 10, CYAN); frame.circle(cx, cy, 6, CARD)
+        elif index == 1:
+            frame.line(cx, cy - 12, cx + 12, cy, CYAN); frame.line(cx + 12, cy, cx, cy + 12, CYAN)
+            frame.line(cx, cy + 12, cx - 12, cy, CYAN); frame.line(cx - 12, cy, cx, cy - 12, CYAN)
+            frame.fill_rect(cx - 4, cy - 4, 9, 9, CYAN)
+        elif index == 2:
+            frame.line(cx - 13, cy - 4, cx - 2, cy + 2, CYAN); frame.line(cx - 2, cy + 2, cx - 2, cy - 7, CYAN)
+            frame.line(cx - 2, cy - 7, cx + 13, cy + 5, CYAN); frame.line(cx + 13, cy + 5, cx + 13, cy - 4, CYAN)
+        else:
+            frame.circle(cx, cy, 8, CYAN); frame.circle(cx, cy, 4, CARD)
+            for dx, dy in ((0, -13), (0, 9), (-13, 0), (9, 0), (-9, -9), (9, 9), (-9, 9), (9, -9)):
+                frame.fill_rect(cx + dx - 2, cy + dy - 2, 5, 5, CYAN)
 
     def _status(self, frame: Frame) -> None:
         module, health, settings = self.state.get("module", {}), self.state.get("health", {}), self.state.get("settings", {})
