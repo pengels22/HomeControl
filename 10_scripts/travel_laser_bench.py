@@ -100,7 +100,7 @@ def start_handover(target: str, role: str) -> None:
         raise SystemExit("HomeControl bench already has recorded processes; use restart or switch-role")
     for executable in ("touchscreen_app.py", "touchscreen_display_bridge.py"):
         path = f"{REMOTE_ROOT}/10_scripts/{executable}"
-        running = ssh_command(target, f"for pid in $(pgrep -f {shlex.quote(path)} || true); do test \"$pid\" != \"$$\" && echo \"$pid\"; done", check=False)
+        running = ssh_command(target, f"for pid in $(pgrep -f {shlex.quote(path)} || true); do comm=$(ps -o comm= -p \"$pid\" 2>/dev/null || true); case \"$comm\" in python|python3) echo \"$pid\";; esac; done", check=False)
         if running.stdout.strip():
             raise SystemExit(f"HomeControl process already running ({executable}); use stop or restart")
     owners = ssh_command(target, "fuser -s /dev/spidev1.1 /dev/i2c-2 /dev/gpiochip1", check=False)
