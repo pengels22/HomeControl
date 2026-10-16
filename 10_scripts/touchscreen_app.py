@@ -39,6 +39,7 @@ class Command(BaseModel):
     kind: str
     channel: str | None = None
     value: float | bool | None = None
+    bank: int | None = None
     role: str = "RCM"
     authorized: bool = True
 
@@ -59,7 +60,7 @@ class SimulatedTouchscreenAdapter:
             "LCM": [f"A{i}" for i in range(1, 9)],
         }
         relay_names = channels.get(self.role, [])
-        relays = [{"channel": ch, "name": ch, "on": False, "lockout": False, "confirmed": True} for ch in relay_names]
+        relays = [{"channel": ch, "position": index, "name": ch, "on": False, "lockout": False, "confirmed": True} for index, ch in enumerate(relay_names, start=1)]
         dimmers = []
         if self.role == "LCM":
             dimmers = [
@@ -88,6 +89,7 @@ class SimulatedTouchscreenAdapter:
             "rooms": rooms,
             "external_sensors": external,
             "last_ack": None,
+            "bank_selector": {"touchscreen_bank": 0, "physical_bank": None, "physical_selector_authoritative": False, "effective_bank": 0, "source": "touchscreen"},
         }
 
     def snapshot(self) -> dict[str, Any]:
@@ -101,6 +103,18 @@ class SimulatedTouchscreenAdapter:
             raise HTTPException(status_code=403, detail="authorized touchscreen session required")
         if command.role.upper() != self.role:
             raise HTTPException(status_code=409, detail="module role does not match touchscreen session")
+        if command.kind == "bank_select":
+            if self.role != "RCM" or command.bank not in range(4):
+                raise HTTPException(status_code=400, detail="invalid RCM bank selection")
+            selector = self.state["bank_selector"]
+            selector["touchscreen_bank"] = command.bank
+            if selector["physical_selector_authoritative"] and selector["physical_bank"] is not None:
+                selector["effective_bank"] = selector["physical_bank"]
+                selector["source"] = "physical"
+            else:
+                selector["effective_bank"] = command.bank
+                selector["source"] = "touchscreen"
+            return {"ok": True, "simulated": True, "physical_output_commanded": False, "bank": selector["effective_bank"], "source": selector["source"]}
         if command.kind not in {"relay", "dimmer"}:
             raise HTTPException(status_code=400, detail="unsupported simulated command")
         if not command.channel or command.value is None:
@@ -123,6 +137,12 @@ class SimulatedTouchscreenAdapter:
         ack = {"ok": True, "simulated": True, "physical_output_commanded": False, "channel": command.channel, "value": item.get("on", item.get("percent")), "acknowledged_at": time.time()}
         self.state["last_ack"] = ack
         return ack
+
+    def update_physical_bank(self, bank: int) -> None:
+        """Apply a hardware selector update; physical input wins over touch requests."""
+        if self.role != "RCM" or bank not in range(4):
+            raise ValueError("invalid RCM bank")
+        self.state["bank_selector"].update({"physical_bank": bank, "physical_selector_authoritative": True, "effective_bank": bank, "source": "physical"})
 
 
 adapters = {role: SimulatedTouchscreenAdapter(role) for role in ROLE_PAGES}

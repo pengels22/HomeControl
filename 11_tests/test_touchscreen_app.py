@@ -51,6 +51,45 @@ def test_relay_ack_is_simulated_and_lockout_is_enforced(client):
     touchscreen.adapters['RCM'].state['relays'][0]['lockout'] = False
 
 
+def test_rcm_bank_mapping_uses_numeric_positions_and_eight_relays_per_bank(client):
+    state = client.get('/api/touchscreen/state', params={'role': 'RCM'}).json()
+    assert [(item['position'], item['channel']) for item in state['relays']] == [
+        (index, f'{bank}{index - offset}')
+        for bank, offset in zip('ABCD', (0, 8, 16, 24))
+        for index in range(offset + 1, offset + 9)
+    ]
+
+
+def test_touchscreen_bank_selection_updates_shared_effective_bank(client):
+    response = client.post('/api/touchscreen/command', json={'kind': 'bank_select', 'bank': 2, 'role': 'RCM'})
+    assert response.status_code == 200
+    assert response.json()['bank'] == 2
+    state = client.get('/api/touchscreen/state', params={'role': 'RCM'}).json()
+    assert state['bank_selector']['effective_bank'] == 2
+    assert state['bank_selector']['source'] == 'touchscreen'
+
+
+def test_physical_bank_selector_has_authority_over_touchscreen_request(client):
+    adapter = touchscreen.adapters['RCM']
+    adapter.update_physical_bank(1)
+    response = client.post('/api/touchscreen/command', json={'kind': 'bank_select', 'bank': 3, 'role': 'RCM'})
+    assert response.status_code == 200
+    assert response.json()['bank'] == 1
+    assert response.json()['source'] == 'physical'
+    assert client.get('/api/touchscreen/state', params={'role': 'RCM'}).json()['bank_selector']['effective_bank'] == 1
+    adapter.state['bank_selector'].update({'physical_bank': None, 'physical_selector_authoritative': False, 'effective_bank': 0, 'source': 'touchscreen'})
+
+
+def test_bank_selection_does_not_bypass_lockout(client):
+    adapter = touchscreen.adapters['RCM']
+    adapter.state['bank_selector'].update({'effective_bank': 1, 'touchscreen_bank': 1})
+    adapter.state['relays'][8]['lockout'] = True
+    blocked = client.post('/api/touchscreen/command', json={'kind': 'relay', 'channel': 'B1', 'value': True, 'role': 'RCM'})
+    assert blocked.status_code == 409
+    adapter.state['relays'][8]['lockout'] = False
+    adapter.state['bank_selector'].update({'effective_bank': 0, 'touchscreen_bank': 0})
+
+
 def test_permission_guard_rejects_unauthorized_command(client):
     response = client.post('/api/touchscreen/command', json={'kind': 'relay', 'channel': 'A1', 'value': True, 'role': 'RCM', 'authorized': False})
     assert response.status_code == 403
