@@ -10,7 +10,9 @@ interfaces = import_module("10_scripts.touchscreen_hardware.interfaces")
 touch = import_module("10_scripts.touchscreen_hardware.ft6336_touch")
 bridge = import_module("10_scripts.touchscreen_hardware.browser_bridge")
 input_bridge = import_module("10_scripts.touchscreen_hardware.input_bridge")
+renderer = import_module("10_scripts.touchscreen_hardware.browser_renderer")
 profiles = import_module("07_servises.common.hardware_profiles")
+bench = import_module("10_scripts.travel_laser_bench")
 
 ROOT = Path(__file__).parents[1]
 
@@ -179,3 +181,166 @@ async def test_run_touch_input_exercises_consumer_lifecycle_and_browser_sink():
         ("release", (60, 160)),
         ("close",),
     ]
+
+
+def test_rgb565_conversion_uses_big_endian_wire_order():
+    assert renderer.rgb888_to_rgb565(bytes([255, 0, 0, 0, 255, 0, 0, 0, 255])) == bytes([
+        0xF8, 0x00, 0x07, 0xE0, 0x00, 0x1F,
+    ])
+
+
+def test_dirty_update_sends_full_frame_then_only_changed_rectangle():
+    first = bytes([0, 0, 0] * 4)
+    second = bytearray(first)
+    second[3:6] = bytes([255, 0, 0])
+
+    full = renderer._dirty_update(None, first, 2, 2)
+    partial = renderer._dirty_update(first, bytes(second), 2, 2)
+    unchanged = renderer._dirty_update(bytes(second), bytes(second), 2, 2)
+
+    assert (full.x, full.y, full.width, full.height) == (0, 0, 2, 2)
+    assert (partial.x, partial.y, partial.width, partial.height) == (1, 0, 1, 1)
+    assert unchanged is None
+
+
+def test_cdp_touch_sink_uses_same_touch_lifecycle_as_uinput_sink():
+    class FakeClient:
+        def __init__(self):
+            self.calls = []
+
+        def command(self, method, params=None):
+            self.calls.append((method, params))
+
+    client = FakeClient()
+    sink = input_bridge.CdpTouchSink(client)
+    point = interfaces.TouchPoint(0, 10, 20)
+    sink.open()
+    sink.press(point)
+    sink.move(interfaces.TouchPoint(0, 10, 40))
+    sink.release(point)
+
+    assert [call[0] for call in client.calls] == [
+        "Input.setIgnoreInputEvents",
+        "Input.dispatchTouchEvent",
+        "Input.dispatchTouchEvent",
+        "Input.dispatchTouchEvent",
+    ]
+    assert client.calls[1][1]["type"] == "touchStart"
+    assert client.calls[2][1]["type"] == "touchMove"
+    assert client.calls[3][1]["type"] == "touchEnd"
+
+
+def test_browser_renderer_config_is_exactly_480x320_and_headless():
+    config = renderer.BrowserRendererConfig()
+    command = config.command()
+    assert (config.width, config.height) == (480, 320)
+    assert "--headless=new" in command
+    assert "--remote-debugging-port=9222" in command
+    assert command[-1].startswith("http://127.0.0.1:8765/")
+
+
+def test_restore_commands_only_touch_test_resources_and_original_service_state():
+    commands = bench.restore_commands({"service_active": "active", "service_enabled": "enabled"})
+    joined = "; ".join(commands)
+    assert "travel-laser-ui.service" in joined
+    assert "/tmp/homecontrol-touchscreen-test.pids" in joined
+    assert "gpio" not in joined.lower()
+    assert "relay" not in joined.lower()
+    assert "systemctl start travel-laser-ui.service" in commands
+    assert "systemctl enable travel-laser-ui.service" in commands
+
+
+def test_preflight_reports_ssh_or_remote_check_failures():
+    results = {"identity": {"returncode": 255}, "manual": {"returncode": 0}}
+    assert not bench.preflight_ok(results)
+    assert bench.preflight_ok({"identity": {"returncode": 0}, "manual": {"returncode": 0}})
+
+
+@pytest.mark.asyncio
+async def test_browser_renderer_start_capture_and_shutdown_are_reversible(tmp_path, monkeypatch):
+    class FakeProcess:
+        def __init__(self):
+            self.terminated = False
+            self.killed = False
+
+        def terminate(self):
+            self.terminated = True
+
+        def kill(self):
+            self.killed = True
+
+        def wait(self, timeout):
+            return 0
+
+    class FakeClient:
+        def __init__(self, url):
+            self.url = url
+            self.connected = False
+            self.closed = False
+
+        def connect(self):
+            self.connected = True
+
+        def command(self, method, params=None):
+            if method == "Page.captureScreenshot":
+                return {"data": "ignored"}
+            return {}
+
+        def close(self):
+            self.closed = True
+
+    process = FakeProcess()
+    client = None
+
+    def make_process(*args, **kwargs):
+        return process
+
+    def make_client(url):
+        nonlocal client
+        client = FakeClient(url)
+        return client
+
+    display = type("Display", (), {"draw_rgb565": lambda self, *args: asyncio.sleep(0)})()
+    config = renderer.BrowserRendererConfig(width=2, height=1, user_data_dir=tmp_path / "browser")
+    browser = renderer.BrowserRenderer(display, config, make_process, make_client)
+    monkeypatch.setattr(browser, "_wait_for_page", lambda: {"webSocketDebuggerUrl": "ws://fake"})
+    monkeypatch.setattr(renderer, "_decode_rgb", lambda encoded: bytes([255, 0, 0, 0, 0, 0]))
+
+    await browser.start()
+    assert client.connected is True
+    update = await browser.capture_update()
+    assert (update.width, update.height) == (2, 1)
+    await browser.stop()
+    assert client.closed is True
+    assert process.terminated is True
+
+
+@pytest.mark.asyncio
+async def test_browser_renderer_stops_resources_after_capture_failure():
+    class FakeProcess:
+        def __init__(self):
+            self.terminated = False
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout):
+            return 0
+
+    class FailingClient:
+        def __init__(self):
+            self.closed = False
+
+        def command(self, method, params=None):
+            raise RuntimeError("renderer disconnected")
+
+        def close(self):
+            self.closed = True
+
+    browser = renderer.BrowserRenderer(type("Display", (), {})())
+    browser.process = FakeProcess()
+    browser.client = FailingClient()
+    with pytest.raises(RuntimeError, match="renderer disconnected"):
+        await browser.run()
+    assert browser.process is None
+    assert browser.client is None

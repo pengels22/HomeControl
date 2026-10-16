@@ -7,6 +7,7 @@ then owns DOM hit-testing, scrolling, pointer capture, sliders, and gestures.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -142,6 +143,46 @@ class UInputTouchSink:
         from evdev import ecodes
 
         return getattr(ecodes, name)
+
+
+class CdpTouchSink:
+    """CDP equivalent for headless Chromium without a compositor."""
+
+    def __init__(self, client):
+        self.client = client
+
+    def open(self) -> None:
+        self.client.command("Input.setIgnoreInputEvents", {"ignore": False})
+
+    def press(self, point: TouchPoint) -> None:
+        self._dispatch("touchStart", point)
+
+    def move(self, point: TouchPoint) -> None:
+        self._dispatch("touchMove", point)
+
+    def release(self, point: TouchPoint | None = None) -> None:
+        self.client.command("Input.dispatchTouchEvent", {
+            "type": "touchEnd",
+            "touchPoints": [],
+            "timestamp": time.time(),
+        })
+
+    def close(self) -> None:
+        return None
+
+    def _dispatch(self, action: str, point: TouchPoint) -> None:
+        self.client.command("Input.dispatchTouchEvent", {
+            "type": action,
+            "touchPoints": [{
+                "x": point.x,
+                "y": point.y,
+                "radiusX": 1,
+                "radiusY": 1,
+                "force": 1,
+                "id": point.id,
+            }],
+            "timestamp": time.time(),
+        })
 
 
 async def run_touch_input(touch, sink: TouchSink, stop_event: asyncio.Event | None = None) -> None:

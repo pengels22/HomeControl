@@ -6,7 +6,7 @@ importing laser-control code or enabling physical outputs.
 """
 
 from .interfaces import DisplayConfig, TouchConfig, TouchEvent, TouchPoint
-from .input_bridge import TouchEventBridge, UInputTouchSink, run_touch_input
+from .input_bridge import CdpTouchSink, TouchEventBridge, UInputTouchSink, run_touch_input
 from .service import TouchscreenHardwareService, create_service
 
 __all__ = [
@@ -16,6 +16,7 @@ __all__ = [
     "TouchPoint",
     "TouchscreenHardwareService",
     "TouchEventBridge",
+    "CdpTouchSink",
     "UInputTouchSink",
     "create_service",
     "run_touch_input",

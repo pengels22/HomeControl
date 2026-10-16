@@ -1,2 +1,5 @@
 # Optional Linux-only dependency for the manual Orange Pi browser input bridge.
 evdev>=1.7,<2
+# Optional only when using headless Chromium/CDP frame capture.
+Pillow>=10,<12
+websocket-client>=1.8,<2

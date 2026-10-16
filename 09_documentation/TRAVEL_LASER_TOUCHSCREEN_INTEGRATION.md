@@ -75,6 +75,42 @@ The bridge is still commissioning-only. It is not enabled by the preview
 server and is not claimed as physically validated until an Orange Pi confirms
 `/dev/uinput` delivery to the selected kiosk compositor.
 
+For the confirmed Travel Laser host, which has no Chromium, compositor, or
+framebuffer, `touchscreen_display_bridge.py` uses headless Chromium's CDP
+transport. The renderer captures a 480x320 PNG, decodes it to RGB, computes a
+changed rectangle, converts that rectangle to big-endian RGB565, and calls the
+existing ST7796U driver's partial-window update. Full-frame capture is still
+performed because CDP exposes a frame image; the SPI transfer is reduced to the
+dirty rectangle. `RenderMetrics` records capture rate, update count, changed
+pixels, and capture/update time for the bench report.
+
+The renderer's optional dependencies are Pillow and websocket-client. A
+compositor-backed kiosk may instead use the existing `uinput` sink, avoiding
+CDP touch injection while retaining the same `TouchEventBridge`.
+
+## Bench workflow
+
+The workflow is deliberately split into non-disruptive preparation and an
+explicit handover:
+
+```sh
+./.venv/bin/python 10_scripts/travel_laser_bench.py preflight
+./.venv/bin/python 10_scripts/travel_laser_bench.py stage
+# After physical laser disconnection and operator approval only:
+./.venv/bin/python 10_scripts/travel_laser_bench.py test --role RCM --approve-hardware-handover
+./.venv/bin/python 10_scripts/travel_laser_bench.py restore
+```
+
+The default target is the exact SSH alias `laser`. `preflight` is read-only;
+`stage` only copies files into `/tmp` and does not stop services. `test` records
+the original Travel Laser service state, stops that service to avoid SPI/I2C
+ownership conflicts, and starts only the HomeControl preview plus display
+bridge. It cannot prove that a laser is physically disconnected, so that is a
+manual gate. `restore` kills only recorded test PIDs, removes the temporary
+state, and restores the recorded service enabled/active state. The state file
+and restoration commands are designed to remain usable over SSH after a local
+development session fails.
+
 ## Outstanding verification
 
 No live device, Jetson, LAB1, Conflict service, physical relay, dimmer, or
