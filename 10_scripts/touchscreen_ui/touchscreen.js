@@ -8,7 +8,10 @@
   let page = params.get('page') || 'home';
   let history = [];
   let idle = null;
-  let dragging = false;
+  const activeDimmers = new Set();
+  const dimmerCommitTimers = new Map();
+  const dimmerQueues = new Map();
+  const suppressNextChanges = new Set();
   let requestSequence = 0;
   let latestMutationSequence = 0;
   let appliedRevision = -1;
@@ -31,7 +34,7 @@
     if (renderPage || !document.querySelector('.shell')) render();
     else syncControls();
   }
-  function resetIdle() { clearTimeout(idle); if (!dragging) idle = setTimeout(() => { page = 'home'; history = []; render(); }, 10000); }
+  function resetIdle() { clearTimeout(idle); if (!activeDimmers.size) { const timeout = Number(data?.settings?.inactivity_seconds) || 10; idle = setTimeout(() => { page = 'home'; history = []; render(); }, timeout * 1000); } }
   function go(next) { if (next === 'home') { page = 'home'; history = []; } else { history.push(page); page = next; } render(); }
   function back() { page = history.pop() || 'home'; render(); }
   function tile(key, label) { return `<button class="tile" data-page="${key}"><span class="icon" aria-hidden="true">${icons[key] || '○'}</span><span>${label}</span></button>`; }
@@ -49,15 +52,35 @@
   function sensors() { return shell(data.external_sensors.map(item => `<div class="metric"><span><strong>${esc(item.name)}</strong><small class="label">${esc(item.source)}</small></span><strong class="unavailable">${esc(item.value)}</strong></div>`).join(''), 'Sensors'); }
 
   function findControl(attribute, value) { return [...document.querySelectorAll(`[${attribute}]`)].find(element => element.getAttribute(attribute) === String(value)); }
+  function queueDimmerCommit(channel, value, immediate = false) {
+    clearTimeout(dimmerCommitTimers.get(channel));
+    const commit = () => {
+      dimmerCommitTimers.delete(channel);
+      const previous = dimmerQueues.get(channel) || Promise.resolve();
+      const next = previous.catch(() => {}).then(() => send({kind: 'dimmer', channel, value}));
+      const queued = next.finally(() => { if (dimmerQueues.get(channel) === queued) dimmerQueues.delete(channel); });
+      dimmerQueues.set(channel, queued);
+    };
+    if (immediate) commit();
+    else dimmerCommitTimers.set(channel, setTimeout(commit, 120));
+  }
+  function commitDimerInput(input, immediate = false) {
+    const channel = input.dataset.dimmer;
+    activeDimmers.delete(channel);
+    suppressNextChanges.add(channel);
+    setTimeout(() => suppressNextChanges.delete(channel), 0);
+    queueDimmerCommit(channel, Number(input.value), immediate);
+    resetIdle();
+  }
   function syncControls() {
     if (!data) return;
     data.relays?.forEach(item => { const button = findControl('data-relay', item.channel); if (!button) return; button.classList.toggle('on', Boolean(item.on)); button.setAttribute('aria-pressed', String(Boolean(item.on))); button.disabled = Boolean(item.lockout); button.setAttribute('aria-label', `${item.name} ${item.on ? 'on' : 'off'}${item.lockout ? ', maintenance locked' : ''}`); });
-    data.dimmers?.forEach(item => { const input = findControl('data-dimmer', item.channel); if (!input || dragging || document.activeElement === input) return; input.value = item.percent; const percent = input.closest('.row')?.querySelector('.percent'); if (percent) percent.textContent = `${item.percent}%`; });
+    data.dimmers?.forEach(item => { const input = findControl('data-dimmer', item.channel); if (!input || activeDimmers.has(item.channel) || document.activeElement === input) return; input.value = item.percent; const percent = input.closest('.row')?.querySelector('.percent'); if (percent) percent.textContent = `${item.percent}%`; });
     const selected = Number(data.bank_selector?.effective_bank || 0); document.querySelectorAll('[data-bank]').forEach(button => { const active = Number(button.dataset.bank) === selected; button.classList.toggle('selected', active); button.setAttribute('aria-pressed', String(active)); });
     const timeout = document.querySelector('[data-timeout]');
     if (timeout && document.activeElement !== timeout) timeout.value = data.settings.inactivity_seconds;
   }
-  function render() { if (!data) return; const body = page === 'home' ? home() : page === 'status' ? status() : page === 'relays' ? relays() : page === 'lights' ? lights() : page === 'dimmers' ? dimmers() : page === 'non-dimmers' ? relays('Non-Dimmers', data.relays.slice(0, 8)) : page === 'network' ? network() : page === 'settings' ? settings() : page === 'rmc-data' ? rooms() : sensors(); app.innerHTML = body; document.querySelectorAll('[data-page]').forEach(button => button.addEventListener('click', () => go(button.dataset.page))); document.querySelectorAll('[data-back]').forEach(button => button.addEventListener('click', back)); document.querySelectorAll('[data-bank]').forEach(button => button.addEventListener('click', () => send({kind: 'bank_select', bank: Number(button.dataset.bank)}))); document.querySelectorAll('[data-relay]').forEach(button => button.addEventListener('click', () => send({kind: 'relay', channel: button.dataset.relay, value: !button.classList.contains('on')}))); document.querySelectorAll('[data-dimmer]').forEach(input => { input.addEventListener('pointerdown', event => { dragging = true; input.setPointerCapture?.(event.pointerId); resetIdle(); }); input.addEventListener('pointermove', resetIdle); input.addEventListener('input', () => { const percent = input.closest('.row')?.querySelector('.percent'); if (percent) percent.textContent = `${input.value}%`; resetIdle(); }); input.addEventListener('change', () => { dragging = false; send({kind: 'dimmer', channel: input.dataset.dimmer, value: Number(input.value)}); resetIdle(); }); input.addEventListener('pointerup', event => { input.releasePointerCapture?.(event.pointerId); dragging = false; resetIdle(); }); input.addEventListener('pointercancel', () => { dragging = false; resetIdle(); }); }); const timeout = document.querySelector('[data-timeout]'); if (timeout) timeout.addEventListener('change', () => { const value = Number(timeout.value); if (!Number.isInteger(value) || value < 1 || value > 300) { showToast('Screen timeout must be 1–300 seconds', true); syncControls(); return; } send({kind: 'setting', setting: 'screen_timeout', value}); }); const clock = document.getElementById('clock'); if (clock) { const tick = () => { clock.textContent = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}); }; tick(); setInterval(tick, 1000); } resetIdle(); }
+  function render() { if (!data) return; const body = page === 'home' ? home() : page === 'status' ? status() : page === 'relays' ? relays() : page === 'lights' ? lights() : page === 'dimmers' ? dimmers() : page === 'non-dimmers' ? relays('Non-Dimmers', data.relays.slice(0, 8)) : page === 'network' ? network() : page === 'settings' ? settings() : page === 'rmc-data' ? rooms() : sensors(); app.innerHTML = body; document.querySelectorAll('[data-page]').forEach(button => button.addEventListener('click', () => go(button.dataset.page))); document.querySelectorAll('[data-back]').forEach(button => button.addEventListener('click', back)); document.querySelectorAll('[data-bank]').forEach(button => button.addEventListener('click', () => send({kind: 'bank_select', bank: Number(button.dataset.bank)}))); document.querySelectorAll('[data-relay]').forEach(button => button.addEventListener('click', () => send({kind: 'relay', channel: button.dataset.relay, value: !button.classList.contains('on')}))); document.querySelectorAll('[data-dimmer]').forEach(input => { input.addEventListener('pointerdown', event => { activeDimmers.add(input.dataset.dimmer); input.setPointerCapture?.(event.pointerId); resetIdle(); }); input.addEventListener('pointermove', resetIdle); input.addEventListener('keydown', event => { if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) { activeDimmers.add(input.dataset.dimmer); resetIdle(); } }); input.addEventListener('input', () => { const percent = input.closest('.row')?.querySelector('.percent'); if (percent) percent.textContent = `${input.value}%`; resetIdle(); }); input.addEventListener('change', () => { if (activeDimmers.has(input.dataset.dimmer)) return; if (suppressNextChanges.delete(input.dataset.dimmer)) return; queueDimmerCommit(input.dataset.dimmer, Number(input.value)); }); input.addEventListener('keyup', event => { if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) commitDimerInput(input); }); input.addEventListener('pointerup', event => { input.releasePointerCapture?.(event.pointerId); commitDimerInput(input, true); }); input.addEventListener('pointercancel', () => { activeDimmers.delete(input.dataset.dimmer); resetIdle(); }); input.addEventListener('blur', () => { if (activeDimmers.has(input.dataset.dimmer)) commitDimerInput(input); }); }); const timeout = document.querySelector('[data-timeout]'); if (timeout) timeout.addEventListener('change', () => { const value = Number(timeout.value); if (!Number.isInteger(value) || value < 1 || value > 300) { showToast('Screen timeout must be 1–300 seconds', true); syncControls(); return; } send({kind: 'setting', setting: 'screen_timeout', value}); }); const clock = document.getElementById('clock'); if (clock) { const tick = () => { clock.textContent = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}); }; tick(); setInterval(tick, 1000); } resetIdle(); }
   async function send(payload) { const mutationSequence = ++requestSequence; latestMutationSequence = mutationSequence; try { const response = await fetch('/api/touchscreen/command', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({...payload, role})}); const result = await response.json(); if (!response.ok) throw new Error(result.detail); showToast(`Acknowledged ${result.channel || result.setting || (result.bank != null ? `bank ${result.bank + 1}` : 'update')}`); await load({renderPage: false}); if (payload.kind === 'setting') resetIdle(); } catch (error) { showToast(error.message, true); try { await load({renderPage: false}); } catch (_) { /* keep the current interaction if reconciliation is unavailable */ } } }
   document.addEventListener('pointerdown', resetIdle); document.addEventListener('pointermove', resetIdle); document.addEventListener('keydown', resetIdle); document.addEventListener('touchstart', resetIdle, {passive: true}); document.addEventListener('touchmove', resetIdle, {passive: true}); document.addEventListener('scroll', resetIdle, {passive: true}); load().then(() => { setInterval(() => load({renderPage: false}).catch(() => {}), 3000); }).catch(error => showToast(error.message, true));
 })();

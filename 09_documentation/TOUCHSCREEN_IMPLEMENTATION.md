@@ -34,8 +34,8 @@ calls. Simulated acknowledgments explicitly report
 - Ten seconds of valid-input inactivity returns to Home. Active slider drags
   suppress the timeout until release.
 - LCM exposes all 14 dimmers in configuration order. Requested values from 0%
-  through 5% normalize to an acknowledged simulated OFF/0% state; 6%-100%
-  remain their requested setpoint.
+  through 4% normalize to an acknowledged simulated OFF/0% state; 5%-100%
+  remain their requested ON setpoint.
 - RCM and LCM relay commands enforce maintenance lockouts and authorization.
 - SIM uses `Unavailable` for offline/stale room telemetry.
 - HCM Sensors is restricted to external FIRE and AC monitor inputs; internal
