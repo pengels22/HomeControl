@@ -3,8 +3,9 @@
 ## Audit status
 
 Read-only audit performed against the exact SSH alias `laser` on 2026-10-16.
-No packages were installed, no persistent permissions changed, and the Travel
-Laser service remained active throughout this audit.
+The approved minimal package installation was completed after the audit. No
+persistent permissions changed, and the Travel Laser service remained active
+throughout installation and verification.
 
 Host facts:
 
@@ -26,6 +27,28 @@ Missing renderer components:
 - python-evdev, which is optional for the compositor-backed `uinput` path and
   is not required by the preferred headless CDP path.
 - X11, Wayland, Weston, Cage, and other compositor binaries.
+
+## Installation result
+
+The approved installation was run on `laser` with the following command:
+
+```sh
+sudo apt-get install --no-install-recommends -y \
+  chromium python3-pil python3-websocket python3-evdev
+```
+
+APT installed 50 new packages, downloading approximately 129 MB and using
+approximately 476 MB of additional disk space. The resulting root filesystem
+has approximately 26 GiB available. Installed versions verified on the board:
+
+- Chromium `155.0.8059.39-1~deb13u1`.
+- Pillow `11.1.0`.
+- websocket-client `1.8.0`.
+- python3-evdev `1.9.1-1`.
+
+The existing venv imports for `spidev`, `gpiod`, and `smbus2` also remain
+healthy. A headless Chromium CDP smoke test succeeded on loopback. No display
+bridge, SPI/I2C handover, or HomeControl renderer was started.
 
 Device permissions:
 
@@ -95,6 +118,6 @@ Travel Laser service. It does not issue laser, relay, E-stop, or GPIO output
 commands.
 
 The audit found no additional system service requirement. Chromium is launched
-and terminated by the temporary display bridge. Package installation, udev
-changes, group changes, and the hardware handover all require separate explicit
-approval and are intentionally not performed by this change.
+and terminated by the temporary display bridge. No udev or group changes were
+made. The hardware handover remains a separate approved step and has not been
+performed.
