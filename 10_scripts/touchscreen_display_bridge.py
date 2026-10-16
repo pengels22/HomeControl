@@ -9,6 +9,7 @@ import importlib
 from pathlib import Path
 import json
 import resource
+import signal
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -37,6 +38,12 @@ async def main() -> None:
         renderer_module.BrowserRendererConfig(url=url, width=display.width, height=display.height),
     )
     stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(signum, stop.set)
+        except NotImplementedError:
+            pass
     touch = service.create_touch()
     tasks = []
     sink = None
@@ -47,9 +54,11 @@ async def main() -> None:
             asyncio.create_task(renderer.run(stop)),
             asyncio.create_task(input_module.run_touch_input(touch, sink, stop)),
         ]
-        await asyncio.gather(
-            *tasks,
-        )
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        stop.set()
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*done, *pending, return_exceptions=True)
     except (KeyboardInterrupt, asyncio.CancelledError):
         stop.set()
     finally:

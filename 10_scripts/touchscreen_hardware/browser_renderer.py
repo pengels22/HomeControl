@@ -38,6 +38,8 @@ class BrowserRendererConfig:
             self.browser_binary,
             "--headless=new",
             "--disable-gpu",
+            "--no-sandbox",
+            "--remote-allow-origins=*",
             "--no-first-run",
             "--no-default-browser-check",
             f"--remote-debugging-address=127.0.0.1",

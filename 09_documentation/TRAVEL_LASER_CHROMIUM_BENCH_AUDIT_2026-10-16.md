@@ -121,3 +121,57 @@ The audit found no additional system service requirement. Chromium is launched
 and terminated by the temporary display bridge. No udev or group changes were
 made. The hardware handover remains a separate approved step and has not been
 performed.
+
+## Approved physical bench session
+
+The approved handover was performed on `laser` after the dependency install.
+`travel-laser-ui.service` was stopped only; it remains disabled from runtime
+ownership but still enabled for boot. HomeControl was launched from a separate
+temporary runtime at `/tmp/homecontrol-touchscreen-venv`, using the existing
+Travel Laser hardware Python packages through `PYTHONPATH`. No Travel Laser
+application files, boot overlays, K1, E-stop, or output configuration were
+changed.
+
+The HomeControl API reported `simulation=true` and
+`physical_outputs_enabled=false` for RCM, LCM, and SIM. The bridge owned only
+the validated `/dev/spidev1.1` and `/dev/i2c-2` resources. No relay, laser, or
+other physical output command path is present in the simulated adapter.
+
+Observed browser and display checks:
+
+- RCM displayed the four approved bank labels and eight relay rows; a simulated
+  A1 toggle acknowledged successfully.
+- LCM exposed all 14 dimmers. 10-1 held 5%, normalized a below-threshold value
+  to 0%, and HV-1 held 65% through the browser interaction test.
+- SIM displayed the RMC Data page with unavailable telemetry rather than
+  fabricated values.
+- RCM bridge sample: 14 frames, 2.34 capture FPS, 2 updates, 1 full update,
+  36 MiB maximum RSS. No physical FT6336U touch events occurred during the
+  unattended run; the touch sink remained active and ready.
+- A screenshot from the SIM physical-renderer verification is retained at
+  `/tmp/homecontrol-physical-bench-sim.png` on the development workstation.
+
+The session is intentionally left assigned to HomeControl after successful
+startup. These commands are available after reconnecting over SSH:
+
+```sh
+# Check service ownership, processes, API safety state, and recent logs.
+ssh laser 'systemctl is-active travel-laser-ui.service || true; pgrep -af "touchscreen_app|touchscreen_display_bridge|chromium"; curl -fsS http://127.0.0.1:8765/api/touchscreen/state?role=SIM; tail -100 /tmp/homecontrol-touchscreen-test.log'
+
+# Restart the HomeControl touchscreen app and bridge in the selected role.
+./.venv/bin/python 10_scripts/travel_laser_bench.py stage
+./.venv/bin/python 10_scripts/travel_laser_bench.py test --role RCM --approve-hardware-handover
+
+# Switch role without changing the staged hardware mapping: stop the current
+# bridge PID from /tmp/homecontrol-touchscreen-test.pids, then start a new one
+# with --role LCM or --role SIM using the same command shown by the runner log.
+
+# Stop HomeControl and restore the original Travel Laser service manually.
+./.venv/bin/python 10_scripts/travel_laser_bench.py restore
+```
+
+The recovery command uses `sudo -n` only for recorded test PIDs and the
+original systemd service. It does not enable HomeControl at boot. Starting
+Travel Laser while HomeControl still owns SPI/I2C is unsafe; always run
+`restore` only after the HomeControl bridge has stopped and device ownership is
+empty.

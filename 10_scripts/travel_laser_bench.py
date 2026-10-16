@@ -21,6 +21,8 @@ TARGET = "laser"
 REMOTE_ROOT = "/tmp/homecontrol-touchscreen-test"
 REMOTE_STATE = "/tmp/homecontrol-touchscreen-bench-state.json"
 REMOTE_LOG = "/tmp/homecontrol-touchscreen-test.log"
+REMOTE_PYTHON = "/tmp/homecontrol-touchscreen-venv/bin/python"
+REMOTE_PYTHONPATH = "/opt/travel-laser-controller/.venv/lib/python3.13/site-packages"
 READ_ONLY_CHECKS = {
     "identity": "hostname; uname -a; cat /etc/os-release",
     "devices": "for p in /dev/spidev1.1 /dev/i2c-2 /dev/gpiochip1 /dev/uinput; do printf '%s ' \"$p\"; test -e \"$p\" && echo present || echo missing; done",
@@ -64,17 +66,17 @@ def dependencies_ready(results: dict[str, dict[str, object]]) -> bool:
 
 def restore_commands(state: dict[str, object]) -> list[str]:
     commands = [
-        "if test -s /tmp/homecontrol-touchscreen-test.pids; then xargs -r kill < /tmp/homecontrol-touchscreen-test.pids || true; fi",
+        "if test -s /tmp/homecontrol-touchscreen-test.pids; then xargs -r sudo -n kill < /tmp/homecontrol-touchscreen-test.pids || true; fi",
         "rm -f /tmp/homecontrol-touchscreen-test.pids",
     ]
     if state.get("service_active") == "active":
-        commands.append("systemctl start travel-laser-ui.service")
+        commands.append("sudo -n systemctl start travel-laser-ui.service")
     else:
-        commands.append("systemctl stop travel-laser-ui.service || true")
+        commands.append("sudo -n systemctl stop travel-laser-ui.service || true")
     if state.get("service_enabled") == "enabled":
-        commands.append("systemctl enable travel-laser-ui.service")
+        commands.append("sudo -n systemctl enable travel-laser-ui.service")
     else:
-        commands.append("systemctl disable travel-laser-ui.service || true")
+        commands.append("sudo -n systemctl disable travel-laser-ui.service || true")
     commands.append(f"rm -f {REMOTE_STATE}")
     return commands
 
@@ -85,6 +87,7 @@ def stage(source_root: Path, target: str, remote_root: str) -> None:
         "10_scripts/touchscreen_display_bridge.py",
         "10_scripts/touchscreen_hardware",
         "10_scripts/touchscreen_ui",
+        "06_config/01_HCM/hardware_pins.yaml",
         "06_config/02_SIM/hardware_pins.yaml",
         "06_config/03_LCM/hardware_pins.yaml",
         "06_config/04_RCM/hardware_pins.yaml",
@@ -119,18 +122,18 @@ def test_handover(target: str, remote_root: str, role: str, dry_run: bool = Fals
         raise SystemExit("Chromium/Pillow/websocket-client prerequisites are missing; no service was stopped")
     service_lines = str(results["service"]["stdout"]).splitlines()
     state = {
-        "service_active": "active" if "active" in service_lines else "inactive",
-        "service_enabled": "enabled" if "enabled" in service_lines else "disabled",
+        "service_active": "active" if any(line.strip() == "active" for line in service_lines) else "inactive",
+        "service_enabled": "enabled" if any(line.strip() == "enabled" for line in service_lines) else "disabled",
         "role": role,
         "remote_root": remote_root,
     }
     state_json = json.dumps(state, separators=(",", ":"))
     ssh_command(target, f"printf '%s' {shlex.quote(state_json)} > {REMOTE_STATE}")
-    ssh_command(target, "systemctl stop travel-laser-ui.service")
+    ssh_command(target, "sudo -n systemctl stop travel-laser-ui.service")
     launch = (
-        f"nohup python3 {remote_root}/10_scripts/touchscreen_app.py > {REMOTE_LOG} 2>&1 & "
+        f"nohup env PYTHONPATH={REMOTE_PYTHONPATH} {REMOTE_PYTHON} {remote_root}/10_scripts/touchscreen_app.py > {REMOTE_LOG} 2>&1 & "
         f"echo $! > /tmp/homecontrol-touchscreen-test.pids; "
-        f"nohup python3 {remote_root}/10_scripts/touchscreen_display_bridge.py --role {shlex.quote(role)} --mode orange_pi >> {REMOTE_LOG} 2>&1 & "
+        f"nohup sudo -n env PYTHONPATH={REMOTE_PYTHONPATH} {REMOTE_PYTHON} {remote_root}/10_scripts/touchscreen_display_bridge.py --role {shlex.quote(role)} --mode orange_pi >> {REMOTE_LOG} 2>&1 & "
         f"echo $! >> /tmp/homecontrol-touchscreen-test.pids"
     )
     ssh_command(target, launch)

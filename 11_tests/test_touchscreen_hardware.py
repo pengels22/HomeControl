@@ -235,6 +235,8 @@ def test_browser_renderer_config_is_exactly_480x320_and_headless():
     command = config.command()
     assert (config.width, config.height) == (480, 320)
     assert "--headless=new" in command
+    assert "--no-sandbox" in command
+    assert "--remote-allow-origins=*" in command
     assert "--remote-debugging-port=9222" in command
     assert command[-1].startswith("http://127.0.0.1:8765/")
 
@@ -246,8 +248,8 @@ def test_restore_commands_only_touch_test_resources_and_original_service_state()
     assert "/tmp/homecontrol-touchscreen-test.pids" in joined
     assert "gpio" not in joined.lower()
     assert "relay" not in joined.lower()
-    assert "systemctl start travel-laser-ui.service" in commands
-    assert "systemctl enable travel-laser-ui.service" in commands
+    assert any("systemctl start travel-laser-ui.service" in command for command in commands)
+    assert any("systemctl enable travel-laser-ui.service" in command for command in commands)
 
 
 def test_preflight_reports_ssh_or_remote_check_failures():
