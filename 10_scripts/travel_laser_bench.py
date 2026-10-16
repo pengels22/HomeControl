@@ -69,7 +69,10 @@ def _state_for_start(target: str) -> dict[str, object]:
 def _start_command(role: str, remote_root: str) -> str:
     return (
         f"nohup setsid env PYTHONPATH={REMOTE_PYTHONPATH} {REMOTE_PYTHON} {remote_root}/10_scripts/touchscreen_app.py > {REMOTE_LOG} 2>&1 & app=$!; "
-        f"nohup setsid sudo -n env PYTHONPATH={REMOTE_PYTHONPATH} {REMOTE_PYTHON} {remote_root}/10_scripts/touchscreen_display_bridge.py --role {shlex.quote(role)} --mode orange_pi >> {REMOTE_LOG} 2>&1 & bridge=$!; "
+        f"nohup setsid sudo -n env HOMECONTROL_TOUCH_LOG=/tmp/homecontrol-touchscreen-events.log PYTHONPATH={REMOTE_PYTHONPATH} {REMOTE_PYTHON} {remote_root}/10_scripts/touchscreen_display_bridge.py --role {shlex.quote(role)} --mode orange_pi >> {REMOTE_LOG} 2>&1 & "
+        f"sleep 1; bridge=; for candidate in $(pgrep -f {shlex.quote(remote_root + '/10_scripts/touchscreen_display_bridge.py')} || true); do "
+        "if test \"$candidate\" != \"$$\"; then bridge=$(ps -o pgid= -p \"$candidate\" | tr -d ' '); test -n \"$bridge\" && break; fi; done; "
+        "test -n \"$bridge\" || { echo 'bridge process group was not found' >&2; exit 1; }; "
         "printf '%s\\n%s\\n' \"$app\" \"$bridge\" > /tmp/homecontrol-touchscreen-test.pids"
     )
 
@@ -78,14 +81,12 @@ def _stop_command(bridge_only: bool = False) -> str:
     if bridge_only:
         return (
             "if test -s /tmp/homecontrol-touchscreen-test.pids; then bridge=$(sed -n '2p' /tmp/homecontrol-touchscreen-test.pids); "
-            "sudo -n kill -TERM \"$bridge\" 2>/dev/null || true; sudo -n pkill -TERM -P \"$bridge\" 2>/dev/null || true; fi"
+            "sudo -n kill -TERM -- -\"$bridge\" 2>/dev/null || true; fi"
         )
     return (
-        "if test -s /tmp/homecontrol-touchscreen-test.pids; then while read -r pid; do "
-        "sudo -n kill -TERM \"$pid\" 2>/dev/null || true; sudo -n pkill -TERM -P \"$pid\" 2>/dev/null || true; "
-        "done < /tmp/homecontrol-touchscreen-test.pids; sleep 2; while read -r pid; do "
-        "sudo -n kill -KILL \"$pid\" 2>/dev/null || true; sudo -n pkill -KILL -P \"$pid\" 2>/dev/null || true; "
-        "done < /tmp/homecontrol-touchscreen-test.pids; fi; rm -f /tmp/homecontrol-touchscreen-test.pids"
+        "if test -s /tmp/homecontrol-touchscreen-test.pids; then app=$(head -1 /tmp/homecontrol-touchscreen-test.pids); bridge=$(sed -n '2p' /tmp/homecontrol-touchscreen-test.pids); "
+        "sudo -n kill -TERM -- -\"$bridge\" 2>/dev/null || true; sudo -n kill -TERM \"$app\" 2>/dev/null || true; sleep 2; "
+        "sudo -n kill -KILL -- -\"$bridge\" 2>/dev/null || true; sudo -n kill -KILL \"$app\" 2>/dev/null || true; fi; rm -f /tmp/homecontrol-touchscreen-test.pids"
     )
 
 
@@ -97,6 +98,11 @@ def start_handover(target: str, role: str) -> None:
     existing = ssh_command(target, "test -s /tmp/homecontrol-touchscreen-test.pids", check=False)
     if existing.returncode == 0:
         raise SystemExit("HomeControl bench already has recorded processes; use restart or switch-role")
+    for executable in ("touchscreen_app.py", "touchscreen_display_bridge.py"):
+        path = f"{REMOTE_ROOT}/10_scripts/{executable}"
+        running = ssh_command(target, f"for pid in $(pgrep -f {shlex.quote(path)} || true); do test \"$pid\" != \"$$\" && echo \"$pid\"; done", check=False)
+        if running.stdout.strip():
+            raise SystemExit(f"HomeControl process already running ({executable}); use stop or restart")
     owners = ssh_command(target, "fuser -s /dev/spidev1.1 /dev/i2c-2 /dev/gpiochip1", check=False)
     if owners.returncode == 0:
         raise SystemExit("display or touch device is already owned; no process was started")
@@ -113,8 +119,10 @@ def stop_handover(target: str) -> None:
 def switch_role(target: str, role: str) -> None:
     ssh_command(target, _stop_command(bridge_only=True))
     ssh_command(target, (
-        f"nohup setsid sudo -n env PYTHONPATH={REMOTE_PYTHONPATH} {REMOTE_PYTHON} {REMOTE_ROOT}/10_scripts/touchscreen_display_bridge.py --role {shlex.quote(role)} --mode orange_pi >> {REMOTE_LOG} 2>&1 & bridge=$!; "
-        "app=$(head -1 /tmp/homecontrol-touchscreen-test.pids); printf '%s\\n%s\\n' \"$app\" \"$bridge\" > /tmp/homecontrol-touchscreen-test.pids"
+        f"nohup setsid sudo -n env HOMECONTROL_TOUCH_LOG=/tmp/homecontrol-touchscreen-events.log PYTHONPATH={REMOTE_PYTHONPATH} {REMOTE_PYTHON} {REMOTE_ROOT}/10_scripts/touchscreen_display_bridge.py --role {shlex.quote(role)} --mode orange_pi >> {REMOTE_LOG} 2>&1 & "
+        "sleep 1; bridge=; for candidate in $(pgrep -f /tmp/homecontrol-touchscreen-test/10_scripts/touchscreen_display_bridge.py || true); do "
+        "if test \"$candidate\" != \"$$\"; then bridge=$(ps -o pgid= -p \"$candidate\" | tr -d ' '); test -n \"$bridge\" && break; fi; done; "
+        "test -n \"$bridge\" || { echo 'bridge process group was not found' >&2; exit 1; }; app=$(head -1 /tmp/homecontrol-touchscreen-test.pids); printf '%s\\n%s\\n' \"$app\" \"$bridge\" > /tmp/homecontrol-touchscreen-test.pids"
     ))
     print(remote_status(target).stdout)
 

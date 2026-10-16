@@ -8,6 +8,7 @@ import asyncio
 import importlib
 import json
 import logging
+import os
 from pathlib import Path
 import resource
 import signal
@@ -23,7 +24,19 @@ RESTART_DELAY_SECONDS = 1.0
 
 
 def _configure_logging() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    stream = logging.StreamHandler()
+    stream.setFormatter(formatter)
+    root.addHandler(stream)
+    log_path = os.getenv("HOMECONTROL_TOUCH_LOG", "/tmp/homecontrol-touchscreen-events.log")
+    try:
+        file_handler = logging.FileHandler(log_path)
+    except OSError:
+        return
+    file_handler.setFormatter(formatter)
+    root.addHandler(file_handler)
 
 
 def _task_result(task: asyncio.Task, name: str) -> str:
