@@ -20,8 +20,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+try:
+    from PIL import Image, ImageDraw, ImageFont
+except ImportError:  # The simulated test environment does not need Pillow.
+    Image = ImageDraw = ImageFont = None
+
 ROOT = Path(__file__).resolve().parents[1]
 LOGGER = logging.getLogger("homecontrol.native_touchscreen")
+FONT_PATHS = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+)
 
 BLACK, WHITE = 0x0000, 0xFFFF
 PANEL, CARD, LINE = 0x10A3, 0x1968, 0x05DF
@@ -83,6 +92,7 @@ class Frame:
     def __init__(self, width: int = 480, height: int = 320, color: int = BLACK):
         self.width, self.height = width, height
         self.data = bytearray(width * height * 2)
+        self._font_cache: dict[int, Any] = {}
         self.fill(color)
 
     def fill(self, color: int) -> None:
@@ -126,13 +136,51 @@ class Frame:
         self.circle(x + w - radius - 1, y + radius, radius, color)
 
     def text(self, x: int, y: int, value: Any, color: int = WHITE, scale: int = 1, limit: int = 50) -> None:
+        value = str(value)[:limit].upper()
+        if Image is not None and ImageDraw is not None and ImageFont is not None:
+            font = self._font_cache.get(scale)
+            if font is None:
+                font_path = next((path for path in FONT_PATHS if Path(path).exists()), None)
+                if font_path:
+                    font = ImageFont.truetype(font_path, max(9, scale * 8))
+                    self._font_cache[scale] = font
+            if font is not None:
+                self._smooth_text(x, y, value, color, font)
+                return
         cursor = x
-        for char in str(value)[:limit].upper():
+        for char in value:
             glyph = GLYPHS.get(char, GLYPHS["?"])
             for row, pixels in enumerate(glyph):
                 for col, pixel in enumerate(pixels):
                     if pixel == "#": self.fill_rect(cursor + col * scale, y + row * scale, scale, scale, color)
             cursor += 6 * scale
+
+    def _smooth_text(self, x: int, y: int, value: str, color: int, font: Any) -> None:
+        if not value:
+            return
+        probe = Image.new("L", (1, 1), 0)
+        probe_draw = ImageDraw.Draw(probe)
+        left, top, right, bottom = probe_draw.textbbox((0, 0), value, font=font)
+        mask = Image.new("L", (right - left + 2, bottom - top + 2), 0)
+        ImageDraw.Draw(mask).text((-left + 1, -top + 1), value, font=font, fill=255)
+        red, green, blue = ((color >> 11) & 0x1F) * 255 // 31, ((color >> 5) & 0x3F) * 255 // 63, (color & 0x1F) * 255 // 31
+        for row in range(mask.height):
+            target_y = y + row
+            if not 0 <= target_y < self.height:
+                continue
+            for column in range(mask.width):
+                target_x = x + column
+                if not 0 <= target_x < self.width:
+                    continue
+                alpha = mask.getpixel((column, row))
+                if not alpha:
+                    continue
+                offset = (target_y * self.width + target_x) * 2
+                existing = int.from_bytes(self.data[offset:offset + 2], "big")
+                old_red, old_green, old_blue = ((existing >> 11) & 0x1F) * 255 // 31, ((existing >> 5) & 0x3F) * 255 // 63, (existing & 0x1F) * 255 // 31
+                blend = alpha / 255
+                mixed = ((round(old_red * (1 - blend) + red * blend) * 31 // 255) << 11) | ((round(old_green * (1 - blend) + green * blend) * 63 // 255) << 5) | (round(old_blue * (1 - blend) + blue * blend) * 31 // 255)
+                self.data[offset:offset + 2] = mixed.to_bytes(2, "big")
 
 
 def inside(x: int, y: int, box: tuple[int, int, int, int]) -> bool:
