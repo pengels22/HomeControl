@@ -7,6 +7,8 @@ import argparse
 import asyncio
 import importlib
 from pathlib import Path
+import json
+import resource
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -37,6 +39,7 @@ async def main() -> None:
     stop = asyncio.Event()
     touch = service.create_touch()
     tasks = []
+    sink = None
     try:
         await renderer.start()
         sink = input_module.CdpTouchSink(renderer.client)
@@ -58,6 +61,26 @@ async def main() -> None:
             await asyncio.gather(*tasks, return_exceptions=True)
         await renderer.stop()
         await display.close()
+        print(json.dumps({
+            "render": {
+                "frames_captured": renderer.metrics.frames_captured,
+                "updates_sent": renderer.metrics.updates_sent,
+                "full_updates": renderer.metrics.full_updates,
+                "changed_pixels": renderer.metrics.changed_pixels,
+                "capture_fps": renderer.metrics.capture_fps,
+                "capture_seconds": renderer.metrics.capture_seconds,
+                "update_seconds": renderer.metrics.update_seconds,
+            },
+            "touch": {
+                "dispatch_count": getattr(sink, "dispatch_count", 0),
+                "dispatch_seconds": getattr(sink, "dispatch_seconds", 0.0),
+            },
+            "process": {
+                "user_cpu_seconds": resource.getrusage(resource.RUSAGE_SELF).ru_utime,
+                "system_cpu_seconds": resource.getrusage(resource.RUSAGE_SELF).ru_stime,
+                "max_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+            },
+        }, indent=2))
 
 
 if __name__ == "__main__":

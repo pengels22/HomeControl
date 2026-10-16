@@ -150,6 +150,8 @@ class CdpTouchSink:
 
     def __init__(self, client):
         self.client = client
+        self.dispatch_count = 0
+        self.dispatch_seconds = 0.0
 
     def open(self) -> None:
         self.client.command("Input.setIgnoreInputEvents", {"ignore": False})
@@ -161,16 +163,20 @@ class CdpTouchSink:
         self._dispatch("touchMove", point)
 
     def release(self, point: TouchPoint | None = None) -> None:
+        started = time.perf_counter()
         self.client.command("Input.dispatchTouchEvent", {
             "type": "touchEnd",
             "touchPoints": [],
             "timestamp": time.time(),
         })
+        self.dispatch_count += 1
+        self.dispatch_seconds += time.perf_counter() - started
 
     def close(self) -> None:
         return None
 
     def _dispatch(self, action: str, point: TouchPoint) -> None:
+        started = time.perf_counter()
         self.client.command("Input.dispatchTouchEvent", {
             "type": action,
             "touchPoints": [{
@@ -183,6 +189,8 @@ class CdpTouchSink:
             }],
             "timestamp": time.time(),
         })
+        self.dispatch_count += 1
+        self.dispatch_seconds += time.perf_counter() - started
 
 
 async def run_touch_input(touch, sink: TouchSink, stop_event: asyncio.Event | None = None) -> None:

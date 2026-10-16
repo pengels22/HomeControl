@@ -27,6 +27,8 @@ READ_ONLY_CHECKS = {
     "service": "systemctl is-active travel-laser-ui.service || true; systemctl is-enabled travel-laser-ui.service || true; systemctl show -p MainPID travel-laser-ui.service",
     "processes": "pgrep -af 'travel-laser-ui|chromium|homecontrol-touchscreen' || true",
     "owners": "fuser -v /dev/spidev1.1 /dev/i2c-2 /dev/gpiochip1 /dev/uinput 2>&1 || true",
+    "resources": "free -h; df -h / /tmp",
+    "dependencies": "printf 'chromium='; command -v chromium || echo missing; /opt/travel-laser-controller/.venv/bin/python - <<'PY'\nfor name in ('spidev', 'gpiod', 'smbus2', 'evdev', 'PIL', 'websocket'):\n    try:\n        __import__(name); print(name + '=available')\n    except Exception:\n        print(name + '=missing')\nPY\nprintf 'uinput='; stat -c 'mode=%a owner=%U group=%G' /dev/uinput 2>/dev/null || echo missing",
 }
 
 
@@ -53,6 +55,11 @@ def run_preflight(target: str = TARGET) -> dict[str, dict[str, object]]:
 
 def preflight_ok(results: dict[str, dict[str, object]]) -> bool:
     return all(int(item["returncode"]) == 0 for name, item in results.items() if name != "manual")
+
+
+def dependencies_ready(results: dict[str, dict[str, object]]) -> bool:
+    output = str(results.get("dependencies", {}).get("stdout", ""))
+    return all(marker in output for marker in ("chromium=/usr", "PIL=available", "websocket=available"))
 
 
 def restore_commands(state: dict[str, object]) -> list[str]:
@@ -91,10 +98,25 @@ def stage(source_root: Path, target: str, remote_root: str) -> None:
         subprocess.run(["scp", "-r", str(source), destination], check=True)
 
 
-def test_handover(target: str, remote_root: str, role: str) -> None:
+def test_handover(target: str, remote_root: str, role: str, dry_run: bool = False) -> None:
+    results = run_preflight(target)
+    if not preflight_ok(results):
+        raise SystemExit("read-only preflight failed; no service was stopped")
+    if dry_run:
+        print(json.dumps({
+            "dry_run": True,
+            "role": role,
+            "remote_root": remote_root,
+            "dependencies_ready": dependencies_ready(results),
+            "would_stop": "travel-laser-ui.service",
+            "would_start": ["touchscreen_app.py", "touchscreen_display_bridge.py"],
+            "would_restore": restore_commands({"service_active": "active", "service_enabled": "enabled"}),
+        }, indent=2))
+        return
     if not sys.argv or "--approve-hardware-handover" not in sys.argv:
         raise SystemExit("test mode requires --approve-hardware-handover")
-    results = run_preflight(target)
+    if not dependencies_ready(results):
+        raise SystemExit("Chromium/Pillow/websocket-client prerequisites are missing; no service was stopped")
     service_lines = str(results["service"]["stdout"]).splitlines()
     state = {
         "service_active": "active" if "active" in service_lines else "inactive",
@@ -132,6 +154,7 @@ def main() -> None:
     parser.add_argument("--remote-root", default=REMOTE_ROOT)
     parser.add_argument("--role", choices=["RCM", "LCM", "SIM"], default="RCM")
     parser.add_argument("--approve-hardware-handover", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     if args.command == "preflight":
         results = run_preflight(args.target)
@@ -142,7 +165,7 @@ def main() -> None:
         stage(args.source_root, args.target, args.remote_root)
         print(f"Staged HomeControl touchscreen files at {args.target}:{args.remote_root}; no service was stopped.")
     elif args.command == "test":
-        test_handover(args.target, args.remote_root, args.role)
+        test_handover(args.target, args.remote_root, args.role, args.dry_run)
     else:
         restore(args.target)
 

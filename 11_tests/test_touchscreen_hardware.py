@@ -256,6 +256,13 @@ def test_preflight_reports_ssh_or_remote_check_failures():
     assert bench.preflight_ok({"identity": {"returncode": 0}, "manual": {"returncode": 0}})
 
 
+def test_bench_handover_requires_renderer_dependencies_but_not_uinput_for_cdp():
+    missing = {"dependencies": {"stdout": "chromium=missing\nPIL=missing\nwebsocket=missing\n"}}
+    ready = {"dependencies": {"stdout": "chromium=/usr/bin/chromium\nPIL=available\nwebsocket=available\nevdev=missing\n"}}
+    assert not bench.dependencies_ready(missing)
+    assert bench.dependencies_ready(ready)
+
+
 @pytest.mark.asyncio
 async def test_browser_renderer_start_capture_and_shutdown_are_reversible(tmp_path, monkeypatch):
     class FakeProcess:
