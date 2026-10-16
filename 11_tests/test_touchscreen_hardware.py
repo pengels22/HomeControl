@@ -183,6 +183,26 @@ async def test_run_touch_input_exercises_consumer_lifecycle_and_browser_sink():
     ]
 
 
+@pytest.mark.asyncio
+async def test_touch_input_closes_sink_when_touch_initialization_fails():
+    class FailingTouch:
+        def __init__(self):
+            self.closed = False
+
+        async def initialize(self):
+            raise OSError("I2C unavailable")
+
+        async def close(self):
+            self.closed = True
+
+    sink = RecordingSink()
+    touch = FailingTouch()
+    with pytest.raises(OSError, match="I2C unavailable"):
+        await input_bridge.run_touch_input(touch, sink, asyncio.Event())
+    assert sink.events == [("open",), ("close",)]
+    assert touch.closed is True
+
+
 def test_rgb565_conversion_uses_big_endian_wire_order():
     assert renderer.rgb888_to_rgb565(bytes([255, 0, 0, 0, 255, 0, 0, 0, 255])) == bytes([
         0xF8, 0x00, 0x07, 0xE0, 0x00, 0x1F,
@@ -246,6 +266,7 @@ def test_restore_commands_only_touch_test_resources_and_original_service_state()
     joined = "; ".join(commands)
     assert "travel-laser-ui.service" in joined
     assert "/tmp/homecontrol-touchscreen-test.pids" in joined
+    assert "pkill -TERM -P" in joined
     assert "gpio" not in joined.lower()
     assert "relay" not in joined.lower()
     assert any("systemctl start travel-laser-ui.service" in command for command in commands)

@@ -38,6 +38,87 @@ def ssh_command(target: str, command: str, check: bool = True) -> subprocess.Com
     return subprocess.run(["ssh", target, "--", command], text=True, capture_output=True, check=check)
 
 
+def remote_status(target: str = TARGET) -> subprocess.CompletedProcess[str]:
+    command = (
+        "printf 'service='; systemctl is-active travel-laser-ui.service || true; "
+        "printf ' enabled='; systemctl is-enabled travel-laser-ui.service || true; echo; "
+        "printf 'processes\\n'; pgrep -af 'homecontrol-touchscreen-test|touchscreen_app|touchscreen_display_bridge|chromium' || true; "
+        "printf 'owners\\n'; fuser -v /dev/spidev1.1 /dev/i2c-2 /dev/gpiochip1 /dev/uinput 2>&1 || true; "
+        "printf 'api\\n'; curl -fsS http://127.0.0.1:8765/api/touchscreen/state?role=SIM 2>/dev/null || true; echo"
+    )
+    return ssh_command(target, command, check=False)
+
+
+def _state_for_start(target: str) -> dict[str, object]:
+    existing = ssh_command(target, f"cat {REMOTE_STATE}", check=False)
+    if existing.returncode == 0:
+        return json.loads(existing.stdout)
+    results = run_preflight(target)
+    if not preflight_ok(results):
+        raise SystemExit("read-only preflight failed; no service was stopped")
+    service_lines = str(results["service"]["stdout"]).splitlines()
+    state = {
+        "service_active": "active" if any(line.strip() == "active" for line in service_lines) else "inactive",
+        "service_enabled": "enabled" if any(line.strip() == "enabled" for line in service_lines) else "disabled",
+    }
+    state_json = json.dumps(state, separators=(",", ":"))
+    ssh_command(target, f"printf '%s' {shlex.quote(state_json)} > {REMOTE_STATE}")
+    return state
+
+
+def _start_command(role: str, remote_root: str) -> str:
+    return (
+        f"nohup setsid env PYTHONPATH={REMOTE_PYTHONPATH} {REMOTE_PYTHON} {remote_root}/10_scripts/touchscreen_app.py > {REMOTE_LOG} 2>&1 & app=$!; "
+        f"nohup setsid sudo -n env PYTHONPATH={REMOTE_PYTHONPATH} {REMOTE_PYTHON} {remote_root}/10_scripts/touchscreen_display_bridge.py --role {shlex.quote(role)} --mode orange_pi >> {REMOTE_LOG} 2>&1 & bridge=$!; "
+        "printf '%s\\n%s\\n' \"$app\" \"$bridge\" > /tmp/homecontrol-touchscreen-test.pids"
+    )
+
+
+def _stop_command(bridge_only: bool = False) -> str:
+    if bridge_only:
+        return (
+            "if test -s /tmp/homecontrol-touchscreen-test.pids; then bridge=$(sed -n '2p' /tmp/homecontrol-touchscreen-test.pids); "
+            "sudo -n kill -TERM \"$bridge\" 2>/dev/null || true; sudo -n pkill -TERM -P \"$bridge\" 2>/dev/null || true; fi"
+        )
+    return (
+        "if test -s /tmp/homecontrol-touchscreen-test.pids; then while read -r pid; do "
+        "sudo -n kill -TERM \"$pid\" 2>/dev/null || true; sudo -n pkill -TERM -P \"$pid\" 2>/dev/null || true; "
+        "done < /tmp/homecontrol-touchscreen-test.pids; sleep 2; while read -r pid; do "
+        "sudo -n kill -KILL \"$pid\" 2>/dev/null || true; sudo -n pkill -KILL -P \"$pid\" 2>/dev/null || true; "
+        "done < /tmp/homecontrol-touchscreen-test.pids; fi; rm -f /tmp/homecontrol-touchscreen-test.pids"
+    )
+
+
+def start_handover(target: str, role: str) -> None:
+    results = run_preflight(target)
+    if not preflight_ok(results) or not dependencies_ready(results):
+        raise SystemExit("preflight or renderer dependency check failed; no process was started")
+    _state_for_start(target)
+    existing = ssh_command(target, "test -s /tmp/homecontrol-touchscreen-test.pids", check=False)
+    if existing.returncode == 0:
+        raise SystemExit("HomeControl bench already has recorded processes; use restart or switch-role")
+    owners = ssh_command(target, "fuser -s /dev/spidev1.1 /dev/i2c-2 /dev/gpiochip1", check=False)
+    if owners.returncode == 0:
+        raise SystemExit("display or touch device is already owned; no process was started")
+    ssh_command(target, "sudo -n systemctl stop travel-laser-ui.service")
+    ssh_command(target, _start_command(role, REMOTE_ROOT))
+    print(remote_status(target).stdout)
+
+
+def stop_handover(target: str) -> None:
+    ssh_command(target, _stop_command())
+    print(remote_status(target).stdout)
+
+
+def switch_role(target: str, role: str) -> None:
+    ssh_command(target, _stop_command(bridge_only=True))
+    ssh_command(target, (
+        f"nohup setsid sudo -n env PYTHONPATH={REMOTE_PYTHONPATH} {REMOTE_PYTHON} {REMOTE_ROOT}/10_scripts/touchscreen_display_bridge.py --role {shlex.quote(role)} --mode orange_pi >> {REMOTE_LOG} 2>&1 & bridge=$!; "
+        "app=$(head -1 /tmp/homecontrol-touchscreen-test.pids); printf '%s\\n%s\\n' \"$app\" \"$bridge\" > /tmp/homecontrol-touchscreen-test.pids"
+    ))
+    print(remote_status(target).stdout)
+
+
 def run_preflight(target: str = TARGET) -> dict[str, dict[str, object]]:
     results = {}
     for name, command in READ_ONLY_CHECKS.items():
@@ -118,26 +199,8 @@ def test_handover(target: str, remote_root: str, role: str, dry_run: bool = Fals
         return
     if not sys.argv or "--approve-hardware-handover" not in sys.argv:
         raise SystemExit("test mode requires --approve-hardware-handover")
-    if not dependencies_ready(results):
-        raise SystemExit("Chromium/Pillow/websocket-client prerequisites are missing; no service was stopped")
-    service_lines = str(results["service"]["stdout"]).splitlines()
-    state = {
-        "service_active": "active" if any(line.strip() == "active" for line in service_lines) else "inactive",
-        "service_enabled": "enabled" if any(line.strip() == "enabled" for line in service_lines) else "disabled",
-        "role": role,
-        "remote_root": remote_root,
-    }
-    state_json = json.dumps(state, separators=(",", ":"))
-    ssh_command(target, f"printf '%s' {shlex.quote(state_json)} > {REMOTE_STATE}")
-    ssh_command(target, "sudo -n systemctl stop travel-laser-ui.service")
-    launch = (
-        f"nohup env PYTHONPATH={REMOTE_PYTHONPATH} {REMOTE_PYTHON} {remote_root}/10_scripts/touchscreen_app.py > {REMOTE_LOG} 2>&1 & "
-        f"echo $! > /tmp/homecontrol-touchscreen-test.pids; "
-        f"nohup sudo -n env PYTHONPATH={REMOTE_PYTHONPATH} {REMOTE_PYTHON} {remote_root}/10_scripts/touchscreen_display_bridge.py --role {shlex.quote(role)} --mode orange_pi >> {REMOTE_LOG} 2>&1 & "
-        f"echo $! >> /tmp/homecontrol-touchscreen-test.pids"
-    )
-    ssh_command(target, launch)
-    print(json.dumps({"state": state, "log": REMOTE_LOG, "restore": "python3 10_scripts/travel_laser_bench.py restore"}, indent=2))
+    start_handover(target, role)
+    print(json.dumps({"log": REMOTE_LOG, "restore": "python3 10_scripts/travel_laser_bench.py restore"}, indent=2))
 
 
 def restore(target: str) -> None:
@@ -151,7 +214,7 @@ def restore(target: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="HomeControl Travel Laser bench workflow")
-    parser.add_argument("command", choices=["preflight", "stage", "test", "restore"])
+    parser.add_argument("command", choices=["preflight", "stage", "test", "status", "start", "stop", "restart", "switch-role", "restore"])
     parser.add_argument("--target", default=TARGET)
     parser.add_argument("--source-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--remote-root", default=REMOTE_ROOT)
@@ -169,6 +232,17 @@ def main() -> None:
         print(f"Staged HomeControl touchscreen files at {args.target}:{args.remote_root}; no service was stopped.")
     elif args.command == "test":
         test_handover(args.target, args.remote_root, args.role, args.dry_run)
+    elif args.command == "status":
+        print(remote_status(args.target).stdout)
+    elif args.command == "start":
+        start_handover(args.target, args.role)
+    elif args.command == "stop":
+        stop_handover(args.target)
+    elif args.command == "restart":
+        stop_handover(args.target)
+        start_handover(args.target, args.role)
+    elif args.command == "switch-role":
+        switch_role(args.target, args.role)
     else:
         restore(args.target)
 

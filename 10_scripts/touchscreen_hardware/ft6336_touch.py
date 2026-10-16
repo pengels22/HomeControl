@@ -35,10 +35,14 @@ class FT6336Touch:
             await self._recover_bus(); return None
         self._read_failures = 0; count = data[0] & 0x0F
         if count == 0:
-            if self._was_down: self._was_down = False; return TouchEvent("up", ())
+            if self._was_down:
+                self._was_down = False
+                LOGGER.info("FT6336 event kind=up points=none")
+                return TouchEvent("up", ())
             return None
         raw_x = ((data[1] & 0x0F) << 8) | data[2]; raw_y = ((data[3] & 0x0F) << 8) | data[4]
         x, y = self._transform(raw_x, raw_y); kind = "move" if self._was_down else "down"; self._was_down = True
+        LOGGER.info("FT6336 event kind=%s raw=(%s,%s) transformed=(%s,%s)", kind, raw_x, raw_y, x, y)
         return TouchEvent(kind, (TouchPoint(0, x, y),))
 
     async def close(self) -> None:

@@ -7,11 +7,15 @@ then owns DOM hit-testing, scrolling, pointer capture, sliders, and gestures.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from typing import Protocol
 
 from .interfaces import TouchEvent, TouchPoint
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class TouchSink(Protocol):
@@ -31,6 +35,7 @@ class TouchEventBridge:
     active_point: TouchPoint | None = None
 
     def handle(self, event: TouchEvent) -> bool:
+        LOGGER.info("touch bridge event kind=%s points=%s", event.kind, event.points)
         if event.kind == "down" and event.points:
             point = event.points[0]
             if self.active_id is not None:
@@ -157,18 +162,22 @@ class CdpTouchSink:
         self.client.command("Input.setIgnoreInputEvents", {"ignore": False})
 
     def press(self, point: TouchPoint) -> None:
+        LOGGER.info("CDP dispatch type=touchStart point=(%s,%s)", point.x, point.y)
         self._dispatch("touchStart", point)
 
     def move(self, point: TouchPoint) -> None:
+        LOGGER.info("CDP dispatch type=touchMove point=(%s,%s)", point.x, point.y)
         self._dispatch("touchMove", point)
 
     def release(self, point: TouchPoint | None = None) -> None:
+        LOGGER.info("CDP dispatch type=touchEnd point=%s", point)
         started = time.perf_counter()
-        self.client.command("Input.dispatchTouchEvent", {
+        result = self.client.command("Input.dispatchTouchEvent", {
             "type": "touchEnd",
             "touchPoints": [],
             "timestamp": time.time(),
         })
+        LOGGER.info("CDP acknowledgment type=touchEnd result=%s", result)
         self.dispatch_count += 1
         self.dispatch_seconds += time.perf_counter() - started
 
@@ -177,7 +186,7 @@ class CdpTouchSink:
 
     def _dispatch(self, action: str, point: TouchPoint) -> None:
         started = time.perf_counter()
-        self.client.command("Input.dispatchTouchEvent", {
+        result = self.client.command("Input.dispatchTouchEvent", {
             "type": action,
             "touchPoints": [{
                 "x": point.x,
@@ -189,6 +198,7 @@ class CdpTouchSink:
             }],
             "timestamp": time.time(),
         })
+        LOGGER.info("CDP acknowledgment type=%s result=%s", action, result)
         self.dispatch_count += 1
         self.dispatch_seconds += time.perf_counter() - started
 
@@ -198,13 +208,15 @@ async def run_touch_input(touch, sink: TouchSink, stop_event: asyncio.Event | No
 
     bridge = TouchEventBridge(sink)
     sink.open()
-    await touch.initialize()
     try:
+        await touch.initialize()
+        LOGGER.info("touch reader initialized")
         while stop_event is None or not stop_event.is_set():
             event = await touch.read_event()
             if event is not None:
                 bridge.handle(event)
     finally:
+        LOGGER.info("touch reader shutting down")
         bridge.cancel()
         await touch.close()
         sink.close()
