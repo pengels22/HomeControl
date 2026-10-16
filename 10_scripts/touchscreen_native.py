@@ -297,69 +297,83 @@ class NativeUI:
 
     def _status(self, frame: Frame) -> None:
         module, health, settings = self.state.get("module", {}), self.state.get("health", {}), self.state.get("settings", {})
-        frame.text(12, 78, module.get("name", "MODULE"), CYAN, 2); frame.text(12, 105, health.get("status", "UNAVAILABLE"), WARN, 2)
+        self._page_heading(frame, "STATUS")
+        frame.rounded_rect(16, 82, 448, 218, 14, CARD, LINE)
+        status = str(health.get("status", "UNAVAILABLE")); status_color = GOOD if status == "SIMULATED" else WARN
+        frame.circle(38, 104, 6, status_color); frame.text(52, 98, module.get("name", "MODULE"), WHITE, 2); frame.text(330, 101, status, status_color, 1)
         rows = [("ROLE", module.get("role", "UNKNOWN")), ("IDENTITY", module.get("device_id", "UNKNOWN")), ("HEARTBEAT", health.get("heartbeat", "UNKNOWN")), ("SIMULATION", module.get("simulation", "UNKNOWN")), ("OUTPUTS", module.get("physical_outputs_enabled", "UNKNOWN")), ("PROFILE", settings.get("hardware_profile", "UNKNOWN"))]
         for i, (label, value) in enumerate(rows):
-            y = 140 + i * 27; frame.text(16, y, label, MUTED); frame.text(180, y, str(value), WHITE)
+            y = 132 + i * 25; frame.text(30, y, label, MUTED); frame.text(170, y, str(value), WHITE)
+            if i < len(rows) - 1: frame.fill_rect(28, y + 18, 424, 1, PANEL)
+
+    def _page_heading(self, frame: Frame, title: str) -> None:
+        frame.text(100, 51, title, CYAN, 2)
 
     def _relays(self, frame: Frame, title: str = "RELAYS", items: list[dict[str, Any]] | None = None) -> None:
-        frame.text(12, 75, title, CYAN, 2); items = items if items is not None else self.state.get("relays", [])
+        self._page_heading(frame, title); items = items if items is not None else self.state.get("relays", [])
         if title == "RELAYS" and self.role == "RCM":
             for index, label in enumerate(("1-8", "9-16", "17-24", "25-32")):
-                x = 10 + index * 117; color = CYAN if index == self.bank else CARD; frame.fill_rect(x, 100, 110, 28, color); frame.text(x + 29, 110, label, BLACK if index == self.bank else WHITE)
+                x = 10 + index * 117; color = CYAN if index == self.bank else CARD
+                frame.rounded_rect(x, 82, 110, 27, 7, color, LINE); frame.text(x + 29, 91, label, BLACK if index == self.bank else WHITE)
             items = [item for item in items if (int(item.get("position", 1)) - 1) // 8 == self.bank]
-            start = 138
-        else: start = 102
+            start = 118
+        else: start = 82
         for index, item in enumerate(items[:8]):
             y = start + index * 22
-            frame.fill_rect(10, y, 460, 19, CARD)
-            frame.text(18, y + 6, item.get("name", "UNNAMED"), WHITE)
+            frame.rounded_rect(12, y, 456, 19, 6, CARD, LINE)
+            frame.text(24, y + 5, item.get("name", "UNNAMED"), WHITE)
             locked = bool(item.get("lockout"))
             if locked:
-                frame.text(300, y + 6, "LOCKED", WARN)
+                frame.text(300, y + 5, "LOCKED", WARN)
             track = GOOD if item.get("on") and not locked else MUTED
-            frame.pill(420, y + 3, 38, 13, track)
-            frame.circle(426 if item.get("on") and not locked else 451, y + 9, 5, WHITE)
+            frame.pill(420, y + 3, 38, 13, track); frame.circle(426 if item.get("on") and not locked else 451, y + 9, 5, WHITE)
 
     def _lights(self, frame: Frame) -> None:
-        frame.text(12, 78, "LIGHTS", CYAN, 2)
+        self._page_heading(frame, "LIGHTS")
         for i, label in enumerate(("DIMMERS", "NON-DIMMERS")):
-            x = 16 + i * 232; frame.fill_rect(x, 120, 216, 64, CARD); frame.rect(x, 120, 216, 64, LINE); frame.text(x + 34, 145, label, WHITE, 2)
+            x = 16 + i * 232; frame.rounded_rect(x, 92, 216, 110, 14, CARD, LINE)
+            self._home_icon(frame, x + 108, 124, 1 if i == 0 else 0)
+            frame.text(x + 31, 168, label, WHITE, 2)
 
     def _dimmers(self, frame: Frame) -> None:
-        frame.text(12, 75, "DIMMERS", CYAN, 2)
+        self._page_heading(frame, "DIMMERS")
         for index, item in enumerate(self.state.get("dimmers", [])):
-            y = 104 + index * 26
+            y = 82 + index * 26
             percent = self.drag_percent if self.drag_channel == item.get("channel") else int(item.get("percent", 0))
-            frame.text(12, y + 6, item.get("name", "UNNAMED"), WHITE)
-            frame.fill_rect(145, y + 8, 260, 6, MUTED)
-            frame.fill_rect(145, y + 8, int(260 * percent / 100), 6, CYAN)
-            frame.circle(145 + int(260 * percent / 100), y + 11, 7, WHITE)
-            frame.text(420, y + 6, f"{percent}%", WHITE)
+            frame.rounded_rect(12, y, 456, 22, 7, CARD, LINE)
+            frame.text(24, y + 6, item.get("name", "UNNAMED"), WHITE)
+            frame.fill_rect(145, y + 9, 250, 5, MUTED); frame.fill_rect(145, y + 9, int(250 * percent / 100), 5, CYAN)
+            frame.circle(145 + int(250 * percent / 100), y + 11, 6, WHITE); frame.text(412, y + 6, f"{percent}%", WHITE)
 
     def _network(self, frame: Frame) -> None:
-        frame.text(12, 78, "NETWORK", CYAN, 2); network = self.state.get("network", {})
+        self._page_heading(frame, "NETWORK"); network = self.state.get("network", {})
+        frame.rounded_rect(16, 82, 448, 218, 14, CARD, LINE)
         for i, (label, key) in enumerate((("HOST", "hostname"), ("IPV4", "ipv4"), ("LINK", "link"), ("HCM", "hcm"), ("SYNC", "last_sync"))):
-            y = 118 + i * 28; frame.text(18, y, label, MUTED); frame.text(150, y, network.get(key, "UNKNOWN"), WHITE)
+            y = 104 + i * 34; frame.text(30, y, label, MUTED); frame.text(150, y, network.get(key, "UNKNOWN"), WHITE)
+            if i < 4: frame.fill_rect(28, y + 20, 424, 1, PANEL)
 
     def _settings(self, frame: Frame) -> None:
-        frame.text(12, 78, "SETTINGS", CYAN, 2); settings = self.state.get("settings", {})
+        self._page_heading(frame, "SETTINGS"); settings = self.state.get("settings", {})
+        frame.rounded_rect(16, 82, 448, 218, 14, CARD, LINE)
         rows = [("TIMEOUT", f"{settings.get('inactivity_seconds', 10)} SEC"), ("BRIGHTNESS", f"{settings.get('display_brightness', 'UNKNOWN')}%"), ("ROLE", settings.get("role", "UNKNOWN")), ("SIMULATION", settings.get("simulation", "UNKNOWN")), ("PROFILE", settings.get("hardware_profile", "UNKNOWN"))]
         for i, (label, value) in enumerate(rows):
-            y = 120 + i * 30
-            frame.text(18, y, label, MUTED)
+            y = 100 + i * 34
+            frame.text(30, y, label, MUTED)
             if i == 0:
-                frame.fill_rect(190, y - 5, 58, 24, CARD); frame.rect(190, y - 5, 58, 24, LINE); frame.text(202, y + 2, value, WHITE)
-                frame.fill_rect(258, y - 5, 32, 24, PANEL); frame.rect(258, y - 5, 32, 24, LINE); frame.text(270, y + 2, "-", WHITE)
-                frame.fill_rect(298, y - 5, 32, 24, PANEL); frame.rect(298, y - 5, 32, 24, LINE); frame.text(310, y + 2, "+", WHITE)
+                frame.rounded_rect(190, y - 5, 58, 24, 6, CARD, LINE); frame.text(202, y + 2, value, WHITE)
+                frame.rounded_rect(258, y - 5, 32, 24, 6, PANEL, LINE); frame.text(270, y + 2, "-", WHITE)
+                frame.rounded_rect(298, y - 5, 32, 24, 6, PANEL, LINE); frame.text(310, y + 2, "+", WHITE)
             else:
                 frame.text(190, y, value, WHITE)
-        frame.text(18, 275, "TIMEOUT ONLY", WARN)
+            if i < len(rows) - 1: frame.fill_rect(28, y + 20, 424, 1, PANEL)
+        frame.text(30, 278, "TIMEOUT ONLY", WARN)
 
     def _rooms(self, frame: Frame) -> None:
-        frame.text(12, 78, "RMC DATA", CYAN, 2)
+        self._page_heading(frame, "RMC DATA")
         for index, room in enumerate(self.state.get("rooms", [])[:5]):
-            y = 112 + index * 32; frame.text(16, y, room.get("name", "ROOM"), WHITE); frame.text(180, y, f"T {room.get('temperature_f', 'UNAVAILABLE')}", MUTED); frame.text(330, y, f"H {room.get('humidity_pct', 'UNAVAILABLE')}", MUTED)
+            y = 82 + index * 46; frame.rounded_rect(12, y, 456, 40, 9, CARD, LINE)
+            frame.text(24, y + 7, room.get("name", "ROOM"), WHITE); frame.text(24, y + 24, "OFFLINE" if not room.get("online") else "ONLINE", WARN if not room.get("online") else GOOD)
+            frame.text(180, y + 8, f"T {room.get('temperature_f', 'UNAVAILABLE')}", MUTED); frame.text(330, y + 8, f"H {room.get('humidity_pct', 'UNAVAILABLE')}", MUTED)
 
     async def touch(self, event: Any) -> None:
         if not event.points: return
@@ -368,7 +382,7 @@ class NativeUI:
         if event.kind == "down":
             if self.page != "home" and y < 66: self.page = "home"; await self.draw(); return
             if self.page == "dimmers":
-                index = (y - 104) // 26
+                index = (y - 82) // 26
                 items = self.state.get("dimmers", [])
                 if 0 <= index < len(items): self.drag_channel = items[index].get("channel"); self.drag_percent = max(0, min(100, int((x - 145) * 100 / 260))); await self.draw(); return
             await self._tap(x, y)
@@ -384,7 +398,7 @@ class NativeUI:
             if self.role == "RCM" and 100 <= y < 128:
                 self.bank = max(0, min(3, (x - 10) // 117)); await self.command({"kind": "bank_select", "bank": self.bank}); return
             items = [i for i in self.state.get("relays", []) if self.role != "RCM" or (int(i.get("position", 1)) - 1) // 8 == self.bank]
-            index = (y - (138 if self.role == "RCM" else 102)) // 22
+            index = (y - (118 if self.role == "RCM" else 82)) // 22
             if 0 <= index < len(items) and not items[index].get("lockout"): await self.command({"kind": "relay", "channel": items[index].get("channel"), "value": not items[index].get("on", False)}); return
         elif self.page == "lights": self.page = "dimmers" if x < 240 else "non-dimmers"
         elif self.page == "settings" and 110 <= y < 150:
