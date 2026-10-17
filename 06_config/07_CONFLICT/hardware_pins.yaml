@@ -1,33 +1,40 @@
-schema_version: 1
-module_type: CONFLICT
-verification:
-  status: DESIGN_APPROVED
-  note: Conflict Manager assignments are processor-specific and monitoring remains disabled pending electrical commissioning.
-physical_output_enabled: false
-processor:
-  model: Orange Pi Zero 2W
-  os: Armbian
-signals:
-  fire_alarm_s:
-    physical_pin: 38
-    soc_gpio: PI4
-    soc_gpio_number: 260
-    gpiochip: /dev/gpiochip1
-    line: 260
-    normal_level: low
-    alarm_level: high
-    debounce_ms: 250
-    verification: DESIGN_APPROVED
-  fire_alarm_P:
-    physical_pin: 40
-    soc_gpio: PI3
-    soc_gpio_number: 259
-    gpiochip: /dev/gpiochip1
-    line: 259
-    normal_level: low
-    alarm_level: high
-    debounce_ms: 250
-    verification: DESIGN_APPROVED
-monitoring:
-  enabled: false
-  reason: Physical wiring and commissioning remain separately gated.
+{
+  "schema_version": 1,
+  "module_type": "CONFLICT",
+  "verification": {
+    "status": "DESIGN_APPROVED",
+    "note": "Conflict Manager assignments are processor-specific and monitoring remains disabled pending electrical commissioning."
+  },
+  "physical_output_enabled": false,
+  "processor": {"model": "Orange Pi Zero 2W", "os": "Armbian"},
+  "signals": {
+    "fire_alarm_s": {
+      "physical_pin": 38,
+      "soc_gpio": "PI4",
+      "soc_gpio_number": 260,
+      "gpiochip": "/dev/gpiochip1",
+      "line": 260,
+      "normal_level": "low",
+      "alarm_level": "high",
+      "debounce_ms": 250,
+      "wiring": {"no": "3.3V", "nc": "GND", "com": "GPIO"},
+      "verification": "DESIGN_APPROVED"
+    },
+    "fire_alarm_P": {
+      "physical_pin": 40,
+      "soc_gpio": "PI3",
+      "soc_gpio_number": 259,
+      "gpiochip": "/dev/gpiochip1",
+      "line": 259,
+      "normal_level": "low",
+      "alarm_level": "high",
+      "debounce_ms": 250,
+      "wiring": {"no": "3.3V", "nc": "GND", "com": "GPIO"},
+      "verification": "DESIGN_APPROVED"
+    }
+  },
+  "monitoring": {
+    "enabled": false,
+    "reason": "Physical wiring and commissioning remain separately gated."
+  }
+}

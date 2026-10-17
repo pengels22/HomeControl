@@ -1,4 +1,5 @@
 """Optional read-only GPIO inputs for the independent Conflict supervisor."""
+import json
 import time
 
 
@@ -38,9 +39,31 @@ class DebouncedLevel:
         return self.stable
 
 
+def _load_manifest_signals(path):
+    """Load the JSON-compatible YAML hardware manifest without PyYAML."""
+    with open(path, encoding='utf-8') as stream:
+        data = json.load(stream)
+    signals = data.get('signals')
+    if not isinstance(signals, dict):
+        raise GPIOInputError('hardware profile has no signals mapping')
+    for name in ('fire_alarm_s', 'fire_alarm_P'):
+        entry = signals.get(name)
+        if not isinstance(entry, dict) or int(entry.get('debounce_ms', 0)) != 250:
+            raise GPIOInputError('invalid fire input manifest for {}'.format(name))
+        if str(entry.get('normal_level')).lower() != 'low' or str(entry.get('alarm_level')).lower() != 'high':
+            raise GPIOInputError('invalid polarity for {}'.format(name))
+        if entry.get('wiring') != {'no': '3.3V', 'nc': 'GND', 'com': 'GPIO'}:
+            raise GPIOInputError('invalid SPDT wiring for {}'.format(name))
+    return signals
+
+
 class GPIOInputMonitor:
     def __init__(self, config):
         self.config = config or {}
+        profile = self.config.get('hardware_profile')
+        if profile:
+            self.config = dict(self.config)
+            self.config.update(_load_manifest_signals(profile))
         self.enabled = bool(self.config.get('enabled', False))
         self.readers = {}
         debounce_ms = int(self.config.get('debounce_ms', 250))
@@ -67,19 +90,20 @@ class GPIOInputMonitor:
         if not self.enabled:
             return {name: {'state': 'unknown', 'health': 'disabled'} for name in ('fire_alarm_s', 'fire_alarm_P')}
         result = {}
+        sampled_at = time.time()
         for name, (request, line, active_level) in self.readers.items():
             try:
                 raw = request.get_value(line)
                 raw_level = bool(getattr(raw, 'value', raw))
                 stable = self.debouncers[name].update(raw_level, now)
                 if stable is None:
-                    result[name] = {'state': 'unknown', 'health': 'debouncing', 'raw': raw_level}
+                    result[name] = {'state': 'unknown', 'health': 'debouncing', 'raw': raw_level, 'sampled_at': sampled_at}
                 elif name == 'fire_alarm_s':
-                    result[name] = {'state': 'active' if stable == bool(active_level) else 'normal', 'health': 'ok', 'raw': raw_level}
+                    result[name] = {'state': 'active' if stable == bool(active_level) else 'normal', 'health': 'ok', 'raw': raw_level, 'sampled_at': sampled_at}
                 else:
-                    result[name] = {'state': 'present' if stable == bool(active_level) else 'absent', 'health': 'ok', 'raw': raw_level}
+                    result[name] = {'state': 'present' if stable == bool(active_level) else 'absent', 'health': 'ok', 'raw': raw_level, 'sampled_at': sampled_at}
             except Exception as exc:
-                result[name] = {'state': 'unknown', 'health': 'fault', 'error': str(exc)}
+                result[name] = {'state': 'unknown', 'health': 'fault', 'error': str(exc), 'sampled_at': sampled_at}
         return result
 
     def close(self):

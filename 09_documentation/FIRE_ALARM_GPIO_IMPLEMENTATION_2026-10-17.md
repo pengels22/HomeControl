@@ -7,6 +7,13 @@ Both controllers use the exact case-sensitive identifiers `fire_alarm_s` and
 `fire_alarm_P`, with a 250 ms debounce. An unavailable or faulty input is
 reported as `UNKNOWN`; it is never treated as normal.
 
+The sensing contacts use the approved independent three-wire arrangement on
+each processor: NO to that processor's 3.3 V, NC to that processor's GND, and
+COM to its GPIO input. The supplies and grounds are not shared between the
+Jetson and Orange Pi. Contact changeover can briefly float COM; debounce is
+retained, but it is not open-wire detection or a substitute for input
+protection and wiring supervision.
+
 ## Approved mappings
 
 | Controller | Sensor | Header pin | SoC/Linux mapping | HIGH means |
@@ -18,7 +25,9 @@ reported as `UNKNOWN`; it is never treated as normal.
 
 The HCM mappings were checked read-only with `gpioinfo`; the Conflict lines
 were also present and unused during read-only inspection. No pinmux, overlay,
-service, or live configuration was changed.
+service, or live configuration was changed. The application loads these
+values from the hardware manifests; the Conflict heartbeat installer copies
+its manifest to the configured local path.
 
 ## Behavior
 

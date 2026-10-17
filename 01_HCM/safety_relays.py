@@ -4,10 +4,12 @@ import asyncio
 import time
 from dataclasses import dataclass
 from importlib import import_module
+from pathlib import Path
 from typing import Any
 
 common_global_config = import_module('07_servises.common.global_config')
 physical_drivers = import_module('07_servises.common.physical_drivers')
+fire_alarm_config = import_module('07_servises.common.fire_alarm_config')
 
 
 @dataclass
@@ -67,10 +69,10 @@ class SimulatedSafetyRelayBackend:
 class LinuxSafetyInputBackend:
     """Explicit read-only Jetson GPIO backend for the two safety inputs."""
 
-    def __init__(self):
+    def __init__(self, signals: dict[str, dict[str, Any]]):
         self.inputs = {
-            'fire_alarm_s': physical_drivers.LinuxGPIOInputTransport('/dev/gpiochip0', 159, 'homecontrol-fire-alarm-s'),
-            'fire_alarm_P': physical_drivers.LinuxGPIOInputTransport('/dev/gpiochip0', 158, 'homecontrol-fire-alarm-P'),
+            name: physical_drivers.LinuxGPIOInputTransport(entry['gpiochip'], int(entry['line']), 'homecontrol-' + name)
+            for name, entry in signals.items()
         }
 
     def read(self, relay: SafetyRelay) -> bool:
@@ -88,14 +90,21 @@ class LinuxSafetyInputBackend:
 
 class HCMSafetyRelayController:
     @classmethod
-    def from_linux(cls, globals_=None):
-        return cls(backend=LinuxSafetyInputBackend(), globals_=globals_)
+    def from_linux(cls, globals_=None, hardware_profile=None):
+        signals = cls.load_signal_config(hardware_profile)
+        return cls(backend=LinuxSafetyInputBackend(signals), globals_=globals_, hardware_profile=hardware_profile)
 
-    def __init__(self, backend: SimulatedSafetyRelayBackend | None = None, globals_=None):
+    @staticmethod
+    def load_signal_config(hardware_profile=None):
+        path = hardware_profile or Path(__file__).resolve().parents[1] / '06_config' / '01_HCM' / 'hardware_pins.yaml'
+        return fire_alarm_config.load_fire_alarm_signals(path)
+
+    def __init__(self, backend: SimulatedSafetyRelayBackend | None = None, globals_=None, hardware_profile=None):
         self.globals = globals_ or common_global_config.load_global_config('HCM')
         self.backend = backend or SimulatedSafetyRelayBackend()
-        fire_s = SafetyRelay('fire_alarm_s', gpio='/dev/gpiochip0:159', board_pin=38, direction='input', lockout_exempt=True)
-        fire_p = SafetyRelay('fire_alarm_P', gpio='/dev/gpiochip0:158', board_pin=40, direction='input', lockout_exempt=True)
+        signals = self.load_signal_config(hardware_profile)
+        fire_s = SafetyRelay('fire_alarm_s', gpio='%s:%s' % (signals['fire_alarm_s']['gpiochip'], signals['fire_alarm_s']['line']), board_pin=int(signals['fire_alarm_s']['physical_pin']), direction='input', lockout_exempt=True)
+        fire_p = SafetyRelay('fire_alarm_P', gpio='%s:%s' % (signals['fire_alarm_P']['gpiochip'], signals['fire_alarm_P']['line']), board_pin=int(signals['fire_alarm_P']['physical_pin']), direction='input', lockout_exempt=True)
         self.relays = {
             'fire_alarm_s': fire_s,
             'fire_alarm_P': fire_p,

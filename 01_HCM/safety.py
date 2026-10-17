@@ -158,6 +158,10 @@ class SafetyController:
         self.ac_power_present = present
         self.ac_power_fault = False
         await self.heartbeat.fault('fire_alarm_P_fault', None)
+        await self.heartbeat.fault(
+            'fire_alarm_P_power_loss',
+            'smoke alarm AC supply absent' if not present else None,
+        )
         if changed:
             await self.heartbeat.status('fire_alarm_P', 'present' if present else 'absent')
         return {'state': 'present' if present else 'absent', 'fault': False, 'changed': changed, 'sampled_at': sample_time}
