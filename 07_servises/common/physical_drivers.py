@@ -30,20 +30,28 @@ class I2CTransport(Protocol):
 class MockI2CTransport:
     registers: dict[tuple[int, int], int] = field(default_factory=dict)
     operations: list[dict[str, Any]] = field(default_factory=list)
+    max_operations: int | None = 10_000
+    operation_count: int = 0
     fail_reads: bool = False
     fail_writes: bool = False
+
+    def _record(self, operation: dict[str, Any]) -> None:
+        self.operation_count += 1
+        if self.max_operations is not None and len(self.operations) >= self.max_operations:
+            self.operations.pop(0)
+        self.operations.append(operation)
 
     def read_byte_data(self, address: int, register: int) -> int:
         if self.fail_reads:
             raise HardwareTransportError("mock I2C read failure")
-        self.operations.append({"op": "read", "address": address, "register": register})
+        self._record({"op": "read", "address": address, "register": register})
         return self.registers.get((address, register), 0)
 
     def write_byte_data(self, address: int, register: int, value: int) -> None:
         if self.fail_writes:
             raise HardwareTransportError("mock I2C write failure")
         value &= 0xFF
-        self.operations.append({"op": "write", "address": address, "register": register, "value": value})
+        self._record({"op": "write", "address": address, "register": register, "value": value})
         self.registers[(address, register)] = value
 
     def write_i2c_block_data(self, address: int, register: int, values: list[int]) -> None:

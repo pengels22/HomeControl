@@ -56,3 +56,11 @@ def test_lab1_bundle_contains_production_classes_and_only_mock_transports():
     assert isinstance(bundle['lcm_pwm'], drivers.PCA9685Driver)
     assert isinstance(bundle['i2c_transport'], drivers.MockI2CTransport)
     assert bundle['i2c_transport'].operations == []
+
+
+def test_mock_i2c_retains_bounded_diagnostics_but_counts_all_operations():
+    transport = drivers.MockI2CTransport(max_operations=2)
+    for index in range(5):
+        transport.write_byte_data(0x20, index, index)
+    assert len(transport.operations) == 2
+    assert transport.operation_count == 5
