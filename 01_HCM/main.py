@@ -30,7 +30,17 @@ async def hvac_damper(room, open_: bool):
     # Spring-open/power-close actuator: relay OFF=open, ON=closed.
     await command_logical(room.damper_logical_device, {'op':'set_relay','value':not open_})
 
-safety_relays = HCMSafetyRelayController()
+def build_safety_relays():
+    if settings.safety_input_backend == 'simulated':
+        return HCMSafetyRelayController()
+    if settings.safety_input_backend == 'linux':
+        return HCMSafetyRelayController.from_linux()
+    raise RuntimeError('HCM_SAFETY_INPUT_BACKEND must be simulated or linux')
+
+
+# Physical GPIO monitoring is opt-in and remains disabled by the default
+# simulated backend until wiring and pinmux commissioning is approved.
+safety_relays = build_safety_relays()
 hvac = HVACController(hvac_output, hvac_damper)
 safety = SafetyController(hvac, safety_relays=safety_relays)
 rules = RulesEngine()

@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     module_host: str = '0.0.0.0'
     module_port: int = hcm_globals.API_Module_Port
     update_port: int = hcm_globals.API_Update_Port
-    database_url: str = 'postgresql://homecontrol:homecontrol-dev@127.0.0.1:5432/homecontrol'
+    database_url: str | None = None
     config_root: Path = Path('06_config')
     dev_mode: bool = hcm_globals.HCM_Dev_Mode
     tls_enabled: bool = hcm_globals.HCM_TLS_Enabled
@@ -44,5 +44,6 @@ class Settings(BaseSettings):
     auth_session_ttl_s: int = ms_to_s(hcm_globals.Auth_Session_TTL)
     host_network_status_file: Path | None = Path('/var/lib/homecontrol/.state/host-network-status.json')
     storage_root: Path = Path('/var/lib/homecontrol')
+    safety_input_backend: str = 'simulated'
 
 settings = Settings()

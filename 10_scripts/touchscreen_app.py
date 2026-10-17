@@ -60,10 +60,14 @@ class HcmAuthoritativeTouchscreenAdapter:
         self.role = role
         self.base_url = os.environ["HOMECONTROL_HCM_API_URL"].rstrip("/")
         self.token = os.environ.get("HOMECONTROL_HCM_TOKEN", "")
+        if not self.token:
+            raise RuntimeError("production touchscreen mode requires HOMECONTROL_HCM_TOKEN")
         try:
             self.logical_map = json.loads(os.environ.get("HOMECONTROL_TOUCHSCREEN_LOGICAL_MAP", "{}"))
         except json.JSONDecodeError as exc:
             raise RuntimeError("HOMECONTROL_TOUCHSCREEN_LOGICAL_MAP must be JSON") from exc
+        if not isinstance(self.logical_map, dict) or not self.logical_map:
+            raise RuntimeError("production touchscreen mode requires logical bindings")
 
     def _request(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"}
@@ -223,10 +227,13 @@ class SimulatedTouchscreenAdapter:
         self.state["bank_selector"].update({"physical_bank": bank, "physical_selector_authoritative": True, "effective_bank": bank, "source": "physical"})
 
 
-if os.getenv("HOMECONTROL_HCM_API_URL"):
+TOUCHSCREEN_MODE = os.getenv("HOMECONTROL_TOUCHSCREEN_MODE", "simulation").lower()
+if TOUCHSCREEN_MODE == "production":
     adapters = {role: HcmAuthoritativeTouchscreenAdapter(role) for role in ROLE_PAGES}
-else:
+elif TOUCHSCREEN_MODE == "simulation":
     adapters = {role: SimulatedTouchscreenAdapter(role) for role in ROLE_PAGES}
+else:
+    raise RuntimeError("HOMECONTROL_TOUCHSCREEN_MODE must be simulation or production")
 app = FastAPI(title="HomeControl Shared Touchscreen", version="preview")
 app.mount("/assets", StaticFiles(directory=UI_ROOT), name="touchscreen-assets")
 

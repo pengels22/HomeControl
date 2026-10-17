@@ -43,6 +43,21 @@ def test_simulated_service_never_opens_hardware_nodes():
     assert service.create_touch() is None
 
 
+def test_native_production_api_requires_authenticated_hcm_and_logical_bindings(monkeypatch):
+    monkeypatch.delenv("HOMECONTROL_HCM_API_URL", raising=False)
+    monkeypatch.delenv("HOMECONTROL_HCM_TOKEN", raising=False)
+    monkeypatch.delenv("HOMECONTROL_TOUCHSCREEN_LOGICAL_MAP", raising=False)
+    with pytest.raises(RuntimeError, match="requires HCM URL"):
+        native.api_client_for_mode("production")
+
+    monkeypatch.setenv("HOMECONTROL_HCM_API_URL", "https://hcm.test/api/v1")
+    monkeypatch.setenv("HOMECONTROL_HCM_TOKEN", "test-token")
+    monkeypatch.setenv("HOMECONTROL_TOUCHSCREEN_LOGICAL_MAP", '{"RCM:A1":"relay-a1"}')
+    client = native.api_client_for_mode("production")
+    assert client.token == "test-token"
+    assert client.logical_map == {"RCM:A1": "relay-a1"}
+
+
 def test_native_renderer_draws_shared_frame_without_browser():
     class Display:
         width = 480

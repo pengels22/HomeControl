@@ -455,10 +455,6 @@ $('login-form').addEventListener('submit',login);$('refresh').addEventListener('
                     'hcm_heartbeat_health',
                     'component_health',
                     'active_faults',
-                    'local_configuration_revision',
-                    'config_sync',
-                    'pending_hcm_log_delivery_count',
-                    'recent_logs',
                 )
             }
 

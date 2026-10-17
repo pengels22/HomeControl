@@ -244,3 +244,15 @@ async def test_unknown_fire_inputs_report_fault_and_never_normal(monkeypatch):
     assert sample.fault is True
     assert controller.fire_active is False
     assert ('fault', 'fire_input_fault', 'fire input unknown or disconnected') in reporter.reports
+
+
+@pytest.mark.asyncio
+async def test_safety_status_payload_keeps_unknown_until_fresh_inputs():
+    controller = SafetyController(FakeHVAC(), heartbeat=Reporter(), safety_relays=safety_relays_mod.HCMSafetyRelayController())
+    assert controller.status_payload()['status'] == 'Unknown'
+    controller.safety_relays.set_simulated_input('fire_alarm_s', False)
+    controller.safety_relays.set_simulated_input('fire_alarm_P', True)
+    await controller.sample_fire_input_from_backend(0.0)
+    await controller.sample_ac_power_from_backend(0.0)
+    assert controller.status_payload()['fire_alarm_s']['state'] == 'normal'
+    assert controller.status_payload()['fire_alarm_P']['state'] == 'present'

@@ -13,6 +13,7 @@ import asyncio
 import importlib
 import json
 import logging
+import os
 import signal
 import time
 import urllib.request
@@ -205,12 +206,41 @@ def inside(x: int, y: int, box: tuple[int, int, int, int]) -> bool:
 @dataclass
 class ApiClient:
     base_url: str = "http://127.0.0.1:8765"
+    token: str | None = None
+    logical_map: dict[str, str] | None = None
 
     def request(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        if self.logical_map is not None and path == "/api/touchscreen/command" and payload:
+            key = f"{str(payload.get('role', '')).upper()}:{payload.get('channel')}"
+            logical_name = self.logical_map.get(key)
+            if not logical_name:
+                raise RuntimeError("configured logical touchscreen binding is unavailable")
+            contract = importlib.import_module("07_servises.common.control_contract")
+            payload = {"logical_name": logical_name, "command": contract.normalize_touch_command(payload)}
+            path = "/device/command"
         data = None if payload is None else json.dumps(payload).encode()
-        request = urllib.request.Request(self.base_url + path, data=data, headers={"Content-Type": "application/json"}, method="POST" if data else "GET")
+        headers = {"Content-Type": "application/json"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        request = urllib.request.Request(self.base_url + path, data=data, headers=headers, method="POST" if data else "GET")
         with urllib.request.urlopen(request, timeout=4) as response:
             return json.loads(response.read().decode())
+
+
+def api_client_for_mode(mode: str) -> ApiClient:
+    if mode == "simulated":
+        return ApiClient()
+    if mode != "production":
+        raise ValueError("touchscreen API mode must be simulated or production")
+    base_url = os.environ.get("HOMECONTROL_HCM_API_URL", "").rstrip("/")
+    token = os.environ.get("HOMECONTROL_HCM_TOKEN", "")
+    try:
+        logical_map = json.loads(os.environ.get("HOMECONTROL_TOUCHSCREEN_LOGICAL_MAP", "{}"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("HOMECONTROL_TOUCHSCREEN_LOGICAL_MAP must be JSON") from exc
+    if not base_url or not token or not isinstance(logical_map, dict) or not logical_map:
+        raise RuntimeError("production touchscreen mode requires HCM URL, token, and logical bindings")
+    return ApiClient(base_url=base_url, token=token, logical_map=logical_map)
 
 
 class NativeUI:
@@ -411,7 +441,7 @@ class NativeUI:
         await self.draw()
 
 
-async def run(role: str, mode: str) -> None:
+async def run(role: str, mode: str, api_mode: str = "simulated") -> None:
     hardware = importlib.import_module("10_scripts.touchscreen_hardware")
     service = hardware.create_service(role, mode)
     display = touch = None
@@ -421,7 +451,7 @@ async def run(role: str, mode: str) -> None:
         try: loop.add_signal_handler(signum, stop.set)
         except NotImplementedError: pass
     try:
-        display = service.create_display(); touch = service.create_touch(); ui = NativeUI(role, display)
+        display = service.create_display(); touch = service.create_touch(); ui = NativeUI(role, display, api_client_for_mode(api_mode))
         await display.initialize(); await touch.initialize(); await ui.refresh(); await ui.draw()
 
         async def poll() -> None:
@@ -446,5 +476,5 @@ async def run(role: str, mode: str) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(); parser.add_argument("--role", choices=("RCM", "LCM", "SIM"), default="SIM"); parser.add_argument("--mode", choices=("simulated", "orange_pi"), default="simulated")
-    args = parser.parse_args(); asyncio.run(run(args.role, args.mode))
+    parser = argparse.ArgumentParser(); parser.add_argument("--role", choices=("RCM", "LCM", "SIM"), default="SIM"); parser.add_argument("--mode", choices=("simulated", "orange_pi"), default="simulated"); parser.add_argument("--api-mode", choices=("simulated", "production"), default="simulated")
+    args = parser.parse_args(); asyncio.run(run(args.role, args.mode, args.api_mode))

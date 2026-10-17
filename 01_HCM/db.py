@@ -8,6 +8,8 @@ _pool: asyncpg.Pool | None = None
 async def connect():
     global _pool
     if _pool is None:
+        if not settings.database_url:
+            raise RuntimeError('HCM_DATABASE_URL is required; no database credential fallback is permitted')
         _pool = await asyncpg.create_pool(settings.database_url, min_size=1, max_size=10)
     return _pool
 

@@ -62,7 +62,13 @@ safety = None
 safety_relays = None
 
 @router.get('/health')
-async def health(): return {'ok': True}
+async def health():
+    payload = {'ok': True}
+    if safety is not None:
+        payload['fire_life_safety'] = safety.status_payload()
+    else:
+        payload['fire_life_safety'] = {'status': 'Unavailable', 'source': 'hcm_safety_controller'}
+    return payload
 
 @router.post('/auth/dev-session')
 async def dev_session():

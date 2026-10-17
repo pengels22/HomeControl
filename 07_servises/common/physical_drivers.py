@@ -8,6 +8,8 @@ callers must enforce the commissioning gate before invoking output methods.
 from __future__ import annotations
 
 import json
+import math
+import re
 import threading
 import time
 import urllib.request
@@ -34,6 +36,12 @@ class MockI2CTransport:
     operation_count: int = 0
     fail_reads: bool = False
     fail_writes: bool = False
+    strict_registers: bool = False
+    device_registers: dict[int, set[int]] = field(default_factory=dict)
+
+    def _validate_register(self, address: int, register: int) -> None:
+        if self.strict_registers and address in self.device_registers and register not in self.device_registers[address]:
+            raise HardwareTransportError(f"mock register 0x{register:02X} is invalid for 0x{address:02X}")
 
     def _record(self, operation: dict[str, Any]) -> None:
         self.operation_count += 1
@@ -44,12 +52,14 @@ class MockI2CTransport:
     def read_byte_data(self, address: int, register: int) -> int:
         if self.fail_reads:
             raise HardwareTransportError("mock I2C read failure")
+        self._validate_register(address, register)
         self._record({"op": "read", "address": address, "register": register})
         return self.registers.get((address, register), 0)
 
     def write_byte_data(self, address: int, register: int, value: int) -> None:
         if self.fail_writes:
             raise HardwareTransportError("mock I2C write failure")
+        self._validate_register(address, register)
         value &= 0xFF
         self._record({"op": "write", "address": address, "register": register, "value": value})
         self.registers[(address, register)] = value
@@ -173,8 +183,10 @@ class XL9535RelayDriver:
 class MCP23017RelayDriver:
     """MCP23017 8-bit relay bank with active-low output preservation."""
 
-    IODIR = 0x00
-    OLAT = 0x14
+    # BANK=0 is the reset/default register layout. The LCM relay contract is
+    # Port B; Port A is reserved for selector/indicator infrastructure.
+    IODIR = 0x01
+    OLAT = 0x15
 
     def __init__(self, bus: LockedI2C, address: int, count: int = 8, active_low: bool = True):
         self.bus, self.address, self.count, self.active_low = bus, address, count, active_low
@@ -212,6 +224,10 @@ class PCA9685Driver:
     MODE1 = 0x00
     PRESCALE = 0xFE
     LED0 = 0x06
+    MODE1_RESTART = 0x80
+    MODE1_AI = 0x20
+    MODE1_SLEEP = 0x10
+    FULL_OFF = 0x10
 
     def __init__(self, bus: LockedI2C, address: int = 0x40, frequency_hz: int = 1000):
         self.bus, self.address, self.frequency_hz = bus, address, frequency_hz
@@ -219,9 +235,15 @@ class PCA9685Driver:
         self.initialized = False
 
     def initialize(self) -> dict[str, Any]:
-        self.bus.write(self.address, self.MODE1, 0x00)
+        # PRE_SCALE is writable only while SLEEP is asserted. Auto-increment
+        # is required for the four-byte LED channel transaction.
+        self.bus.write(self.address, self.MODE1, self.MODE1_AI | self.MODE1_SLEEP)
         prescale = round(25_000_000 / (4096 * self.frequency_hz) - 1)
         self.bus.write(self.address, self.PRESCALE, max(3, min(255, prescale)))
+        time.sleep(0.0005)
+        self.bus.write(self.address, self.MODE1, self.MODE1_AI)
+        time.sleep(0.0005)
+        self.bus.write(self.address, self.MODE1, self.MODE1_AI | self.MODE1_RESTART)
         self.initialized = True
         return {"ok": True, "address": f"0x{self.address:02X}", "frequency_hz": self.frequency_hz}
 
@@ -231,7 +253,10 @@ class PCA9685Driver:
         bounded = max(0.0, min(100.0, float(percent)))
         raw = round(bounded * 4095 / 100)
         register = self.LED0 + channel * 4
-        self.bus.block(self.address, register, [raw & 0xFF, (raw >> 8) & 0x0F, 0, 0])
+        # Normal PWM starts ON at count zero and ends at OFF=raw. At zero use
+        # the device's full-OFF bit so the output is unambiguously disabled.
+        off_high = ((raw >> 8) & 0x0F) | (self.FULL_OFF if raw == 0 else 0)
+        self.bus.block(self.address, register, [0, 0, raw & 0xFF, off_high])
         self.values[channel] = raw
         return {"ok": True, "channel": channel, "percent": bounded, "raw": raw, "readback": raw if verify else None}
 
@@ -249,6 +274,10 @@ class MockShellyTransport:
     calls: list[dict[str, Any]] = field(default_factory=list)
 
     def set_brightness(self, component: str, percent: float) -> dict[str, Any]:
+        if not re.fullmatch(r"light:\d+", str(component)):
+            raise HardwareTransportError("mock Shelly component must be light:<id>")
+        if not math.isfinite(float(percent)):
+            raise HardwareTransportError("mock Shelly brightness must be finite")
         call = {"component": component, "percent": max(0.0, min(100.0, float(percent)))}
         self.calls.append(call)
         return self.responses.get(component, {"ok": True, **call})

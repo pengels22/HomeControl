@@ -52,6 +52,8 @@ class SafetyController:
         self.alarm_contact_fault = True
         self.ac_power_present: bool | None = None
         self.ac_power_fault = True
+        self.fire_input_fault = True
+        self.last_input_sample_wall: float | None = None
         self.maintenance_lockout_active = False
         self.fire_input = fire_input_mod.DebouncedFireInput(
             alarm_level=bool(self.globals.Fire_Input_Alarm_High),
@@ -78,8 +80,22 @@ class SafetyController:
             return 'maintenance_lockout'
         return 'normal'
 
+    def status_payload(self) -> dict:
+        age = None if self.last_input_sample_wall is None else max(0.0, time.time() - self.last_input_sample_wall)
+        fresh = age is not None and age <= 2.0
+        fire = 'unknown' if self.fire_input_fault or not fresh else ('active' if self.fire_active else 'normal')
+        ac = 'unknown' if self.ac_power_fault or not fresh else ('present' if self.ac_power_present else 'absent')
+        return {
+            'status': 'Active' if fire == 'active' else 'Normal' if fire == 'normal' else 'Unknown',
+            'fire_alarm_s': {'state': fire, 'fresh': fresh, 'age_seconds': age},
+            'fire_alarm_P': {'state': ac, 'fresh': fresh, 'age_seconds': age},
+            'source': 'hcm_safety_controller',
+        }
+
     async def sample_fire_input(self, level: bool | None, now: float):
+        self.last_input_sample_wall = time.time()
         sample = self.fire_input.sample(level, now)
+        self.fire_input_fault = bool(sample.fault)
         if sample.fault:
             await self.heartbeat.status('fire_alarm_s', 'unknown')
             await self.heartbeat.fault('fire_input_fault', 'fire input unknown or disconnected')
@@ -133,6 +149,7 @@ class SafetyController:
 
     async def sample_ac_power_from_backend(self, now: float | None = None):
         sample_time = time.monotonic() if now is None else now
+        self.last_input_sample_wall = time.time()
         level = None
         if self.safety_relays is not None:
             try:

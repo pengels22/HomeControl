@@ -40,9 +40,44 @@ def test_mcp23017_and_pca9685_use_mock_transactions():
     assert any(op['address'] == 0x40 for op in transport.operations)
 
 
+def test_mcp23017_uses_port_b_and_does_not_touch_port_a():
+    transport = drivers.MockI2CTransport(strict_registers=True, device_registers={
+        0x27: {0x00, 0x01, 0x14, 0x15},
+    })
+    relay = drivers.MCP23017RelayDriver(drivers.LockedI2C(transport), 0x27)
+    relay.initialize()
+    relay.set_channel(0, True)
+    writes = [op for op in transport.operations if op['op'] == 'write']
+    assert {op['register'] for op in writes} == {0x01, 0x15}
+    assert all(op['register'] not in {0x00, 0x14} for op in writes)
+
+
+def test_pca9685_programs_sleep_wake_and_uses_on_zero_off_raw():
+    transport = drivers.MockI2CTransport(strict_registers=True, device_registers={
+        0x40: set(range(0x00, 0x10)) | {0xFE},
+    })
+    pwm = drivers.PCA9685Driver(drivers.LockedI2C(transport), frequency_hz=1000)
+    pwm.initialize()
+    init = [op for op in transport.operations if op['op'] == 'write']
+    assert [op['value'] for op in init if op['register'] == 0x00] == [0x30, 0x20, 0xA0]
+    pwm.set_percent(0, 0)
+    pwm.set_percent(1, 65)
+    writes = [op for op in transport.operations if op['op'] == 'write']
+    channel_zero = [op['value'] for op in writes if op['register'] in {0x06, 0x07, 0x08, 0x09}]
+    channel_one = [op['value'] for op in writes if op['register'] in {0x0A, 0x0B, 0x0C, 0x0D}]
+    assert channel_zero == [0, 0, 0, 0x10]
+    assert channel_one[0:2] == [0, 0]
+    assert channel_one[2] == round(65 * 4095 / 100) & 0xFF
+    assert channel_one[3] == (round(65 * 4095 / 100) >> 8) & 0x0F
+
+
 def test_shelly_mock_and_debounce_are_deterministic():
     shelly = drivers.MockShellyTransport()
     assert shelly.set_brightness('light:0', 65)['percent'] == 65
+    with pytest.raises(drivers.HardwareTransportError):
+        shelly.set_brightness('relay:0', 65)
+    with pytest.raises(drivers.HardwareTransportError):
+        shelly.set_brightness('light:0', float('nan'))
     debounce = drivers.DebouncedInput(debounce_ms=50)
     assert debounce.update(1, now=1.0) is None
     assert debounce.update(1, now=1.02) is None
