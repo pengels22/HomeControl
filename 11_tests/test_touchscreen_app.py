@@ -130,6 +130,25 @@ def test_permission_guard_rejects_unauthorized_command(client):
     assert response.status_code == 403
 
 
+def test_client_authorization_field_cannot_grant_physical_authority(client):
+    response = client.post('/api/touchscreen/command', json={
+        'kind': 'relay', 'channel': 'A1', 'value': True, 'role': 'RCM', 'authorized': True,
+    })
+    assert response.status_code == 200
+    assert response.json()['physical_output_commanded'] is False
+
+
+def test_shared_contract_normalizes_touchscreen_commands():
+    contract = import_module('07_servises.common.control_contract')
+    assert contract.normalize_touch_command({'kind': 'relay', 'channel': 'A1', 'value': 1}) == {
+        'op': 'set_relay', 'channel': 'A1', 'value': True, 'source': 'touchscreen',
+    }
+    dimmer = contract.normalize_touch_command({'kind': 'dimmer', 'channel': '10-1', 'value': 4})
+    assert dimmer['op'] == 'set_dimmer'
+    assert dimmer['percent'] == 4
+    assert dimmer['value'] is False
+
+
 def test_sim_rmc_data_is_stale_safe_and_hcm_sensor_scope_is_external_only(client):
     sim = client.get('/api/touchscreen/state', params={'role': 'SIM'}).json()
     assert sim['rooms'][0]['online'] is False

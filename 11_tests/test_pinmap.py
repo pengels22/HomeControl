@@ -5,6 +5,7 @@ import pytest
 
 pinmap = import_module('07_servises.common.pinmap')
 rcm = import_module('04_RCM.main')
+commissioning = import_module('07_servises.common.commissioning')
 
 
 def test_load_rcm_pinout_is_no_longer_the_authoritative_source():
@@ -81,3 +82,25 @@ def test_rcm_uses_global_relay_count_and_default_state():
     agent = rcm.RCMAgent({'relay_count': 2, 'default_relay_on': True})
 
     assert agent.relays.snapshot() == {'A1': True, 'A2': True}
+
+
+def test_physical_bench_does_not_commission_without_explicit_channel_allowlist():
+    profile = {
+        'physical_output_enabled': True,
+        'outputs': {'relays': {'real_output_enabled': True, 'channels': ['A1']}},
+    }
+    assert commissioning.physical_write_allowed(profile, 'A1') is False
+    profile['outputs']['relays']['commissioned_channels'] = ['A1']
+    assert commissioning.physical_write_allowed(profile, 'A1') is True
+    assert commissioning.physical_write_allowed(profile, 'A2') is False
+
+
+@pytest.mark.asyncio
+async def test_uncommissioned_physical_request_is_rejected_without_output_command():
+    agent = rcm.RCMAgent({'io_mode': 'real'})
+    result = await agent.apply_command({
+        'op': 'set_relay', 'channel': 'A1', 'value': True, 'physical_write_requested': True,
+    })
+    assert result['ok'] is False
+    assert result['physical_outputs_commanded'] is False
+    assert agent.relays.get('A1') is False

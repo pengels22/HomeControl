@@ -14,6 +14,8 @@ import json
 import os
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+common_contract = importlib.import_module("07_servises.common.control_contract")
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,7 +47,49 @@ class Command(BaseModel):
     bank: int | None = None
     setting: str | None = None
     role: str = "RCM"
-    authorized: bool = True
+    # Deprecated compatibility input. It can only reject a request; it never
+    # grants authority. Production authority comes from the server session.
+    authorized: bool | None = None
+    logical_name: str | None = None
+
+
+class HcmAuthoritativeTouchscreenAdapter:
+    """Forward commands to HCM's logical command API; never fall back locally."""
+
+    def __init__(self, role: str):
+        self.role = role
+        self.base_url = os.environ["HOMECONTROL_HCM_API_URL"].rstrip("/")
+        self.token = os.environ.get("HOMECONTROL_HCM_TOKEN", "")
+        try:
+            self.logical_map = json.loads(os.environ.get("HOMECONTROL_TOUCHSCREEN_LOGICAL_MAP", "{}"))
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("HOMECONTROL_TOUCHSCREEN_LOGICAL_MAP must be JSON") from exc
+
+    def _request(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        headers = {"Content-Type": "application/json"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        body = None if payload is None else json.dumps(payload).encode()
+        request = urllib.request.Request(self.base_url + path, data=body, headers=headers, method="POST" if body else "GET")
+        try:
+            with urllib.request.urlopen(request, timeout=4) as response:
+                return json.loads(response.read().decode())
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode(errors="replace")
+            raise HTTPException(exc.code, detail or "HCM command failed") from exc
+        except (urllib.error.URLError, TimeoutError) as exc:
+            raise HTTPException(503, "HCM authoritative control unavailable") from exc
+
+    def snapshot(self) -> dict[str, Any]:
+        return self._request(f"/touchscreen/state?role={self.role}")
+
+    def command(self, command: Command) -> dict[str, Any]:
+        logical_name = command.logical_name or self.logical_map.get(f"{self.role}:{command.channel}")
+        if not logical_name:
+            raise HTTPException(409, "logical touchscreen binding is unavailable")
+        module_command = common_contract.normalize_touch_command(command.model_dump())
+        result = self._request("/device/command", {"logical_name": logical_name, "command": module_command})
+        return common_contract.command_ack(result=result, logical_name=logical_name, channel=str(command.channel))
 
 
 class SimulatedTouchscreenAdapter:
@@ -115,8 +160,8 @@ class SimulatedTouchscreenAdapter:
         return data
 
     def command(self, command: Command) -> dict[str, Any]:
-        if not command.authorized:
-            raise HTTPException(status_code=403, detail="authorized touchscreen session required")
+        if command.authorized is False:
+            raise HTTPException(status_code=403, detail="client authorization fields cannot grant authority")
         if command.role.upper() != self.role:
             raise HTTPException(status_code=409, detail="module role does not match touchscreen session")
         if command.kind == "setting":
@@ -178,7 +223,10 @@ class SimulatedTouchscreenAdapter:
         self.state["bank_selector"].update({"physical_bank": bank, "physical_selector_authoritative": True, "effective_bank": bank, "source": "physical"})
 
 
-adapters = {role: SimulatedTouchscreenAdapter(role) for role in ROLE_PAGES}
+if os.getenv("HOMECONTROL_HCM_API_URL"):
+    adapters = {role: HcmAuthoritativeTouchscreenAdapter(role) for role in ROLE_PAGES}
+else:
+    adapters = {role: SimulatedTouchscreenAdapter(role) for role in ROLE_PAGES}
 app = FastAPI(title="HomeControl Shared Touchscreen", version="preview")
 app.mount("/assets", StaticFiles(directory=UI_ROOT), name="touchscreen-assets")
 

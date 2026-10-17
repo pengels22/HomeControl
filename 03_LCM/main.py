@@ -11,6 +11,7 @@ common_global_config = import_module('07_servises.common.global_config')
 common_safety = import_module('07_servises.common.safety_arbiter')
 common_infra = import_module('07_servises.common.module_infra')
 common_profiles = import_module('07_servises.common.hardware_profiles')
+common_commissioning = import_module('07_servises.common.commissioning')
 
 class LCMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
@@ -108,6 +109,10 @@ class LCMAgent(common_agent.ModuleAgent):
             'hardware_profile': {
                 'verification': self.hardware_profile.get('verification', {}),
                 'physical_output_enabled': self.hardware_profile.get('physical_output_enabled', False),
+                'commissioning': common_commissioning.commissioning_status(
+                    self.hardware_profile,
+                    common_infra.LCM_RELAY_CHANNELS + common_infra.LCM_ANALOG_DIMMER_CHANNELS + common_infra.LCM_HV_DIMMER_CHANNELS,
+                ),
             },
             'safety': self.safety.snapshot(),
         }
@@ -122,6 +127,8 @@ class LCMAgent(common_agent.ModuleAgent):
         logical = str(channel).upper()
         if logical in self.relay_map:
             physical = self.relay_map[logical]
+            if payload.get('physical_write_requested') and not common_commissioning.physical_write_allowed(self.hardware_profile, physical):
+                return {'ok': False, 'error': 'physical channel is not explicitly commissioned', 'channel': logical, 'physical_outputs_commanded': False}
             decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), physical, payload, payload.get('source', 'module_api')))
             self.relays.set(physical, bool(decision.final_command.get('value', False)))
             return {'ok': True, 'kind': 'relay', 'channel': logical, 'physical': physical, 'value': self.relays.get(physical), 'arbitration': decision.as_dict()}
@@ -131,6 +138,8 @@ class LCMAgent(common_agent.ModuleAgent):
             return {'ok': True, 'kind': 'relay', 'channel': logical, 'value': self.relays.get(logical), 'arbitration': decision.as_dict()}
         if logical in self.hv_dimmer_map:
             physical = self.hv_dimmer_map[logical]
+            if payload.get('physical_write_requested') and not common_commissioning.physical_write_allowed(self.hardware_profile, physical):
+                return {'ok': False, 'error': 'physical channel is not explicitly commissioned', 'channel': logical, 'physical_outputs_commanded': False}
             bounded = {**payload, 'percent': self._clamp_percent(self._percent(payload))}
             decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), physical, bounded, payload.get('source', 'module_api')))
             self.hv_dimmers.set_percent(physical, float(decision.final_command.get('percent', 0.0)))
@@ -142,6 +151,8 @@ class LCMAgent(common_agent.ModuleAgent):
             return {'ok': True, 'kind': 'hv_dimmer', 'channel': logical, **self.hv_dimmers.snapshot()[logical], 'arbitration': decision.as_dict()}
         if logical in self.lv_dimmer_map:
             physical = self.lv_dimmer_map[logical]
+            if payload.get('physical_write_requested') and not common_commissioning.physical_write_allowed(self.hardware_profile, physical):
+                return {'ok': False, 'error': 'physical channel is not explicitly commissioned', 'channel': logical, 'physical_outputs_commanded': False}
             bounded = {**payload, 'percent': self._clamp_percent(self._percent(payload))}
             decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), physical, bounded, payload.get('source', 'module_api')))
             self.lv_dimmers.set_percent(physical, float(decision.final_command.get('percent', 0.0)))

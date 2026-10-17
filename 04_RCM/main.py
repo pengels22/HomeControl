@@ -12,6 +12,7 @@ common_global_config = import_module('07_servises.common.global_config')
 common_safety = import_module('07_servises.common.safety_arbiter')
 common_infra = import_module('07_servises.common.module_infra')
 common_profiles = import_module('07_servises.common.hardware_profiles')
+common_commissioning = import_module('07_servises.common.commissioning')
 
 class RCMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
@@ -38,6 +39,9 @@ class RCMAgent(common_agent.ModuleAgent):
         }
         common_pinmap.require_channels(self.pinout, names)
         self.io_mode = common_io.io_mode(config)
+        # Real I/O mode never accepts a simulation command, even while the
+        # manifest keeps physical outputs disabled.
+        self.simulation = self.io_mode != 'real'
         self.relays = common_hw.DigitalBank(names)
         self.relay_hardware_map = {ch: common_infra.RCM_RELAY_MAP[ch] for ch in names}
         if profile_map:
@@ -99,12 +103,15 @@ class RCMAgent(common_agent.ModuleAgent):
             'hardware_profile': {
                 'verification': self.hardware_profile.get('verification', {}),
                 'physical_output_enabled': self.hardware_profile.get('physical_output_enabled', False),
+                'commissioning': common_commissioning.commissioning_status(
+                    self.hardware_profile, list(self.relays.values)
+                ),
             },
         }
 
     async def apply_command(self, payload):
         if payload.get('op') == 'simulate_relay':
-            if self.io_mode == 'real' or payload.get('simulation') is not True or payload.get('physical_outputs_enabled') is not False:
+            if not self.simulation:
                 return {
                     'ok': False,
                     'error': 'simulation command rejected by physical-output safety gate',
@@ -128,6 +135,8 @@ class RCMAgent(common_agent.ModuleAgent):
             return {'ok': True, 'safety': self.safety.snapshot(), 'arbitration': decisions}
         if payload.get('op') == 'set_relay':
             ch = payload['channel'].upper()
+            if payload.get('physical_write_requested') and not common_commissioning.physical_write_allowed(self.hardware_profile, ch):
+                return {'ok': False, 'error': 'physical channel is not explicitly commissioned', 'channel': ch, 'physical_outputs_commanded': False}
             decision = self.safety.decide(common_safety.OutputRequest(
                 self.identity.get('device_id'),
                 ch,
@@ -149,6 +158,8 @@ class RCMAgent(common_agent.ModuleAgent):
                 'requested_value': bool(payload['value']),
                 'state_confidence': 'commanded_only_no_contact_feedback',
                 'arbitration': decision.as_dict(),
+                'physical_output_commanded': False,
+                'physical_write_allowed': common_commissioning.physical_write_allowed(self.hardware_profile, ch),
             }
         if payload.get('op') == 'all_off':
             decisions = []

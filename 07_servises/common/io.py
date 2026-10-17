@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from .commissioning import physical_write_allowed
 
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
@@ -36,3 +37,10 @@ def io_mode(config: dict[str, Any] | None = None) -> str:
 
 def real_io_enabled(config: dict[str, Any] | None = None) -> bool:
     return io_mode(config) == "real"
+
+
+def physical_channel_write_allowed(config: dict[str, Any] | None, channel: str) -> bool:
+    """Require both the configured real mode and explicit channel commissioning."""
+    cfg = config or {}
+    profile = cfg.get("hardware_profile") or {}
+    return real_io_enabled(cfg) and physical_write_allowed(profile, channel)
