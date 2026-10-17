@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import ipaddress
 import json
 import re
@@ -44,6 +46,25 @@ class ValidationError(ValueError):
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value or {}, separators=(",", ":"))
+
+
+def _verify_conflict_status_signature(response: httpx.Response) -> None:
+    """Fail closed unless the configured Conflict status response is authentic."""
+    mode = settings.conflict_heartbeat_auth_mode
+    if mode == 'none':
+        return
+    if mode != 'hmac-sha256':
+        raise ValueError(f'unsupported Conflict heartbeat auth mode: {mode}')
+    path = settings.conflict_heartbeat_auth_secret_file
+    if not path:
+        raise ValueError('Conflict heartbeat auth secret is not configured')
+    secret = Path(path).read_bytes().strip()
+    if not secret:
+        raise ValueError('Conflict heartbeat auth secret is empty')
+    supplied = response.headers.get('X-HomeControl-Signature', '')
+    expected = hmac.new(secret, response.content, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(supplied, expected):
+        raise ValueError('invalid Conflict heartbeat status signature')
 
 
 def _json_value(value: Any) -> Any:
@@ -415,7 +436,7 @@ def _conflict_supervisor_from_status(payload: dict[str, Any]) -> dict[str, Any]:
         "conflict_hostname": payload.get("hostname"),
         "hcm_device_id": settings.hcm_heartbeat_device_id,
         "hcm_hostname": peer.get("hostname"),
-        "last_ack_age_seconds": age_seconds,
+        "last_heartbeat_received_age_seconds": age_seconds,
         "last_sequence": peer.get("last_sequence"),
         "peer_online": online,
         "peer_health": peer.get("health", {}).get("state") if isinstance(peer.get("health"), dict) else None,
@@ -436,6 +457,7 @@ async def conflict_supervisor_status() -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=2.5) as client:
             response = await client.get(url)
             response.raise_for_status()
+            _verify_conflict_status_signature(response)
             payload = response.json()
     except Exception as exc:
         return {

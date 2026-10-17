@@ -704,7 +704,7 @@ class PreviewState:
                 "port": 6004,
                 "protocol": "hcm-heartbeat-v3",
                 "reason": "Preview fixture has recent simulated heartbeat acknowledgments.",
-                "last_ack_age_seconds": 4.0,
+                "last_heartbeat_received_age_seconds": 4.0,
                 "hcm_device_id": "48b02d87db16",
                 "conflict_device_id": "3c53bbf7adb2",
             },

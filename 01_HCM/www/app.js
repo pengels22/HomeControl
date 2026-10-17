@@ -215,8 +215,8 @@ async function renderDashboard() {
 
 function conflictStatusDetail(conflictSupervisor) {
   if (!conflictSupervisor) return "No authenticated supervisor status reported";
-  const age = Number(conflictSupervisor.last_ack_age_seconds);
-  if (Number.isFinite(age)) return `Last ACK ${Math.round(age)}s ago`;
+  const age = Number(conflictSupervisor.last_heartbeat_received_age_seconds);
+  if (Number.isFinite(age)) return `Last heartbeat received ${Math.round(age)}s ago`;
   if (conflictSupervisor.host) return `${esc(conflictSupervisor.host)}:${esc(conflictSupervisor.port || "")}`;
   return esc(conflictSupervisor.reason || "Supervisor status unavailable");
 }

@@ -1,8 +1,11 @@
 from importlib import import_module
 import json
+import hashlib
+import hmac
 import time
 
 import pytest
+import httpx
 from fastapi import HTTPException
 
 api = import_module('01_HCM.api')
@@ -428,7 +431,7 @@ def test_conflict_supervisor_status_reports_healthy_recent_ack(monkeypatch):
     })
 
     assert result['status'] == 'Healthy'
-    assert result['last_ack_age_seconds'] == 4
+    assert result['last_heartbeat_received_age_seconds'] == 4
     assert result['hcm_device_id'] == '48b02d87db16'
 
 
@@ -462,6 +465,30 @@ def test_conflict_supervisor_status_distinguishes_stale_unknown_and_offline(monk
     }
     offline = management._conflict_supervisor_from_status(offline_payload)
     assert offline['status'] == 'Offline'
+
+
+def test_conflict_status_signature_verification(monkeypatch, tmp_path):
+    secret = b'test-secret'
+    path = tmp_path / 'heartbeat.secret'
+    path.write_bytes(secret)
+    monkeypatch.setattr(management.settings, 'conflict_heartbeat_auth_mode', 'hmac-sha256')
+    monkeypatch.setattr(management.settings, 'conflict_heartbeat_auth_secret_file', path)
+    body = b'{"ok":true}'
+    signature = hmac.new(secret, body, hashlib.sha256).hexdigest()
+    response = httpx.Response(200, headers={'X-HomeControl-Signature': signature}, content=body)
+
+    management._verify_conflict_status_signature(response)
+
+
+def test_conflict_status_signature_verification_rejects_tampering(monkeypatch, tmp_path):
+    path = tmp_path / 'heartbeat.secret'
+    path.write_bytes(b'test-secret')
+    monkeypatch.setattr(management.settings, 'conflict_heartbeat_auth_mode', 'hmac-sha256')
+    monkeypatch.setattr(management.settings, 'conflict_heartbeat_auth_secret_file', path)
+    response = httpx.Response(200, headers={'X-HomeControl-Signature': 'bad'}, content=b'{"ok":true}')
+
+    with pytest.raises(ValueError, match='invalid Conflict heartbeat status signature'):
+        management._verify_conflict_status_signature(response)
 
 
 def test_sim_physical_ai_inventory_and_supported_rmc_binding_channels():

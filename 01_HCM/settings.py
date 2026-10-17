@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     conflict_heartbeat_interval_s: int = 5
     conflict_heartbeat_timeout_s: int = 15
     conflict_heartbeat_protocol: str = 'hcm-heartbeat-v3'
+    conflict_heartbeat_auth_mode: str = 'hmac-sha256'
+    conflict_heartbeat_auth_secret_file: Path | None = Path('/etc/hcm-heartbeat/heartbeat-auth.secret')
     lab1_device_id: str = '2ccf675d3414'
     lab1_hostname: str = 'lab1'
     lab1_ip_address: str = '192.168.20.36'

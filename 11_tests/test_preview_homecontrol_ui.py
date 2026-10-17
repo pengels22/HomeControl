@@ -133,7 +133,7 @@ def test_preview_health_and_logical_devices_support_dashboard_metrics(client):
 
     assert health["heartbeat_supervisor"]["status"] == "Online"
     assert status["conflict_supervisor"]["status"] == "Healthy"
-    assert status["conflict_supervisor"]["last_ack_age_seconds"] == 4.0
+    assert status["conflict_supervisor"]["last_heartbeat_received_age_seconds"] == 4.0
     assert health["fire_life_safety"]["status"] == "Unavailable"
     assert health["active_fault_count"] == 2
     assert any(device["maintenance_locked"] for device in logical["logical_devices"])
