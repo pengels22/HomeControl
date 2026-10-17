@@ -13,6 +13,7 @@ common_safety = import_module('07_servises.common.safety_arbiter')
 common_infra = import_module('07_servises.common.module_infra')
 common_profiles = import_module('07_servises.common.hardware_profiles')
 common_commissioning = import_module('07_servises.common.commissioning')
+common_drivers = import_module('07_servises.common.physical_drivers')
 
 class RCMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
@@ -42,6 +43,9 @@ class RCMAgent(common_agent.ModuleAgent):
         # Real I/O mode never accepts a simulation command, even while the
         # manifest keeps physical outputs disabled.
         self.simulation = self.io_mode != 'real'
+        self.driver_bundle = common_drivers.build_lab1_mock_drivers() if config.get('mock_hardware') else None
+        if self.driver_bundle:
+            self.driver_bundle['rcm_relays'].initialize()
         self.relays = common_hw.DigitalBank(names)
         self.relay_hardware_map = {ch: common_infra.RCM_RELAY_MAP[ch] for ch in names}
         if profile_map:
@@ -107,6 +111,7 @@ class RCMAgent(common_agent.ModuleAgent):
                     self.hardware_profile, list(self.relays.values)
                 ),
             },
+            'hardware_driver': self.driver_bundle['rcm_relays'].diagnostics() if self.driver_bundle else {'mode': 'not_instantiated'},
         }
 
     async def apply_command(self, payload):
@@ -143,6 +148,13 @@ class RCMAgent(common_agent.ModuleAgent):
                 payload,
                 payload.get('source', 'module_api'),
             ))
+            if payload.get('physical_write_requested'):
+                if not self.driver_bundle:
+                    return {'ok': False, 'error': 'physical driver is not configured', 'channel': ch, 'physical_outputs_commanded': False}
+                self.driver_bundle['rcm_relays'].set_channel(
+                    common_infra.RCM_RELAY_CHANNELS.index(ch),
+                    bool(decision.final_command.get('value', False)),
+                )
             self.relays.set(ch, bool(decision.final_command.get('value', False)))
             entry = self.pinout.get(ch)
             hardware_address = (
