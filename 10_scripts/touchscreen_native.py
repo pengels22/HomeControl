@@ -16,6 +16,7 @@ import logging
 import os
 import signal
 import time
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -208,6 +209,7 @@ class ApiClient:
     base_url: str = "http://127.0.0.1:8765"
     token: str | None = None
     logical_map: dict[str, str] | None = None
+    module_identifier: str | None = None
 
     def request(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         if self.logical_map is not None and path == "/api/touchscreen/command" and payload:
@@ -234,13 +236,14 @@ def api_client_for_mode(mode: str) -> ApiClient:
         raise ValueError("touchscreen API mode must be simulated or production")
     base_url = os.environ.get("HOMECONTROL_HCM_API_URL", "").rstrip("/")
     token = os.environ.get("HOMECONTROL_HCM_TOKEN", "")
+    module_identifier = os.environ.get("HOMECONTROL_TOUCHSCREEN_MODULE_ID", "")
     try:
         logical_map = json.loads(os.environ.get("HOMECONTROL_TOUCHSCREEN_LOGICAL_MAP", "{}"))
     except json.JSONDecodeError as exc:
         raise RuntimeError("HOMECONTROL_TOUCHSCREEN_LOGICAL_MAP must be JSON") from exc
-    if not base_url or not token or not isinstance(logical_map, dict) or not logical_map:
-        raise RuntimeError("production touchscreen mode requires HCM URL, token, and logical bindings")
-    return ApiClient(base_url=base_url, token=token, logical_map=logical_map)
+    if not base_url or not token or not module_identifier or not isinstance(logical_map, dict) or not logical_map:
+        raise RuntimeError("production touchscreen mode requires HCM URL, token, module identity, and logical bindings")
+    return ApiClient(base_url=base_url, token=token, logical_map=logical_map, module_identifier=module_identifier)
 
 
 class NativeUI:
@@ -252,24 +255,64 @@ class NativeUI:
         self.drag_channel: str | None = None
         self.drag_percent = 0
         self.pending: set[str] = set()
+        self.sync_error: str | None = None
         self.last_touch = time.monotonic()
-        self.timeout_seconds = 10
+        self.local_settings_path = Path(os.environ.get("HOMECONTROL_TOUCHSCREEN_STATE_DIR", str(ROOT / "tmp" / "touchscreen-state"))) / f"native-{self.role.lower()}-settings.json"
+        self.timeout_seconds = self._load_timeout()
+
+    def _load_timeout(self) -> int:
+        try:
+            value = json.loads(self.local_settings_path.read_text()).get("inactivity_seconds", 10)
+            return max(1, min(300, int(value)))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return 10
+
+    def _save_timeout(self, value: int) -> None:
+        self.local_settings_path.parent.mkdir(parents=True, exist_ok=True)
+        self.local_settings_path.write_text(json.dumps({"inactivity_seconds": value}) + "\n")
 
     async def refresh(self) -> None:
         try:
-            self.state = await asyncio.to_thread(self.api.request, f"/api/touchscreen/state?role={self.role}")
-            self.timeout_seconds = max(1, min(300, int(self.state.get("settings", {}).get("inactivity_seconds", 10))))
+            if getattr(self.api, "logical_map", None) is not None:
+                path = f"/touchscreen/state?module_identifier={urllib.parse.quote(str(self.api.module_identifier or ''))}&role={self.role}"
+            else:
+                path = f"/api/touchscreen/state?role={self.role}"
+            next_state = await asyncio.to_thread(self.api.request, path)
+            if not isinstance(next_state, dict):
+                raise RuntimeError("HCM touchscreen state response is not structured")
+            self.state = next_state
+            self.sync_error = None
+            if getattr(self.api, "logical_map", None) is None:
+                self.timeout_seconds = max(1, min(300, int(self.state.get("settings", {}).get("inactivity_seconds", self.timeout_seconds))))
+            else:
+                self.timeout_seconds = self._load_timeout()
             selector = self.state.get("bank_selector", {})
             self.bank = int(selector.get("effective_bank", self.bank))
         except Exception as exc:
+            self.sync_error = str(exc)
             LOGGER.warning("native state refresh failed: %s", exc)
 
     async def command(self, payload: dict[str, Any]) -> None:
+        if payload.get("kind") == "setting" and getattr(self.api, "logical_map", None) is not None:
+            self.timeout_seconds = max(1, min(300, int(payload.get("value", self.timeout_seconds))))
+            self._save_timeout(self.timeout_seconds)
+            await self.draw()
+            return
+        channel = payload.get("channel")
+        if channel:
+            self.pending.add(str(channel))
         try:
-            await asyncio.to_thread(self.api.request, "/api/touchscreen/command", {**payload, "role": self.role})
+            result = await asyncio.to_thread(self.api.request, "/api/touchscreen/command", {**payload, "role": self.role})
+            if not isinstance(result, dict) or result.get("ok") is False:
+                raise RuntimeError("HCM rejected touchscreen command")
             await self.refresh()
+            if channel:
+                self.pending.discard(str(channel))
         except Exception as exc:
+            self.sync_error = str(exc)
             LOGGER.warning("native command failed: %s", exc)
+            if channel:
+                self.pending.discard(str(channel))
         await self.draw()
 
     async def draw(self) -> None:

@@ -1173,6 +1173,105 @@ async def get_lcm_channels(identifier: str | int) -> dict[str, Any]:
     return {"device": module, "channels": channels}
 
 
+def _touchscreen_channel_value(state: dict[str, Any], channel: str, kind: str) -> Any:
+    """Return only the value reported by the module heartbeat/state payload."""
+    nested = state.get("state") if isinstance(state.get("state"), dict) else state
+    groups = ("relays",) if kind == "relay" else ("hv_dimmers", "lv_dimmers", "dimmers")
+    for group in groups:
+        values = nested.get(group) if isinstance(nested, dict) else None
+        if not isinstance(values, dict) or channel not in values:
+            continue
+        value = values[channel]
+        if isinstance(value, dict):
+            if kind == "relay":
+                return value.get("on", value.get("value", value.get("active")))
+            return value.get("percent", value.get("value"))
+        return value
+    return None
+
+
+async def get_touchscreen_state(identifier: str | int, role: str | None = None) -> dict[str, Any]:
+    """Build the authenticated native UI state from the existing HCM sources."""
+    device = await get_device_admin(identifier)
+    effective_role = device["effective_role"]
+    if role and str(role).upper() != effective_role:
+        raise ValidationError("requested touchscreen role does not match the assigned operational role")
+    module = device["module"]
+    raw_state = _state_payload(module)
+    last_seen = module.get("last_seen")
+    last_seen_seconds = _timestamp_seconds(last_seen)
+    age = None if last_seen_seconds is None else max(0.0, time.time() - last_seen_seconds)
+    fresh = bool(module.get("control_session_online")) and age is not None and age <= 15.0
+    source = await get_rcm_channels(identifier) if effective_role == "RCM" else await get_lcm_channels(identifier) if effective_role == "LCM" else None
+    sim_dashboard = await get_sim_dashboard(identifier) if effective_role == "SIM" else None
+    channels = source["channels"] if source else []
+    relays = []
+    dimmers = []
+    for item in channels:
+        kind = "relay" if item.get("kind", "light") == "light" or effective_role == "RCM" else "dimmer"
+        reported = _touchscreen_channel_value(raw_state, item["channel"], kind)
+        confirmed = bool(fresh and reported is not None)
+        common = {
+            "channel": item["channel"],
+            "position": item.get("number"),
+            "name": item.get("name", ""),
+            "logical_name": item.get("logical_name"),
+            "bound": item.get("bound", False),
+            "enabled": item.get("enabled", False),
+            "maintenance_locked": item.get("maintenance_locked", False),
+            "override": item.get("override") or item.get("active_source"),
+            "control_enabled": bool(item.get("control_enabled") and fresh),
+            "hardware_available": bool(item.get("control_session_online")),
+            "disabled_reason": item.get("disabled_reason") or ("Stale module state" if not fresh else None),
+            "requested_value": reported if confirmed else None,
+            "effective_value": reported if confirmed else None,
+            "confirmed": confirmed,
+        }
+        if kind == "relay":
+            relays.append({**common, "on": bool(reported) if confirmed else None})
+        else:
+            percent = float(reported) if confirmed else None
+            dimmers.append({**common, "percent": percent, "on": percent >= 5 if percent is not None else None, "type": item.get("type")})
+    nested = raw_state.get("state") if isinstance(raw_state.get("state"), dict) else raw_state
+    return {
+        "contract_version": 1,
+        "module": {
+            "hostname": module.get("hostname"),
+            "device_id": module.get("device_id"),
+            "module_type": module.get("module_type"),
+            "role": effective_role,
+            "simulation": device.get("simulation"),
+            "physical_outputs_enabled": device.get("physical_outputs_enabled"),
+            "commissioning": {
+                "enabled": bool(nested.get("commissioning_enabled", False)) if isinstance(nested, dict) else False,
+                "commissioned_channels": list(nested.get("commissioned_channels", [])) if isinstance(nested, dict) and isinstance(nested.get("commissioned_channels", []), list) else [],
+            },
+        },
+        "health": {
+            "status": "Online" if fresh else "Stale" if age is not None else "Unavailable",
+            "faults": module.get("last_health", {}).get("faults", []) if isinstance(module.get("last_health"), dict) else [],
+            "hardware_availability": module.get("last_health", {}).get("component_health", {}) if isinstance(module.get("last_health"), dict) else {},
+        },
+        "freshness": {"last_seen": _wire_value(last_seen), "age_seconds": age, "fresh": fresh, "state_revision": nested.get("state_revision") if isinstance(nested, dict) else None, "config_version": module.get("config_version")},
+        "settings": {},
+        "relays": relays,
+        "dimmers": dimmers,
+        "channels": channels,
+        "rooms": [
+            {
+                "name": item.get("name", item.get("id", "RMC")),
+                "online": item.get("status") == "Online",
+                "temperature_f": item.get("readings", {}).get("temperature_f", {}).get("value") if isinstance(item.get("readings"), dict) else None,
+                "humidity_pct": item.get("readings", {}).get("humidity_pct", {}).get("value") if isinstance(item.get("readings"), dict) else None,
+            }
+            for item in (sim_dashboard or {}).get("rmcs", [])
+        ],
+        "analog_inputs": (sim_dashboard or {}).get("analog_inputs", []),
+        "bank_selector": nested.get("bank_selector", {}) if isinstance(nested, dict) else {},
+        "pending_acknowledgments": nested.get("pending_acknowledgments", []) if isinstance(nested, dict) else [],
+    }
+
+
 async def update_lcm_channel_settings(
     identifier: str | int,
     channel: str,

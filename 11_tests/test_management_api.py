@@ -44,6 +44,47 @@ def test_settings_frontend_labels_verified_emergency_endpoint():
     assert 'emergency?.available && emergency.url' in app_js
 
 
+@pytest.mark.asyncio
+async def test_touchscreen_state_contract_scopes_role_and_marks_reported_values_fresh(monkeypatch):
+    now = time.time()
+    module = {
+        'module': {
+            'id': 7, 'hostname': 'RCM-01', 'device_id': 'abcdef123456',
+            'module_type': 'RCM', 'online': True, 'control_session_online': True,
+            'last_seen': now, 'config_version': 4,
+            'last_state': {'state': {'state_revision': 19, 'relays': {'A1': True}}},
+            'last_health': {'component_health': {'i2c': {'state': 'ok'}}, 'faults': []},
+        },
+        'effective_role': 'RCM', 'simulation': True,
+        'physical_outputs_enabled': False,
+    }
+    channels = {'channels': [{
+        'number': 1, 'channel': 'A1', 'name': 'Entry', 'logical_name': 'entry',
+        'bound': True, 'enabled': True, 'maintenance_locked': False,
+        'control_enabled': True, 'control_session_online': True,
+        'disabled_reason': None,
+    }]}
+    async def fake_device(identifier):
+        assert identifier == 'RCM-01'
+        return module
+    async def fake_channels(identifier):
+        return channels
+    monkeypatch.setattr(management, 'get_device_admin', fake_device)
+    monkeypatch.setattr(management, 'get_rcm_channels', fake_channels)
+
+    result = await management.get_touchscreen_state('RCM-01', role='RCM')
+
+    assert result['contract_version'] == 1
+    assert result['module']['simulation'] is True
+    assert result['module']['physical_outputs_enabled'] is False
+    assert result['freshness']['fresh'] is True
+    assert result['freshness']['state_revision'] == 19
+    assert result['relays'][0]['on'] is True
+    assert result['relays'][0]['confirmed'] is True
+    with pytest.raises(management.ValidationError):
+        await management.get_touchscreen_state('RCM-01', role='LCM')
+
+
 def test_emergency_capability_rejects_unapproved_port_and_paths():
     module = {
         'device_id': '2ccf675d3414',

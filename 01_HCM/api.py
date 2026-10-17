@@ -150,6 +150,15 @@ async def modules(user=Depends(require_user)):
 async def dashboard_status(user=Depends(require_user)):
     return await management.dashboard_status()
 
+@router.get('/touchscreen/state')
+async def touchscreen_state(module_identifier: str, role: str | None = None, user=Depends(require_user)):
+    try:
+        return await management.get_touchscreen_state(module_identifier, role=role)
+    except management.NotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except management.ValidationError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
 @router.get('/settings/network')
 async def settings_network(user=Depends(require_user)):
     return await management.settings_network()
