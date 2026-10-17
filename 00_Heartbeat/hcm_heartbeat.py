@@ -21,6 +21,16 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
 from homecontrol_identity import InvalidDeviceId, normalize_device_id
+try:
+    from gpio_inputs import GPIOInputError, GPIOInputMonitor
+except ImportError:
+    import importlib.util
+    _gpio_path = os.path.join(os.path.dirname(__file__), 'gpio_inputs.py')
+    _gpio_spec = importlib.util.spec_from_file_location('homecontrol_heartbeat_gpio_inputs', _gpio_path)
+    _gpio_module = importlib.util.module_from_spec(_gpio_spec)
+    _gpio_spec.loader.exec_module(_gpio_module)
+    GPIOInputError = _gpio_module.GPIOInputError
+    GPIOInputMonitor = _gpio_module.GPIOInputMonitor
 
 VERSION = 3
 MAX_BODY = 65536
@@ -544,6 +554,12 @@ class State(object):
         self.peer_health = None
         self.last_ack = None
         self.last_error = 'not yet connected'
+        self.gpio_inputs = None
+        self.gpio_input_error = None
+        try:
+            self.gpio_inputs = GPIOInputMonitor(cfg.get('gpio_inputs'))
+        except GPIOInputError as exc:
+            self.gpio_input_error = str(exc)
         self.last_poll_started = False
         self.stop = threading.Event()
 
@@ -639,6 +655,12 @@ class State(object):
                     store_error = 'registry database unavailable: {}'.format(e)
             if store_error:
                 faults.append({'type': 'registry_db', 'detail': store_error})
+        safety_inputs = self.gpio_inputs.read() if self.gpio_inputs else {
+            'fire_alarm_s': {'state': 'unknown', 'health': self.gpio_input_error or 'unavailable'},
+            'fire_alarm_P': {'state': 'unknown', 'health': self.gpio_input_error or 'unavailable'},
+        }
+        if any(item.get('health') == 'fault' for item in safety_inputs.values()):
+            faults.append({'type': 'gpio_input_fault', 'detail': 'fire safety GPIO input read fault'})
         # Peer faults belong to registry, not own health: prevents reciprocal fault cascades.
         result = {
             'protocol': 'hcm-heartbeat', 'version': VERSION,
@@ -649,7 +671,7 @@ class State(object):
             'health': {'state': 'healthy' if not faults else 'fault', 'faults': faults, 'system': system, 'services': services},
             'status': {'state': 'operational' if not faults else 'degraded', 'uptime_seconds': uptime(),
                        'modules': modules, 'maintenance_lockout': cfg.get('maintenance_lockout', False),
-                       'peer': peer},
+                       'peer': peer, 'safety_inputs': safety_inputs},
         }
         if cfg['role'] == 'conflict':
             result['status']['registry'] = registry
@@ -826,6 +848,8 @@ def serve(cfg):
     print('HCM heartbeat v3 on {}:{} role={} id={}'.format(cfg['bind_address'], cfg['port'], cfg['role'], state.device_id), flush=True)
     def stop(_signal, _frame):
         state.stop.set()
+        if state.gpio_inputs:
+            state.gpio_inputs.close()
         web.shutdown()
         unix.shutdown()
     signal.signal(signal.SIGTERM, stop)

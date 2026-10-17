@@ -15,6 +15,10 @@ async def test_hcm_safety_relays_are_simulated_and_lockout_exempt():
 
     assert status['mode'] == 'simulated_gpio'
     assert status['maintenance_lockout_exempt'] is True
+    assert status['relays']['fire_alarm_s']['board_pin'] == 38
+    assert status['relays']['fire_alarm_s']['gpio'] == '/dev/gpiochip0:159'
+    assert status['relays']['fire_alarm_P']['board_pin'] == 40
+    assert status['relays']['fire_alarm_P']['gpio'] == '/dev/gpiochip0:158'
     assert status['relays']['alarm_contact']['direction'] == 'input'
     assert status['relays']['door_request']['lockout_exempt'] is True
     assert status['relays']['auxiliary']['lockout_exempt'] is True

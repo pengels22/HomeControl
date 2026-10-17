@@ -64,8 +64,12 @@ async def hvac_loop():
 async def alarm_contact_loop():
     while True:
         await asyncio.sleep(0.1)
-        try: await safety.sample_alarm_contact_from_backend()
-        except Exception: log.exception('Alarm contact monitoring failed')
+        try:
+            await safety.sample_fire_input_from_backend()
+            await safety.sample_ac_power_from_backend()
+            await safety.sample_alarm_contact_from_backend()
+        except Exception:
+            log.exception('Safety input monitoring failed')
 
 app = FastAPI(title='HomeControl HCM', version='0.1.0', lifespan=lifespan)
 app.include_router(api.router)

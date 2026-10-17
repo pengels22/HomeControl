@@ -50,6 +50,8 @@ class SafetyController:
         self.fire_active = False
         self.alarm_contact_active = False
         self.alarm_contact_fault = True
+        self.ac_power_present: bool | None = None
+        self.ac_power_fault = True
         self.maintenance_lockout_active = False
         self.fire_input = fire_input_mod.DebouncedFireInput(
             alarm_level=bool(self.globals.Fire_Input_Alarm_High),
@@ -58,6 +60,10 @@ class SafetyController:
         self.alarm_contact_input = fire_input_mod.DebouncedFireInput(
             alarm_level=bool(self.globals.Fire_Input_Alarm_High),
             debounce_seconds=float(self.globals.Alarm_Contact_Debounce) / 1000.0,
+        )
+        self.ac_power_input = fire_input_mod.DebouncedFireInput(
+            alarm_level=True,
+            debounce_seconds=float(self.globals.Fire_Contact_Debounce) / 1000.0,
         )
         self.emergency_lighting_logical_names = list(emergency_lighting_logical_names or [])
         self.heartbeat = heartbeat or SafetyHeartbeatReporter()
@@ -75,10 +81,12 @@ class SafetyController:
     async def sample_fire_input(self, level: bool | None, now: float):
         sample = self.fire_input.sample(level, now)
         if sample.fault:
+            await self.heartbeat.status('fire_alarm_s', 'unknown')
             await self.heartbeat.fault('fire_input_fault', 'fire input unknown or disconnected')
         else:
             await self.heartbeat.fault('fire_input_fault', None)
         if sample.changed:
+            await self.heartbeat.status('fire_alarm_s', 'active' if sample.fire_active else 'normal')
             await self.set_fire(sample.fire_active)
         return sample
 
@@ -113,6 +121,46 @@ class SafetyController:
         except Exception:
             level = None
         return await self.sample_alarm_contact(level, now)
+
+    async def sample_fire_input_from_backend(self, now: float | None = None):
+        if self.safety_relays is None:
+            return await self.sample_fire_input(None, time.monotonic() if now is None else now)
+        try:
+            level = self.safety_relays.read_input('fire_alarm_s')
+        except Exception:
+            level = None
+        return await self.sample_fire_input(level, time.monotonic() if now is None else now)
+
+    async def sample_ac_power_from_backend(self, now: float | None = None):
+        sample_time = time.monotonic() if now is None else now
+        level = None
+        if self.safety_relays is not None:
+            try:
+                level = self.safety_relays.read_input('fire_alarm_P')
+            except Exception:
+                level = None
+        if level is None:
+            self.ac_power_input.sample(None, sample_time)
+            self.ac_power_present = None
+            self.ac_power_fault = True
+            await self.heartbeat.status('fire_alarm_P', 'unknown')
+            await self.heartbeat.fault('fire_alarm_P_fault', 'AC-present input unavailable')
+            return {'state': 'unknown', 'fault': True, 'changed': False, 'sampled_at': sample_time}
+        sample = self.ac_power_input.sample(bool(level), sample_time)
+        if sample.fault:
+            self.ac_power_present = None
+            self.ac_power_fault = True
+            await self.heartbeat.status('fire_alarm_P', 'unknown')
+            await self.heartbeat.fault('fire_alarm_P_fault', 'AC-present input is debouncing or unavailable')
+            return {'state': 'unknown', 'fault': True, 'changed': False, 'sampled_at': sample_time}
+        present = bool(sample.fire_active)
+        changed = sample.changed or present != self.ac_power_present
+        self.ac_power_present = present
+        self.ac_power_fault = False
+        await self.heartbeat.fault('fire_alarm_P_fault', None)
+        if changed:
+            await self.heartbeat.status('fire_alarm_P', 'present' if present else 'absent')
+        return {'state': 'present' if present else 'absent', 'fault': False, 'changed': changed, 'sampled_at': sample_time}
 
     async def set_maintenance_lockout(self, active: bool):
         self.maintenance_lockout_active = bool(active)

@@ -207,3 +207,40 @@ async def test_alarm_contact_reads_simulated_safety_backend_during_lockout(monke
     assert controller.alarm_contact_active is True
     assert ('status', 'maintenance_lockout', 'active') in reporter.reports
     assert ('status', 'alarm_contact', 'active') in reporter.reports
+
+
+@pytest.mark.asyncio
+async def test_fire_alarm_s_debounces_and_ac_power_never_triggers_fire(monkeypatch):
+    conn = FakeConn()
+    reporter = Reporter()
+    relays = safety_relays_mod.HCMSafetyRelayController()
+    monkeypatch.setattr(safety_mod.db, 'acquire', lambda: FakeAcquire(conn))
+    controller = SafetyController(FakeHVAC(), heartbeat=reporter, safety_relays=relays)
+
+    relays.set_simulated_input('fire_alarm_s', False)
+    await controller.sample_fire_input_from_backend(0.0)
+    relays.set_simulated_input('fire_alarm_s', True)
+    await controller.sample_fire_input_from_backend(0.10)
+    assert controller.fire_active is False
+    await controller.sample_fire_input_from_backend(0.36)
+    assert controller.fire_active is True
+
+    relays.set_simulated_input('fire_alarm_P', False)
+    result = await controller.sample_ac_power_from_backend(1.0)
+    assert result['state'] == 'absent'
+    assert controller.fire_active is True
+    assert ('status', 'fire_alarm_P', 'absent') in reporter.reports
+
+
+@pytest.mark.asyncio
+async def test_unknown_fire_inputs_report_fault_and_never_normal(monkeypatch):
+    conn = FakeConn()
+    reporter = Reporter()
+    relays = safety_relays_mod.HCMSafetyRelayController()
+    monkeypatch.setattr(safety_mod.db, 'acquire', lambda: FakeAcquire(conn))
+    controller = SafetyController(FakeHVAC(), heartbeat=reporter, safety_relays=relays)
+    relays.set_simulated_input('fire_alarm_s', None)
+    sample = await controller.sample_fire_input_from_backend(0.0)
+    assert sample.fault is True
+    assert controller.fire_active is False
+    assert ('fault', 'fire_input_fault', 'fire input unknown or disconnected') in reporter.reports

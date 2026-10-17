@@ -24,6 +24,12 @@
       "source": "config"
     }
   ],
+  "gpio_inputs": {
+    "enabled": false,
+    "debounce_ms": 250,
+    "fire_alarm_s": {"gpiochip": "/dev/gpiochip1", "line": 260, "active_level": 1},
+    "fire_alarm_P": {"gpiochip": "/dev/gpiochip1", "line": 259, "active_level": 1}
+  },
   "watchdogs": {},
   "root_disk_percent_fail": 95,
   "min_available_memory_percent": 5,

@@ -2,8 +2,10 @@ schema_version: 1
 device_type: CONFLICT
 package: 07_CONFLICT
 hardware:
-  supported_platforms: [raspberry_pi]
-  supported_os: [debian]
+  # Keep the legacy inventory token for deployment-plan compatibility while
+  # documenting the verified current hardware as Orange Pi/Armbian.
+  supported_platforms: [raspberry_pi, orange_pi_zero_2w]
+  supported_os: [debian, armbian]
   architectures: [aarch64]
 runtime:
   type: python
@@ -19,6 +21,7 @@ services:
   - hcm-heartbeat.service
 configuration_files:
   - manifest.yaml
+  - hardware_pins.yaml
 persistent_data:
   - /var/lib/homecontrol-heartbeat
 network_services:
@@ -39,4 +42,4 @@ rollback:
 updates:
   unattended: false
   reboot_required: false
-notes: Conflict registry and HMAC secret are device-specific state and must not be overwritten.
+notes: Conflict currently runs on Orange Pi Zero 2W/Armbian; legacy raspberry_pi/debian inventory tokens remain accepted until the inventory record is reconciled. Registry and HMAC secret are device-specific state and must not be overwritten.

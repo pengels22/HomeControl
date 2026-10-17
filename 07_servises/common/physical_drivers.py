@@ -271,15 +271,41 @@ class ShellyRpcTransport:
 
 @dataclass
 class MockGPIOTransport:
-    values: dict[int, bool] = field(default_factory=dict)
+    values: dict[int, bool | None] = field(default_factory=dict)
     operations: list[dict[str, Any]] = field(default_factory=list)
 
     def write(self, line: int, value: bool) -> None:
         self.values[line] = bool(value)
         self.operations.append({"line": line, "value": bool(value)})
 
-    def read(self, line: int) -> bool:
-        return bool(self.values.get(line, False))
+    def read(self, line: int) -> bool | None:
+        return self.values.get(line)
+
+
+class LinuxGPIOInputTransport:
+    """Read-only libgpiod input transport; never requests output lines."""
+
+    def __init__(self, chip: str, line: int, consumer: str):
+        try:
+            import gpiod
+            from gpiod.line import Direction
+        except ImportError as exc:
+            raise HardwareTransportError("gpiod is required for Linux GPIO inputs") from exc
+        self.chip = chip
+        self.line = int(line)
+        self.request = gpiod.request_lines(
+            chip,
+            consumer=consumer,
+            config={self.line: gpiod.LineSettings(direction=Direction.INPUT)},
+        )
+
+    def read(self, line: int | None = None) -> bool:
+        requested_line = self.line if line is None else int(line)
+        value = self.request.get_value(requested_line)
+        return bool(getattr(value, "value", value))
+
+    def close(self) -> None:
+        self.request.release()
 
 
 class DebouncedInput:

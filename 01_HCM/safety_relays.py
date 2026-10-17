@@ -7,6 +7,7 @@ from importlib import import_module
 from typing import Any
 
 common_global_config = import_module('07_servises.common.global_config')
+physical_drivers = import_module('07_servises.common.physical_drivers')
 
 
 @dataclass
@@ -34,7 +35,12 @@ class SafetyRelay:
 class SimulatedSafetyRelayBackend:
     def __init__(self):
         self.states: dict[str, bool] = {}
-        self.input_states: dict[str, bool | None] = {'alarm_contact': False}
+        self.input_states: dict[str, bool | None] = {
+            'fire_alarm_s': False,
+            'fire_alarm_P': True,
+            # Compatibility name for older authenticated status consumers.
+            'alarm_contact': False,
+        }
 
     async def write(self, relay: SafetyRelay, active: bool) -> None:
         if relay.direction != 'output':
@@ -50,17 +56,51 @@ class SimulatedSafetyRelayBackend:
         return bool(value)
 
     def set_input(self, name: str, value: bool | None) -> None:
-        self.input_states[name] = None if value is None else bool(value)
+        value = None if value is None else bool(value)
+        self.input_states[name] = value
+        if name == 'alarm_contact':
+            self.input_states['fire_alarm_s'] = value
+        elif name == 'fire_alarm_s':
+            self.input_states['alarm_contact'] = value
+
+
+class LinuxSafetyInputBackend:
+    """Explicit read-only Jetson GPIO backend for the two safety inputs."""
+
+    def __init__(self):
+        self.inputs = {
+            'fire_alarm_s': physical_drivers.LinuxGPIOInputTransport('/dev/gpiochip0', 159, 'homecontrol-fire-alarm-s'),
+            'fire_alarm_P': physical_drivers.LinuxGPIOInputTransport('/dev/gpiochip0', 158, 'homecontrol-fire-alarm-P'),
+        }
+
+    def read(self, relay: SafetyRelay) -> bool:
+        if relay.name not in self.inputs:
+            raise ValueError('%s is not a Linux safety input' % relay.name)
+        return self.inputs[relay.name].read()
+
+    async def write(self, relay: SafetyRelay, active: bool) -> None:
+        raise ValueError('safety GPIO inputs are read-only')
+
+    def close(self) -> None:
+        for input_ in self.inputs.values():
+            input_.close()
 
 
 class HCMSafetyRelayController:
+    @classmethod
+    def from_linux(cls, globals_=None):
+        return cls(backend=LinuxSafetyInputBackend(), globals_=globals_)
+
     def __init__(self, backend: SimulatedSafetyRelayBackend | None = None, globals_=None):
         self.globals = globals_ or common_global_config.load_global_config('HCM')
         self.backend = backend or SimulatedSafetyRelayBackend()
+        fire_s = SafetyRelay('fire_alarm_s', gpio='/dev/gpiochip0:159', board_pin=38, direction='input', lockout_exempt=True)
+        fire_p = SafetyRelay('fire_alarm_P', gpio='/dev/gpiochip0:158', board_pin=40, direction='input', lockout_exempt=True)
         self.relays = {
-            # The Jetson SOT assigns FIRE to physical pin 38. GPIO line numbers
-            # and the convenience outputs have no validated Linux mapping.
-            'alarm_contact': SafetyRelay('alarm_contact', gpio='UNVERIFIED', board_pin=38, direction='input', lockout_exempt=True),
+            'fire_alarm_s': fire_s,
+            'fire_alarm_P': fire_p,
+            # Compatibility name for the legacy alarm-contact API.
+            'alarm_contact': fire_s,
             'door_request': SafetyRelay('door_request', gpio='UNVERIFIED', board_pin=None, direction='output', lockout_exempt=True),
             'auxiliary': SafetyRelay('auxiliary', gpio='UNVERIFIED', board_pin=None, direction='output', lockout_exempt=True),
         }
@@ -70,6 +110,8 @@ class HCMSafetyRelayController:
         return {
             'mode': 'simulated_gpio',
             'maintenance_lockout_exempt': True,
+            'fire_alarm_s': self.read_input('fire_alarm_s'),
+            'fire_alarm_P': self.read_input('fire_alarm_P'),
             'alarm_contact': self.read_input('alarm_contact'),
             'relays': {name: relay.as_dict() for name, relay in self.relays.items()},
         }
@@ -146,3 +188,6 @@ class HCMSafetyRelayController:
         for relay in self.relays.values():
             if relay.direction == 'output':
                 await self.set_output(relay.name, False)
+        close = getattr(self.backend, 'close', None)
+        if close is not None:
+            close()
