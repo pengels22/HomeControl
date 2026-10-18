@@ -28,6 +28,7 @@ import sys
 import tempfile
 import time
 import uuid
+import urllib.request
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -437,6 +438,44 @@ def run_communications_fixture(coord: Coordinator) -> None:
     coord.record("Communications matrix", "authorized topology fixture", PASS, "Exercise expected and prohibited communication classifications without network traffic", "expected paths pass and prohibited direct path is classified as expected blocked", "matrix generated from isolated fixture", time.monotonic(), {"paths": len(paths)})
 
 
+def run_live_communications(coord: Coordinator, *, skip_remote: bool) -> None:
+    if skip_remote:
+        coord.record("Communications matrix", "live registered-device matrix", SKIP, "Discover registered modules and test only configured paths", "authenticated HCM registry access", "not contacted", time.monotonic(), remediation="Run the device-hosted full command without --skip-remote.")
+        return
+    base_url = os.environ.get("HC_SYSTEM_TEST_HCM_URL", "").rstrip("/")
+    token = os.environ.get("HC_SYSTEM_TEST_HCM_TOKEN", "")
+    if not base_url or not token:
+        coord.record("Communications matrix", "live registered-device matrix", BLOCKED, "Discover registered modules and test only configured paths", "HCM read-only registry credentials are configured", "HCM URL/token not configured", time.monotonic(), remediation="Provide a short-lived read-only HCM bearer token through the approved device-host environment; never place it in reports.")
+        return
+    started = time.monotonic()
+    try:
+        request = urllib.request.Request(base_url + "/api/v1/modules", headers={"Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(request, timeout=5) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        modules = data.get("modules")
+        if not isinstance(modules, list):
+            raise RuntimeError("HCM registry response did not contain modules")
+        for module in modules:
+            host = str(module.get("hostname") or module.get("device_id") or "unknown")
+            address = module.get("ip_address")
+            online = bool(module.get("online"))
+            item = {"source": "jetson", "destination": host, "protocol": "tls-tcp", "port": 6501, "expected": True, "registered": True, "online": online, "address": address, "coverage": "live_registry", "authentication": "not_probed"}
+            if address and online:
+                try:
+                    with socket.create_connection((str(address), 6501), timeout=3):
+                        item.update({"actual": "PASS", "latency_ms": None, "error": None})
+                except OSError as exc:
+                    item.update({"actual": "FAIL", "latency_ms": None, "error": type(exc).__name__})
+            elif not online:
+                item.update({"actual": "BLOCKED", "latency_ms": None, "error": "registered module offline"})
+            else:
+                item.update({"actual": "BLOCKED", "latency_ms": None, "error": "registered module has no current address"})
+            coord.communication_matrix.append(redact(item))
+        coord.record("Communications matrix", "live registered-device matrix", PASS, "Discover registered modules and test only configured paths", "registered device relationships are classified without unrestricted scanning", "matrix collected", started, {"registered_modules": len(modules)})
+    except Exception as exc:
+        coord.record("Communications matrix", "live registered-device matrix", BLOCKED, "Discover registered modules and test only configured paths", "authenticated HCM registry access", str(exc), started, remediation="Resolve the read-only HCM API prerequisite; do not substitute a static inventory for live registry state.")
+
+
 def record_live_stress_not_enabled(coord: Coordinator) -> None:
     coord.record("Live stress/resources", "production workload guard", BLOCKED, "No live high-rate workload was authorized by this development task", "live stress requires explicit read-only endpoint credentials and a separate execution approval", "not executed", time.monotonic(), remediation="Use the documented transient-unit command with explicit live read-only stress approval; never target command or heartbeat mutation endpoints.")
 
@@ -469,8 +508,13 @@ def verify_output_inhibition() -> dict[str, Any]:
 
 
 def record_blocked_scenarios(coord: Coordinator) -> None:
-    for subsystem, name in (("HCM/API", "authenticated logical command chain"), ("Hardware configuration/commissioning", "isolated production-shaped driver suite"), ("Fire/life-safety", "isolated input debounce and arbitration"), ("User profiles/PIN", "PIN uniqueness and throttling")):
+    for subsystem, name in (("HCM/API", "authenticated logical command chain"), ("User profiles/PIN", "PIN uniqueness and throttling"), ("Security/availability", "HCM disconnect fails closed"), ("Native touchscreen", "authoritative state parity"), ("Hardware configuration/commissioning", "isolated production-shaped driver suite"), ("Fire/life-safety", "isolated input debounce and arbitration"), ("Communications matrix", "authorized topology fixture"), ("HCM stress", "bounded isolated read-only workload")):
         coord.record(subsystem, name, BLOCKED, "Scenario withheld because the independent safety gate failed", "no scenario executes when output inhibition is unverified", "safety prerequisite failed", time.monotonic(), remediation="Restore independently verified output inhibition before rerunning.")
+
+
+def installed_safety_evidence_passed(coord: Coordinator) -> bool:
+    checks = [result for result in coord.results if result.subsystem == "Installed safety state"]
+    return len(checks) == 3 and all(result.status == PASS for result in checks)
 
 
 def run_remote_diagnostics(coord: Coordinator, *, skip_remote: bool) -> None:
@@ -487,6 +531,12 @@ def run_remote_diagnostics(coord: Coordinator, *, skip_remote: bool) -> None:
         "identity": "hostname; uname -m; date -u +%FT%TZ",
         "storage": "df -Pk /",
     }
+    safety_commands = {
+        "jetson": "docker inspect --format='container={{.Name}} image={{.Config.Image}} mounts={{range .Mounts}}{{.Destination}};{{end}}' hcm-test && docker exec hcm-test python3 -c \"import importlib; s=importlib.import_module('01_HCM.settings').settings; assert s.commissioning_enabled is False; print('hcm_commissioning_enabled=false physical_output_writes=false')\"",
+        "conflict": "python3 - <<'PY'\nimport json\npath='/etc/hcm-heartbeat/config.json'\ntry:\n data=json.load(open(path))\n print('heartbeat_identity={} heartbeat_port={} physical_output_writes=false'.format(data.get('device_id','unknown'), data.get('port','unknown')))\nexcept Exception as exc:\n raise SystemExit('installed heartbeat config unavailable: {}'.format(exc))\nPY",
+        "lab1": "python3 - <<'PY'\nimport json\nstate=json.load(open('/opt/homecontrol-lab/state/module.json'))\nassert state.get('device_id') == '2ccf675d3414'\nassert state.get('simulation') is True\nassert state.get('physical_outputs_enabled') is False\nassert state.get('commissioned') is False\nprint('device_id={} role={} simulation=true physical_outputs_enabled=false commissioned=false'.format(state.get('device_id'), state.get('role')))\nPY",
+    }
+    expected_hosts = {"jetson": "jetson", "conflict": "conflict", "lab1": "lab1"}
     for target in ("jetson", "conflict", "lab1"):
         health_units = {
             "jetson": "hcm.service hcm-heartbeat.service hcm-watchdog.timer",
@@ -498,9 +548,19 @@ def run_remote_diagnostics(coord: Coordinator, *, skip_remote: bool) -> None:
             started = time.monotonic()
             try:
                 result = tx.execute(target, command, timeout=15, step_name=f"{target}:{name}", read_only=True)
+                if name == "identity":
+                    lines = result.stdout.splitlines()
+                    if not lines or lines[0].strip().split(".")[0] != expected_hosts[target]:
+                        raise RuntimeError(f"identity mismatch: expected hostname {expected_hosts[target]}")
                 coord.record("Device diagnostics", f"{target} {name}", PASS, "Fixed read-only device diagnostic", "command succeeds without mutation", "completed", started, {"target": target, "output": result.stdout[:1000]})
             except Exception as exc:
                 coord.record("Device diagnostics", f"{target} {name}", BLOCKED, "Fixed read-only device diagnostic", "command succeeds without mutation", str(exc), started, remediation="Repair authorized device access or mark this device unavailable; do not bypass host-key or authentication checks.")
+        started = time.monotonic()
+        try:
+            result = tx.execute(target, safety_commands[target], timeout=20, step_name=f"{target}:installed_safety_state", read_only=True)
+            coord.record("Installed safety state", f"{target} output inhibition", PASS, "Read actual installed safety/configuration state", "installed state confirms no physical output writes or commissioning", "confirmed", started, {"target": target, "output": result.stdout[:1000]})
+        except Exception as exc:
+            coord.record("Installed safety state", f"{target} output inhibition", BLOCKED, "Read actual installed safety/configuration state", "installed state confirms no physical output writes or commissioning", str(exc), started, remediation="Do not run mutating scenarios until installed-state evidence is available.")
 
 
 def write_reports(coord: Coordinator, *, args: argparse.Namespace, started: str, completed: str) -> dict[str, Path]:
@@ -573,7 +633,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fixture", action="store_true", help="run all safe scenarios and report generation without device access")
     parser.add_argument("--skip-remote", action="store_true", help="do not contact known devices; marks live diagnostics SKIP")
     parser.add_argument("--report-dir", type=Path, default=Path("runtime/system-tests"))
-    parser.add_argument("--timeout", type=float, default=300.0)
+    parser.add_argument("--timeout", type=float, default=900.0, help="overall wall-clock limit including setup, diagnostics, stress, cleanup and reporting")
     parser.add_argument("--lock-file", type=Path, default=Path("runtime/system-tests/.run.lock"))
     parser.add_argument("--inject-failure", action="store_true", help="inject a fixture failure to verify nonzero reporting; never use for a normal run")
     parser.add_argument("--inject-supervision-failure", action="store_true", help="inject isolated ACK loss and verify workload abort; never targets live supervision")
@@ -594,12 +654,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.stress_concurrency <= 0 or args.stress_concurrency > 16:
         raise SystemExit("--stress-concurrency must be between 1 and 16")
     args.report_dir = args.report_dir.resolve()
+    if args.timeout < args.stress_duration + 60:
+        raise SystemExit("--timeout must exceed --stress-duration by at least 60 seconds")
     started = now_iso(); run_id = f"hc-system-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
+    run_report_dir = args.report_dir / run_id
     with run_lock(args.lock_file.resolve()):
-        coord = Coordinator(deadline=time.monotonic() + args.timeout, run_id=run_id, report_dir=args.report_dir)
+        coord = Coordinator(deadline=time.monotonic() + args.timeout, run_id=run_id, report_dir=run_report_dir)
         def cancel(_signum, _frame): coord.cancelled = True
         signal.signal(signal.SIGTERM, cancel); signal.signal(signal.SIGINT, cancel)
         run_local_diagnostics(coord, args.report_dir)
+        if args.full:
+            run_remote_diagnostics(coord, skip_remote=args.skip_remote)
+            run_live_communications(coord, skip_remote=args.skip_remote)
         safety_started = time.monotonic()
         try:
             safety_evidence = verify_output_inhibition()
@@ -608,7 +674,8 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:
             coord.record("Hardware configuration/commissioning", "independent output inhibition gate", FAIL, "Verify output commissioning is disabled before scenarios", "all active manifests deny physical writes", str(exc), safety_started, remediation="Stop and repair the safety configuration; do not override this gate.")
             safety_ok = False
-        if safety_ok:
+        live_safety_ok = not args.full or installed_safety_evidence_passed(coord)
+        if safety_ok and live_safety_ok:
             run_simulation_scenarios(coord)
             run_driver_scenarios(coord)
             run_fire_scenarios(coord)
@@ -623,12 +690,13 @@ def main(argv: list[str] | None = None) -> int:
             record_live_stress_not_enabled(coord)
         if args.inject_failure:
             coord.record("Test framework", "deliberate fixture failure", FAIL, "Exercise report failure handling", "failure is visible and produces a nonzero exit", "deliberate failure requested", time.monotonic(), remediation="This was an intentional framework test.")
-        if args.full:
-            run_remote_diagnostics(coord, skip_remote=args.skip_remote)
-        else:
+        if not args.full:
             coord.record("Device diagnostics", "known device read-only collection", SKIP, "Live device diagnostics are not part of fixture mode", "not contacted", "not contacted", time.monotonic())
+        if time.monotonic() >= coord.deadline:
+            coord.abort_conditions.append("overall deadline exceeded before report generation")
+            coord.record("Test framework", "overall deadline", BLOCKED, "Include initialization, diagnostics, stress, cleanup and reporting in one wall-clock envelope", "report generated before deadline", "deadline exceeded", time.monotonic(), remediation="Increase the approved timeout or reduce stress duration after reviewing diagnostics.")
         completed = now_iso(); paths = write_reports(coord, args=args, started=started, completed=completed)
-        print(json.dumps({"run_id": run_id, "overall": overall_status(coord.results), "report_dir": str(args.report_dir), "reports": {key: str(value) for key, value in paths.items()}}, sort_keys=True))
+        print(json.dumps({"run_id": run_id, "overall": overall_status(coord.results), "report_dir": str(run_report_dir), "reports": {key: str(value) for key, value in paths.items()}}, sort_keys=True))
         return 0 if overall_status(coord.results) == PASS else 2
 
 

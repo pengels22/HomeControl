@@ -60,6 +60,13 @@ status, and disk space. Host keys and existing authentication remain required.
 It does not issue remote service restarts, clock changes, network changes,
 output commands, role changes, database writes, or fire actions.
 
+The live matrix discovers registered modules through the authenticated,
+read-only HCM `/api/v1/modules` endpoint when `HC_SYSTEM_TEST_HCM_URL` and a
+short-lived `HC_SYSTEM_TEST_HCM_TOKEN` are supplied in the transient unit's
+environment. It tests only registered module addresses and port 6501; it does
+not scan arbitrary ports. Without those variables the matrix is `BLOCKED`.
+The bearer token is never written to reports.
+
 `--stress-duration` accepts 1-600 seconds and defaults to the requested
 ten-minute maximum. `--stress-concurrency` defaults to four workers and is
 bounded at sixteen. In fixture mode the duration is capped to a short run so
@@ -72,8 +79,20 @@ active HCM/Conflict supervision path is never used as a load target.
 `--skip-remote` is useful only for a local rehearsal of the coordinator and
 marks live diagnostics `SKIP`; it must not be reported as a complete system
 verification. A run-level lock prevents concurrent runs. The timeout is bounded
-(`--timeout` defaults to 300 seconds), and SIGINT/SIGTERM cause remaining
+(`--timeout` defaults to 900 seconds, including initialization, diagnostics,
+stress, cleanup and report generation), and SIGINT/SIGTERM cause remaining
 steps to be marked `BLOCKED` while the report is still written.
+
+Every invocation creates a unique report directory below `--report-dir`, named
+with the UTC start timestamp and run ID. The device-hosted default is therefore
+`/var/log/homecontrol/system-tests/hc-system-<timestamp>-<id>/`.
+
+Before mutating simulation scenarios, the coordinator reads installed-state
+evidence from the target hosts. LAB1 must report its expected device identity,
+`simulation=true`, `physical_outputs_enabled=false`, and an empty commissioning
+allowlist. HCM and Conflict must return their installed service/configuration
+evidence. Missing or ambiguous installed-state evidence blocks applicable
+scenarios; repository manifests alone are insufficient.
 
 ## Scope and interpretation
 
