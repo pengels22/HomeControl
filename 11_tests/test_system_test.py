@@ -40,6 +40,9 @@ def test_fixture_generates_all_reports_and_keeps_safety_incomplete(tmp_path):
     report = json.loads((tmp_path / "report.json").read_text())
     assert report["safety"]["physical_output_writes"] is False
     assert any(item["name"] == "isolated production-shaped driver suite" and item["status"] == "PASS" for item in report["results"])
+    assert len(report["communications_matrix"]) == 4
+    assert any(item["subsystem"] == "HCM stress" and item["status"] == "PASS" for item in report["results"])
+    assert report["abort_conditions"] == []
     assert "222222" not in (tmp_path / "report.json").read_text()
 
 
@@ -63,3 +66,12 @@ def test_overall_status_does_not_count_skip_as_pass():
     runner = load_runner()
     result = runner.Result("x", "y", runner.SKIP, "d", "e", "a", 0)
     assert runner.overall_status([result]) == "INCOMPLETE"
+
+
+def test_isolated_supervision_failure_aborts_workload_and_returns_nonzero(tmp_path):
+    result = run_fixture(tmp_path, "--inject-supervision-failure")
+    assert result.returncode == 2
+    report = json.loads((tmp_path / "report.json").read_text())
+    assert report["overall"] == "FAIL"
+    assert "isolated Conflict ACK freshness failure" in report["abort_conditions"]
+    assert any(item["subsystem"] == "HCM stress" and item["status"] == "FAIL" for item in report["results"])

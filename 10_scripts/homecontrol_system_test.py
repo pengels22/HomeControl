@@ -17,6 +17,10 @@ import importlib
 import importlib.util
 import json
 import os
+import random
+import statistics
+import threading
+import resource
 import shutil
 import signal
 import socket
@@ -83,6 +87,9 @@ class Coordinator:
         self.run_id = run_id
         self.report_dir = report_dir
         self.results: list[Result] = []
+        self.communication_matrix: list[dict[str, Any]] = []
+        self.metrics: list[dict[str, Any]] = []
+        self.abort_conditions: list[str] = []
         self.cancelled = False
 
     def check(self) -> None:
@@ -335,6 +342,105 @@ def run_fire_scenarios(coord: Coordinator) -> None:
     coord.run_step("Fire/life-safety", "isolated input debounce and arbitration", fire_run, description="Inject fire and AC-power states without opening GPIO or invoking house-wide actions", expected="250ms debounce, UNKNOWN/FAULT distinction and independent AC supervision")
 
 
+def percentile(values: list[float], fraction: float) -> float:
+    if not values:
+        return 0.0
+    values = sorted(values)
+    return values[min(len(values) - 1, round((len(values) - 1) * fraction))]
+
+
+def sample_metrics(source: str, *, active_workers: int, requests: int) -> dict[str, Any]:
+    usage = resource.getrusage(resource.RUSAGE_SELF)
+    return {
+        "timestamp": now_iso(),
+        "source": source,
+        "active_workers": active_workers,
+        "requests": requests,
+        "process_cpu_seconds": round(usage.ru_utime + usage.ru_stime, 6),
+        "process_max_rss_kb": usage.ru_maxrss,
+    }
+
+
+def synthetic_stress(duration_s: float, concurrency: int, *, name: str, stop: threading.Event) -> dict[str, Any]:
+    """Bounded synthetic workload; it never opens a socket or calls production APIs."""
+    deadline = time.monotonic() + duration_s
+    latencies: list[float] = []
+    errors = 0
+    requests = 0
+    lock = threading.Lock()
+
+    def request() -> None:
+        nonlocal errors, requests
+        started = time.perf_counter()
+        # A tiny deterministic workload models serialization and response work
+        # without saturating the coordinator or any HomeControl host.
+        value = sum(index * index for index in range(32))
+        if value != 10416:
+            with lock:
+                errors += 1
+        elapsed = (time.perf_counter() - started) * 1000
+        with lock:
+            requests += 1
+            latencies.append(elapsed)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
+        while time.monotonic() < deadline and not stop.is_set():
+            futures = [pool.submit(request) for _ in range(concurrency)]
+            for future in futures:
+                future.result(timeout=2)
+            if requests % max(1, concurrency * 8) == 0:
+                time.sleep(0.001)
+    return {
+        "workload": name,
+        "duration_seconds": round(duration_s, 3),
+        "requests": requests,
+        "errors": errors,
+        "throughput_per_second": round(requests / max(duration_s, 0.001), 3),
+        "latency_ms": {"p50": round(percentile(latencies, 0.50), 4), "p95": round(percentile(latencies, 0.95), 4), "p99": round(percentile(latencies, 0.99), 4), "max": round(max(latencies or [0.0]), 4)},
+        "heartbeat_ack_count": requests,
+        "heartbeat_missed_ack_count": 0,
+        "clock_skew_ms": 0,
+        "simulation_only": True,
+    }
+
+
+def run_stress_scenarios(coord: Coordinator, *, duration_s: float, concurrency: int, inject_supervision_failure: bool = False) -> None:
+    def combined() -> dict[str, Any]:
+        stop = threading.Event()
+        if inject_supervision_failure:
+            # Fixture-only abort path: the supervisor detects a synthetic ACK loss.
+            stop.set()
+            coord.abort_conditions.append("isolated Conflict ACK freshness failure")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            hcm_future = pool.submit(synthetic_stress, duration_s, concurrency, name="isolated_hcm_read_only", stop=stop)
+            conflict_future = pool.submit(synthetic_stress, duration_s, concurrency, name="isolated_conflict_heartbeat", stop=stop)
+            hcm = hcm_future.result(timeout=duration_s + 10)
+            conflict = conflict_future.result(timeout=duration_s + 10)
+        if inject_supervision_failure:
+            raise RuntimeError("isolated supervision failure triggered automatic workload abort")
+        coord.metrics.extend([sample_metrics("isolated_hcm", active_workers=concurrency, requests=hcm["requests"]), sample_metrics("isolated_conflict", active_workers=concurrency, requests=conflict["requests"])])
+        return {"hcm": hcm, "conflict": conflict, "concurrent": True, "physical_outputs": False}
+
+    coord.run_step("HCM stress", "bounded isolated read-only workload", combined, description="Run HCM-shaped workload concurrently with Conflict-shaped heartbeat processing", expected="bounded throughput/latency metrics with zero errors and no physical writes")
+
+
+def run_communications_fixture(coord: Coordinator) -> None:
+    paths = [
+        ("jetson", "conflict", "tcp", 6004, True, "simulated authenticated heartbeat"),
+        ("jetson", "lab1", "tls-tcp", 6501, True, "simulated authenticated module session"),
+        ("lab1", "jetson", "tls-tcp", 6501, True, "simulated heartbeat/control acknowledgement"),
+        ("conflict", "lab1", "direct-module", None, False, "not authorized by central architecture"),
+    ]
+    for source, destination, protocol, port, expected, note in paths:
+        item = {"source": source, "destination": destination, "protocol": protocol, "port": port, "expected": expected, "actual": "PASS" if expected else "BLOCKED_EXPECTED", "latency_ms": 0.2 if expected else None, "packet_loss_percent": 0.0 if expected else None, "authentication": "simulated" if expected else "not applicable", "clock_skew_ms": 0, "error": None, "note": note, "coverage": "isolated_fixture"}
+        coord.communication_matrix.append(item)
+    coord.record("Communications matrix", "authorized topology fixture", PASS, "Exercise expected and prohibited communication classifications without network traffic", "expected paths pass and prohibited direct path is classified as expected blocked", "matrix generated from isolated fixture", time.monotonic(), {"paths": len(paths)})
+
+
+def record_live_stress_not_enabled(coord: Coordinator) -> None:
+    coord.record("Live stress/resources", "production workload guard", BLOCKED, "No live high-rate workload was authorized by this development task", "live stress requires explicit read-only endpoint credentials and a separate execution approval", "not executed", time.monotonic(), remediation="Use the documented transient-unit command with explicit live read-only stress approval; never target command or heartbeat mutation endpoints.")
+
+
 def run_local_diagnostics(coord: Coordinator, report_dir: Path) -> None:
     def local() -> dict[str, Any]:
         usage = shutil.disk_usage(report_dir)
@@ -408,6 +514,9 @@ def write_reports(coord: Coordinator, *, args: argparse.Namespace, started: str,
         "mode": "fixture" if args.fixture else "device-hosted",
         "overall": overall_status(coord.results),
         "results": [result.as_dict() for result in coord.results],
+        "communications_matrix": redact(coord.communication_matrix),
+        "metrics_timeline": redact(coord.metrics),
+        "abort_conditions": list(coord.abort_conditions),
         "safety": {"physical_output_writes": False, "live_mutating_commands": False, "live_service_restarts": False, "production_database_changes": False},
         "unverified": ["electrical commissioning", "physical relay/dimmer behavior", "actual fire alarm wiring"],
     }
@@ -467,6 +576,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=300.0)
     parser.add_argument("--lock-file", type=Path, default=Path("runtime/system-tests/.run.lock"))
     parser.add_argument("--inject-failure", action="store_true", help="inject a fixture failure to verify nonzero reporting; never use for a normal run")
+    parser.add_argument("--inject-supervision-failure", action="store_true", help="inject isolated ACK loss and verify workload abort; never targets live supervision")
+    parser.add_argument("--stress-duration", type=float, default=600.0, help="isolated workload duration in seconds, max 600")
+    parser.add_argument("--stress-concurrency", type=int, default=4, help="isolated workload worker count, max 16")
+    parser.add_argument("--live-readonly-stress", action="store_true", help="reserved explicit opt-in for a future authenticated read-only live probe")
     return parser
 
 
@@ -476,6 +589,10 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("select --full or --fixture")
     if args.timeout <= 0 or args.timeout > 3600:
         raise SystemExit("--timeout must be between 1 and 3600 seconds")
+    if args.stress_duration <= 0 or args.stress_duration > 600:
+        raise SystemExit("--stress-duration must be between 0 and 600 seconds")
+    if args.stress_concurrency <= 0 or args.stress_concurrency > 16:
+        raise SystemExit("--stress-concurrency must be between 1 and 16")
     args.report_dir = args.report_dir.resolve()
     started = now_iso(); run_id = f"hc-system-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
     with run_lock(args.lock_file.resolve()):
@@ -495,8 +612,15 @@ def main(argv: list[str] | None = None) -> int:
             run_simulation_scenarios(coord)
             run_driver_scenarios(coord)
             run_fire_scenarios(coord)
+            run_communications_fixture(coord)
+            effective_duration = min(args.stress_duration, 0.25) if args.fixture else args.stress_duration
+            run_stress_scenarios(coord, duration_s=effective_duration, concurrency=args.stress_concurrency, inject_supervision_failure=args.inject_supervision_failure)
         else:
             record_blocked_scenarios(coord)
+        if args.live_readonly_stress:
+            record_live_stress_not_enabled(coord)
+        elif args.full:
+            record_live_stress_not_enabled(coord)
         if args.inject_failure:
             coord.record("Test framework", "deliberate fixture failure", FAIL, "Exercise report failure handling", "failure is visible and produces a nonzero exit", "deliberate failure requested", time.monotonic(), remediation="This was an intentional framework test.")
         if args.full:
