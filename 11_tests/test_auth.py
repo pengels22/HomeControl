@@ -80,6 +80,18 @@ def test_password_hash_does_not_store_plain_text_and_verifies():
     assert not auth.verify_password('wrong password', password_hash)
 
 
+def test_touchscreen_pin_uses_scrypt_and_hmac_lookup_without_plaintext(monkeypatch, tmp_path):
+    secret = tmp_path / 'pin-secret'
+    secret.write_bytes(b'x' * 32)
+    monkeypatch.setattr(auth.settings, 'touchscreen_pin_lookup_secret_file', secret)
+    verifier = auth.hash_touchscreen_pin('123456')
+    lookup = auth.touchscreen_pin_lookup('123456')
+    assert verifier.startswith('scrypt$')
+    assert auth.verify_touchscreen_pin('123456', verifier)
+    assert not auth.verify_touchscreen_pin('123455', verifier)
+    assert '123456' not in verifier and '123456' not in lookup
+
+
 def test_in_memory_session_uses_configured_default_ttl(monkeypatch):
     monkeypatch.setattr(auth.settings, 'auth_session_ttl_s', 7)
     monkeypatch.setattr(auth.time, 'time', lambda: 100.0)

@@ -2,7 +2,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from .models import (
     AuthChallengeIn,
     AuthVerifyIn,
@@ -31,6 +31,8 @@ from .models import (
     UserPasswordChangeIn,
     UserPasswordResetIn,
     UserRoleUpdateIn,
+    TouchscreenPinIn,
+    TouchscreenPermissionIn,
 )
 from .auth import (
     create_login_challenge,
@@ -46,6 +48,15 @@ from .auth import (
     update_user_role,
     verify_login_challenge,
     verify_pairing_key,
+    enroll_touchscreen_pin,
+    disable_touchscreen_pin,
+    set_touchscreen_permission,
+    revoke_touchscreen_sessions,
+    authenticate_touchscreen_device,
+    unlock_touchscreen,
+    require_touchscreen_session,
+    touchscreen_device_permits_logical,
+    revoke_touchscreen_session,
 )
 from .devices import MaintenanceLockedError, command_logical, set_maintenance_lockout
 from .hvac import Mode
@@ -109,6 +120,54 @@ async def auth_reset_user_password(username: str, body: UserPasswordResetIn, use
 async def auth_change_password(body: UserPasswordChangeIn, user=Depends(require_user)):
     return await change_own_password(user['user'], body.current_password, body.new_password)
 
+@router.post('/auth/users/{username}/touchscreen-pin')
+async def touchscreen_pin_enroll(username: str, body: TouchscreenPinIn, user=Depends(require_user)):
+    if user['role'] != 'ADMIN':
+        raise HTTPException(403)
+    return await enroll_touchscreen_pin(username, body.pin, body.permission)
+
+@router.delete('/auth/users/{username}/touchscreen-pin')
+async def touchscreen_pin_disable(username: str, user=Depends(require_user)):
+    if user['role'] != 'ADMIN':
+        raise HTTPException(403)
+    return await disable_touchscreen_pin(username)
+
+@router.patch('/auth/users/{username}/touchscreen-permission')
+async def touchscreen_permission_update(username: str, body: TouchscreenPermissionIn, user=Depends(require_user)):
+    if user['role'] != 'ADMIN':
+        raise HTTPException(403)
+    return await set_touchscreen_permission(username, body.permission)
+
+@router.post('/auth/users/{username}/touchscreen-sessions/revoke')
+async def touchscreen_sessions_revoke(username: str, user=Depends(require_user)):
+    if user['role'] != 'ADMIN':
+        raise HTTPException(403)
+    return await revoke_touchscreen_sessions(username)
+
+@router.post('/touchscreen/unlock')
+async def touchscreen_unlock(
+    body: TouchscreenPinIn,
+    x_homecontrol_touchscreen_id: str | None = Header(default=None),
+    x_homecontrol_touchscreen_token: str | None = Header(default=None),
+):
+    return await unlock_touchscreen(body.pin, x_homecontrol_touchscreen_id or '', x_homecontrol_touchscreen_token or '')
+
+@router.post('/touchscreen/lock')
+async def touchscreen_lock(
+    x_homecontrol_touchscreen_id: str | None = Header(default=None),
+    x_homecontrol_touchscreen_session: str | None = Header(default=None),
+):
+    await require_touchscreen_session(x_homecontrol_touchscreen_session or '', x_homecontrol_touchscreen_id or '')
+    return await revoke_touchscreen_session(x_homecontrol_touchscreen_session or '', x_homecontrol_touchscreen_id or '')
+
+@router.get('/touchscreen/session')
+async def touchscreen_session(
+    x_homecontrol_touchscreen_id: str | None = Header(default=None),
+    x_homecontrol_touchscreen_session: str | None = Header(default=None),
+):
+    session = await require_touchscreen_session(x_homecontrol_touchscreen_session or '', x_homecontrol_touchscreen_id or '')
+    return {"ok": True, **session}
+
 @router.post('/auth/passkey/challenge')
 async def auth_challenge(body: AuthChallengeIn):
     return await create_login_challenge(body.username)
@@ -151,7 +210,22 @@ async def dashboard_status(user=Depends(require_user)):
     return await management.dashboard_status()
 
 @router.get('/touchscreen/state')
-async def touchscreen_state(module_identifier: str, role: str | None = None, user=Depends(require_user)):
+async def touchscreen_state(
+    module_identifier: str,
+    role: str | None = None,
+    authorization: str | None = Header(default=None),
+    x_homecontrol_touchscreen_id: str | None = Header(default=None),
+    x_homecontrol_touchscreen_token: str | None = Header(default=None),
+):
+    if authorization:
+        await require_user(authorization)
+    else:
+        device = await authenticate_touchscreen_device(x_homecontrol_touchscreen_id or '', x_homecontrol_touchscreen_token or '')
+        permitted = device.get('permitted_module_ids') or []
+        if permitted and module_identifier not in permitted:
+            raise HTTPException(403, 'touchscreen is not permitted to read this module')
+        if not permitted:
+            raise HTTPException(403, 'touchscreen has no permitted module scope')
     try:
         return await management.get_touchscreen_state(module_identifier, role=role)
     except management.NotFoundError as exc:
@@ -510,8 +584,22 @@ async def room(body: RoomStateIn, user=Depends(require_user)):
     return {'ok': True, 'average_f': hvac.average_temperature()}
 
 @router.post('/device/command')
-async def device_command(body: DeviceCommand, user=Depends(require_user)):
-    if user['role'] != 'ADMIN': raise HTTPException(403)
+async def device_command(
+    body: DeviceCommand,
+    authorization: str | None = Header(default=None),
+    x_homecontrol_touchscreen_id: str | None = Header(default=None),
+    x_homecontrol_touchscreen_session: str | None = Header(default=None),
+):
+    if authorization:
+        user = await require_user(authorization)
+        if user['role'] != 'ADMIN':
+            raise HTTPException(403)
+    else:
+        session = await require_touchscreen_session(x_homecontrol_touchscreen_session or '', x_homecontrol_touchscreen_id or '', refresh=True)
+        if session['permission'] not in {'CONTROL', 'ADMIN'}:
+            raise HTTPException(403, 'touchscreen permission does not allow control')
+        if not await touchscreen_device_permits_logical(session['device_id'], body.logical_name):
+            raise HTTPException(403, 'touchscreen is not permitted to control this logical device')
     try: return await command_logical(body.logical_name, body.command, source='user')
     except KeyError as exc: raise HTTPException(404, str(exc))
     except MaintenanceLockedError as exc: raise HTTPException(423, str(exc))

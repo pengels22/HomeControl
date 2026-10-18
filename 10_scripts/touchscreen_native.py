@@ -210,6 +210,7 @@ class ApiClient:
     token: str | None = None
     logical_map: dict[str, str] | None = None
     module_identifier: str | None = None
+    session_token: str | None = None
 
     def request(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         if self.logical_map is not None and path == "/api/touchscreen/command" and payload:
@@ -222,11 +223,27 @@ class ApiClient:
             path = "/device/command"
         data = None if payload is None else json.dumps(payload).encode()
         headers = {"Content-Type": "application/json"}
-        if self.token:
+        if self.logical_map is not None:
+            headers["X-HomeControl-Touchscreen-Id"] = str(self.module_identifier or "")
+            headers["X-HomeControl-Touchscreen-Token"] = str(self.token or "")
+            if self.session_token:
+                headers["X-HomeControl-Touchscreen-Session"] = self.session_token
+        elif self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         request = urllib.request.Request(self.base_url + path, data=data, headers=headers, method="POST" if data else "GET")
         with urllib.request.urlopen(request, timeout=4) as response:
             return json.loads(response.read().decode())
+
+    def unlock(self, pin: str) -> dict[str, Any]:
+        result = self.request("/touchscreen/unlock", {"pin": pin})
+        if result.get("ok") and result.get("session_token"):
+            self.session_token = result["session_token"]
+        return result
+
+    def lock(self) -> dict[str, Any]:
+        result = self.request("/touchscreen/lock", {})
+        self.session_token = None
+        return result
 
 
 def api_client_for_mode(mode: str) -> ApiClient:
@@ -235,14 +252,14 @@ def api_client_for_mode(mode: str) -> ApiClient:
     if mode != "production":
         raise ValueError("touchscreen API mode must be simulated or production")
     base_url = os.environ.get("HOMECONTROL_HCM_API_URL", "").rstrip("/")
-    token = os.environ.get("HOMECONTROL_HCM_TOKEN", "")
+    token = os.environ.get("HOMECONTROL_TOUCHSCREEN_DEVICE_TOKEN", "")
     module_identifier = os.environ.get("HOMECONTROL_TOUCHSCREEN_MODULE_ID", "")
     try:
         logical_map = json.loads(os.environ.get("HOMECONTROL_TOUCHSCREEN_LOGICAL_MAP", "{}"))
     except json.JSONDecodeError as exc:
         raise RuntimeError("HOMECONTROL_TOUCHSCREEN_LOGICAL_MAP must be JSON") from exc
     if not base_url or not token or not module_identifier or not isinstance(logical_map, dict) or not logical_map:
-        raise RuntimeError("production touchscreen mode requires HCM URL, token, module identity, and logical bindings")
+        raise RuntimeError("production touchscreen mode requires HCM URL, device token, module identity, and logical bindings")
     return ApiClient(base_url=base_url, token=token, logical_map=logical_map, module_identifier=module_identifier)
 
 
@@ -256,6 +273,10 @@ class NativeUI:
         self.drag_percent = 0
         self.pending: set[str] = set()
         self.sync_error: str | None = None
+        self.pin_buffer = ""
+        self.unlock_return_page = "home"
+        self.auth_user: str | None = None
+        self.auth_permission: str | None = None
         self.last_touch = time.monotonic()
         self.local_settings_path = Path(os.environ.get("HOMECONTROL_TOUCHSCREEN_STATE_DIR", str(ROOT / "tmp" / "touchscreen-state"))) / f"native-{self.role.lower()}-settings.json"
         self.timeout_seconds = self._load_timeout()
@@ -270,6 +291,14 @@ class NativeUI:
     def _save_timeout(self, value: int) -> None:
         self.local_settings_path.parent.mkdir(parents=True, exist_ok=True)
         self.local_settings_path.write_text(json.dumps({"inactivity_seconds": value}) + "\n")
+
+    @property
+    def production(self) -> bool:
+        return getattr(self.api, "logical_map", None) is not None
+
+    @property
+    def unlocked(self) -> bool:
+        return bool(getattr(self.api, "session_token", None))
 
     async def refresh(self) -> None:
         try:
@@ -298,6 +327,16 @@ class NativeUI:
             self._save_timeout(self.timeout_seconds)
             await self.draw()
             return
+        if self.production and payload.get("kind") in {"relay", "dimmer"}:
+            if not self.unlocked:
+                self.unlock_return_page = self.page
+                self.page = "unlock"
+                await self.draw()
+                return
+            if self.auth_permission not in {"CONTROL", "ADMIN"}:
+                self.sync_error = "Touchscreen permission is read-only"
+                await self.draw()
+                return
         channel = payload.get("channel")
         if channel:
             self.pending.add(str(channel))
@@ -327,6 +366,7 @@ class NativeUI:
         elif self.page == "network": self._network(frame)
         elif self.page == "settings": self._settings(frame)
         elif self.page == "rmc-data": self._rooms(frame)
+        elif self.page == "unlock": self._unlock(frame)
         else: self._status(frame)
         await self.display.draw_rgb565(0, 0, self.width, self.height, bytes(frame.data))
 
@@ -335,6 +375,11 @@ class NativeUI:
         frame.rounded_rect(8, 8, self.width - 16, self.height - 16, 14, BLACK, LINE)
         frame.text(18, 16, "HOMECONTROL", WHITE, 2)
         frame.text(380, 18, time.strftime("%I:%M"), CYAN, 1)
+        if self.production:
+            label = f"{self.auth_user or 'LOCKED'}" if self.unlocked else "LOCKED"
+            frame.text(300, 48, label, GOOD if self.unlocked else WARN, 1)
+            if self.unlocked:
+                frame.rounded_rect(390, 43, 70, 26, 6, PANEL, LINE); frame.text(402, 51, "LOCK", WHITE, 1)
         if self.page != "home":
             frame.rounded_rect(12, 45, 74, 28, 7, PANEL, LINE); frame.text(26, 55, "BACK", WHITE, 1)
 
@@ -412,11 +457,12 @@ class NativeUI:
         self._page_heading(frame, "DIMMERS")
         for index, item in enumerate(self.state.get("dimmers", [])):
             y = 82 + index * 26
-            percent = self.drag_percent if self.drag_channel == item.get("channel") else int(item.get("percent", 0))
+            reported = item.get("percent")
+            percent = self.drag_percent if self.drag_channel == item.get("channel") else int(reported) if reported is not None else 0
             frame.rounded_rect(12, y, 456, 22, 7, CARD, LINE)
             frame.text(24, y + 6, item.get("name", "UNNAMED"), WHITE)
             frame.fill_rect(145, y + 9, 250, 5, MUTED); frame.fill_rect(145, y + 9, int(250 * percent / 100), 5, CYAN)
-            frame.circle(145 + int(250 * percent / 100), y + 11, 6, WHITE); frame.text(412, y + 6, f"{percent}%", WHITE)
+            frame.circle(145 + int(250 * percent / 100), y + 11, 6, WHITE); frame.text(412, y + 6, f"{percent}%" if item.get("confirmed", True) and reported is not None else "?", WHITE)
 
     def _network(self, frame: Frame) -> None:
         self._page_heading(frame, "NETWORK"); network = self.state.get("network", {})
@@ -448,32 +494,87 @@ class NativeUI:
             frame.text(24, y + 7, room.get("name", "ROOM"), WHITE); frame.text(24, y + 24, "OFFLINE" if not room.get("online") else "ONLINE", WARN if not room.get("online") else GOOD)
             frame.text(180, y + 8, f"T {room.get('temperature_f', 'UNAVAILABLE')}", MUTED); frame.text(330, y + 8, f"H {room.get('humidity_pct', 'UNAVAILABLE')}", MUTED)
 
+    def _unlock(self, frame: Frame) -> None:
+        self._page_heading(frame, "UNLOCK")
+        frame.rounded_rect(16, 78, 448, 224, 14, CARD, LINE)
+        frame.text(42, 92, "ENTER SIX-DIGIT PIN", WHITE, 1)
+        frame.text(42, 112, ("•" * len(self.pin_buffer)).ljust(6, "_"), CYAN, 2)
+        labels = (("1", "2", "3"), ("4", "5", "6"), ("7", "8", "9"), ("CLR", "0", "ENTER"))
+        for row, values in enumerate(labels):
+            for col, value in enumerate(values):
+                x, y = 42 + col * 105, 140 + row * 36
+                frame.rounded_rect(x, y, 92, 28, 7, PANEL, LINE)
+                frame.text(x + (32 if len(value) == 1 else 20), y + 8, value, WHITE, 1)
+        if self.sync_error:
+            frame.text(42, 286, "AUTHENTICATION FAILED", WARN, 1)
+
     async def touch(self, event: Any) -> None:
         if not event.points: return
         self.last_touch = time.monotonic()
         point = event.points[0]; x, y = point.x, point.y
         if event.kind == "down":
+            if self.page == "unlock":
+                await self._unlock_tap(x, y)
+                return
+            if self.production and self.unlocked and 385 <= x < 470 and 38 <= y < 80:
+                await self.api.lock(); self.auth_user = None; self.auth_permission = None; self.page = "home"; await self.draw(); return
             if self.page != "home" and x < 100 and 40 <= y < 80:
                 self.page = "home"; self.scroll = 0; await self.draw(); return
             if self.page == "dimmers":
                 index = (y - 82) // 26
                 items = self.state.get("dimmers", [])
-                if 0 <= index < len(items): self.drag_channel = items[index].get("channel"); self.drag_percent = max(0, min(100, int((x - 145) * 100 / 260))); await self.draw(); return
+                if 0 <= index < len(items):
+                    if items[index].get("lockout", items[index].get("maintenance_locked", False)):
+                        await self.draw(); return
+                    if self.production and (not self.unlocked or self.auth_permission not in {"CONTROL", "ADMIN"}):
+                        self.unlock_return_page = self.page; self.page = "unlock"; await self.draw(); return
+                    self.drag_channel = items[index].get("channel"); self.drag_percent = max(0, min(100, int((x - 145) * 100 / 260))); await self.draw(); return
             await self._tap(x, y)
         elif event.kind == "move" and self.drag_channel:
             self.drag_percent = max(0, min(100, int((x - 145) * 100 / 260))); await self.draw()
         elif event.kind in {"up", "cancel"} and self.drag_channel:
             channel, percent = self.drag_channel, self.drag_percent; self.drag_channel = None; await self.command({"kind": "dimmer", "channel": channel, "value": percent})
 
+    async def _unlock_tap(self, x: int, y: int) -> None:
+        if y < 140:
+            return
+        col, row = max(0, min(2, (x - 42) // 105)), max(0, min(3, (y - 140) // 36))
+        value = (("1", "2", "3"), ("4", "5", "6"), ("7", "8", "9"), ("CLR", "0", "ENTER"))[row][col]
+        if value == "CLR":
+            self.pin_buffer = ""
+        elif value == "ENTER":
+            if len(self.pin_buffer) == 6:
+                try:
+                    result = await asyncio.to_thread(self.api.unlock, self.pin_buffer)
+                    self.auth_user = result.get("user")
+                    self.auth_permission = result.get("permission")
+                    self.sync_error = None if result.get("ok") else "Authentication failed"
+                    if result.get("ok"):
+                        self.page = self.unlock_return_page
+                        await self.refresh()
+                except Exception as exc:
+                    self.sync_error = str(exc)
+                finally:
+                    self.pin_buffer = ""
+        elif len(self.pin_buffer) < 6:
+            self.pin_buffer += value
+        await self.draw()
+
     async def _tap(self, x: int, y: int) -> None:
         if self.page == "home":
             if y >= 144: self.page = ("status", "relays" if self.role == "RCM" else ("lights" if self.role == "LCM" else "rmc-data"), "network", "settings")[0 if x < 240 and y < 216 else 1 if x >= 240 and y < 216 else 2 if x < 240 else 3]
         elif self.page == "relays":
             if self.role == "RCM" and 100 <= y < 128:
-                self.bank = max(0, min(3, (x - 10) // 117)); await self.command({"kind": "bank_select", "bank": self.bank}); return
+                requested_bank = max(0, min(3, (x - 10) // 117))
+                if self.production:
+                    # The physical selector remains authoritative in production;
+                    # the next HCM state read supplies the effective bank.
+                    await self.refresh(); await self.draw(); return
+                self.bank = requested_bank; await self.command({"kind": "bank_select", "bank": self.bank}); return
             items = [i for i in self.state.get("relays", []) if self.role != "RCM" or (int(i.get("position", 1)) - 1) // 8 == self.bank]
             index = (y - (118 if self.role == "RCM" else 82)) // 22
-            if 0 <= index < len(items) and not items[index].get("lockout"): await self.command({"kind": "relay", "channel": items[index].get("channel"), "value": not items[index].get("on", False)}); return
+            if 0 <= index < len(items) and not items[index].get("lockout", items[index].get("maintenance_locked", False)):
+                await self.command({"kind": "relay", "channel": items[index].get("channel"), "value": not bool(items[index].get("on"))}); return
         elif self.page == "lights": self.page = "dimmers" if x < 240 else "non-dimmers"
         elif self.page == "settings" and 110 <= y < 150:
             current = int(self.state.get("settings", {}).get("inactivity_seconds", 10))

@@ -96,6 +96,13 @@ class PasswordLoginIn(BaseModel):
     username: str
     password: str
 
+class TouchscreenPinIn(BaseModel):
+    pin: str = Field(min_length=6, max_length=6)
+    permission: Literal['VIEWER','CONTROL','ADMIN'] = 'VIEWER'
+
+class TouchscreenPermissionIn(BaseModel):
+    permission: Literal['VIEWER','CONTROL','ADMIN']
+
 class UserCreateIn(BaseModel):
     username: str
     password: str = Field(min_length=10)

@@ -48,6 +48,22 @@ async def test_auth_session_returns_current_user():
 
 
 @pytest.mark.asyncio
+async def test_touchscreen_viewer_cannot_use_device_command(monkeypatch):
+    async def viewer_session(*args, **kwargs):
+        return {'user': 'viewer', 'permission': 'VIEWER', 'device_id': 'screen-1', 'session_id': 1}
+
+    monkeypatch.setattr(api, 'require_touchscreen_session', viewer_session)
+    with pytest.raises(HTTPException) as exc:
+        await api.device_command(
+            api.DeviceCommand(logical_name='Entry Light', command={'op': 'set_relay', 'value': True}),
+            authorization=None,
+            x_homecontrol_touchscreen_id='screen-1',
+            x_homecontrol_touchscreen_session='session',
+        )
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_passkey_challenge_endpoint_uses_auth_service(monkeypatch):
     async def create_login_challenge(username):
         return {'rp_id': 'homecontrol.local', 'username': username, 'challenge': 'abc'}

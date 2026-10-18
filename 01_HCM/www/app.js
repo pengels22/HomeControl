@@ -672,6 +672,40 @@ async function saveUserPassword(username) {
   }
 }
 
+async function saveTouchscreenPin(username) {
+  try {
+    const pin = activeDialog.querySelector("[data-touchscreen-pin]").value;
+    const permission = activeDialog.querySelector("[data-touchscreen-permission]").value;
+    await api(`/auth/users/${encodeURIComponent(username)}/touchscreen-pin`, {
+      method: "POST", body: JSON.stringify({pin, permission}),
+    });
+    closeDialog();
+    await renderUsers();
+    setError("Touchscreen PIN enrolled. Existing touchscreen sessions were revoked.");
+  } catch (error) { userModalStatus(error.message); }
+}
+
+async function disableTouchscreenPin(username) {
+  try {
+    await api(`/auth/users/${encodeURIComponent(username)}/touchscreen-pin`, {method: "DELETE"});
+    await renderUsers();
+    setError("Touchscreen PIN disabled and sessions revoked.");
+  } catch (error) { setError(error.message); }
+}
+
+function openTouchscreenPinDialog(username) {
+  const user = (window.__lastUsers || []).find((item) => item.username === username);
+  if (!user) return;
+  modal(`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="touchscreen-pin-title">
+    <div class="modal-head"><h3 id="touchscreen-pin-title">Touchscreen Access</h3><button type="button" class="secondary icon-button" data-close-dialog aria-label="Close">x</button></div>
+    <div class="diagnostic-grid">${kv("Username", user.username)}${kv("Current status", user.touchscreen_pin_enabled ? "Enabled" : "Disabled")}</div>
+    <label>Six-digit PIN <input data-touchscreen-pin inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" type="password"></label>
+    <label>Touchscreen permission <select data-touchscreen-permission><option>VIEWER</option><option>CONTROL</option><option>ADMIN</option></select></label>
+    <div class="modal-error" role="status" aria-live="polite" data-user-modal-status></div>
+    <div class="modal-actions"><button type="button" class="secondary" data-close-dialog>Cancel</button><button type="button" data-save-touchscreen-pin="${esc(username)}">Enroll / Reset PIN</button></div>
+  </section>`);
+}
+
 async function saveGitSettings() {
   const status = document.querySelector("[data-git-status]");
   if (status) status.textContent = "Saving repository settings...";
@@ -1181,14 +1215,17 @@ function sessionBlock(session) {
 function userTable(users) {
   if (!users.length) return `<div class="empty">No users returned by HCM.</div>`;
   return `<div class="table-wrap"><table>
-    <thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
+    <thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Touchscreen</th><th>Actions</th></tr></thead>
     <tbody>${users.map((user) => `<tr>
       <td>${esc(user.username)}</td>
       <td>${esc(user.role)}</td>
       <td>${user.enabled ? "Enabled" : "Disabled"}</td>
+      <td>${user.touchscreen_pin_enabled ? esc(user.touchscreen_permission || "VIEWER") : "Not enrolled"}</td>
       <td class="actions-cell">
         <button type="button" class="secondary compact-button" data-change-role="${esc(user.username)}">Change Role</button>
         <button type="button" class="secondary compact-button" data-reset-password="${esc(user.username)}">Reset Password</button>
+        <button type="button" class="secondary compact-button" data-open-touchscreen-pin="${esc(user.username)}">PIN</button>
+        ${user.touchscreen_pin_enabled ? `<button type="button" class="secondary compact-button" data-disable-touchscreen-pin="${esc(user.username)}">Disable PIN</button>` : ""}
       </td>
     </tr>`).join("")}</tbody>
   </table></div>`;
@@ -1586,6 +1623,21 @@ document.addEventListener("click", async (event) => {
   const save = event.target.closest("[data-save-lcm-settings]");
   if (save) {
     await saveLcmSettings(save.dataset.saveLcmSettings);
+    return;
+  }
+  const saveTouchscreen = event.target.closest("[data-save-touchscreen-pin]");
+  if (saveTouchscreen) {
+    await saveTouchscreenPin(saveTouchscreen.dataset.saveTouchscreenPin);
+    return;
+  }
+  const touchscreenPin = event.target.closest("[data-open-touchscreen-pin]");
+  if (touchscreenPin) {
+    openTouchscreenPinDialog(touchscreenPin.dataset.openTouchscreenPin);
+    return;
+  }
+  const disableTouchscreen = event.target.closest("[data-disable-touchscreen-pin]");
+  if (disableTouchscreen) {
+    await disableTouchscreenPin(disableTouchscreen.dataset.disableTouchscreenPin);
     return;
   }
   const saveSimRmc = event.target.closest("[data-save-sim-rmc]");

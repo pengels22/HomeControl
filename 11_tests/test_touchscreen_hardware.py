@@ -1,4 +1,5 @@
 import asyncio
+import json
 from importlib import import_module
 from pathlib import Path
 
@@ -45,19 +46,83 @@ def test_simulated_service_never_opens_hardware_nodes():
 
 def test_native_production_api_requires_authenticated_hcm_and_logical_bindings(monkeypatch):
     monkeypatch.delenv("HOMECONTROL_HCM_API_URL", raising=False)
-    monkeypatch.delenv("HOMECONTROL_HCM_TOKEN", raising=False)
+    monkeypatch.delenv("HOMECONTROL_TOUCHSCREEN_DEVICE_TOKEN", raising=False)
+    monkeypatch.delenv("HOMECONTROL_TOUCHSCREEN_MODULE_ID", raising=False)
     monkeypatch.delenv("HOMECONTROL_TOUCHSCREEN_LOGICAL_MAP", raising=False)
     with pytest.raises(RuntimeError, match="requires HCM URL"):
         native.api_client_for_mode("production")
 
     monkeypatch.setenv("HOMECONTROL_HCM_API_URL", "https://hcm.test/api/v1")
-    monkeypatch.setenv("HOMECONTROL_HCM_TOKEN", "test-token")
+    monkeypatch.setenv("HOMECONTROL_TOUCHSCREEN_DEVICE_TOKEN", "test-token")
     monkeypatch.setenv("HOMECONTROL_TOUCHSCREEN_MODULE_ID", "RCM-01")
     monkeypatch.setenv("HOMECONTROL_TOUCHSCREEN_LOGICAL_MAP", '{"RCM:A1":"relay-a1"}')
     client = native.api_client_for_mode("production")
     assert client.token == "test-token"
     assert client.module_identifier == "RCM-01"
     assert client.logical_map == {"RCM:A1": "relay-a1"}
+
+
+def test_native_production_requests_use_device_and_session_headers(monkeypatch):
+    client = native.ApiClient(
+        base_url="https://hcm.test/api/v1",
+        token="device-token",
+        logical_map={"RCM:A1": "relay-a1"},
+        module_identifier="screen-1",
+        session_token="session-token",
+    )
+    captured = {}
+
+    class Response:
+        def read(self):
+            return json.dumps({"ok": True}).encode()
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+
+    def fake_urlopen(request, timeout):
+        captured["headers"] = dict(request.headers)
+        captured["url"] = request.full_url
+        return Response()
+
+    monkeypatch.setattr(native.urllib.request, "urlopen", fake_urlopen)
+    result = client.request("/api/touchscreen/command", {"role": "RCM", "channel": "A1", "kind": "relay", "value": True})
+    assert result == {"ok": True}
+    assert captured["url"] == "https://hcm.test/api/v1/device/command"
+    assert captured["headers"]["X-homecontrol-touchscreen-id"] == "screen-1"
+    assert captured["headers"]["X-homecontrol-touchscreen-token"] == "device-token"
+    assert captured["headers"]["X-homecontrol-touchscreen-session"] == "session-token"
+    assert "Authorization" not in captured["headers"]
+
+
+def test_native_pin_entry_unlocks_without_persisting_pin():
+    class Display:
+        width = 480
+        height = 320
+        async def draw_rgb565(self, *args):
+            pass
+
+    class Api:
+        logical_map = {"RCM:A1": "entry"}
+        session_token = None
+        def unlock(self, pin):
+            assert pin == "123456"
+            self.session_token = "opaque-session"
+            return {"ok": True, "user": "pat", "permission": "CONTROL"}
+        def request(self, path, payload=None):
+            return {"settings": {}, "bank_selector": {"effective_bank": 0}}
+
+    api_client = Api()
+    ui = native.NativeUI("RCM", Display(), api_client)
+    ui.page = "unlock"
+    for value in ("1", "2", "3", "4", "5", "6"):
+        index = next((index for index, candidate in enumerate(("1", "2", "3", "4", "5", "6", "7", "8", "9", "CLR", "0", "ENTER")) if candidate == value), 0)
+        row, col = divmod(index, 3)
+        asyncio.run(ui._unlock_tap(42 + col * 105 + 10, 140 + row * 36 + 10))
+    asyncio.run(ui._unlock_tap(42 + 2 * 105 + 10, 140 + 3 * 36 + 10))
+    assert ui.auth_user == "pat"
+    assert ui.auth_permission == "CONTROL"
+    assert ui.pin_buffer == ""
 
 
 def test_native_renderer_draws_shared_frame_without_browser():

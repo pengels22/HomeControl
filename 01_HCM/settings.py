@@ -45,5 +45,10 @@ class Settings(BaseSettings):
     host_network_status_file: Path | None = Path('/var/lib/homecontrol/.state/host-network-status.json')
     storage_root: Path = Path('/var/lib/homecontrol')
     safety_input_backend: str = 'simulated'
+    touchscreen_pin_lookup_secret_file: Path | None = Path('/etc/homecontrol/touchscreen-pin-lookup.secret')
+    touchscreen_idle_timeout_s: int = 300
+    touchscreen_absolute_timeout_s: int = 12 * 60 * 60
+    touchscreen_rate_limit_base_s: int = 2
+    touchscreen_rate_limit_max_s: int = 300
 
 settings = Settings()

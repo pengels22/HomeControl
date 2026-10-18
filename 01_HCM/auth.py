@@ -6,6 +6,8 @@ import re
 import secrets
 import time
 import asyncio
+import base64
+import hashlib as _hashlib
 from typing import Any
 from fastapi import Header, HTTPException
 from importlib import import_module
@@ -18,7 +20,9 @@ global_config = import_module('07_servises.common.global_config')
 module_infra = import_module('07_servises.common.module_infra')
 PASSWORD_ITERATIONS = int(global_config.load_global_config('HCM').Auth_Password_PBKDF2_Iterations)
 SUPPORTED_ROLES = {"ADMIN", "READONLY"}
+TOUCHSCREEN_PERMISSIONS = {"VIEWER", "CONTROL", "ADMIN"}
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,64}$")
+PIN_RE = re.compile(r"^[0-9]{6}$")
 
 
 def create_session(user: str, role: str='ADMIN', ttl_s: int | None = None) -> str:
@@ -46,6 +50,55 @@ def verify_password(password: str, password_hash: str | None) -> bool:
         return False
     digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("ascii"), iterations)
     return hmac.compare_digest(digest.hex(), expected)
+
+
+def _pin_secret() -> bytes:
+    path = settings.touchscreen_pin_lookup_secret_file
+    if not path:
+        raise RuntimeError("touchscreen PIN lookup secret is not configured")
+    try:
+        secret = path.read_bytes().strip()
+    except OSError as exc:
+        raise RuntimeError("touchscreen PIN lookup secret is unavailable") from exc
+    if len(secret) < 32:
+        raise RuntimeError("touchscreen PIN lookup secret is too short")
+    return secret
+
+
+def _validate_pin(pin: str) -> str:
+    value = str(pin or "")
+    if not PIN_RE.fullmatch(value):
+        raise HTTPException(400, "PIN must contain exactly six digits")
+    return value
+
+
+def touchscreen_pin_lookup(pin: str) -> str:
+    return hmac.new(_pin_secret(), _validate_pin(pin).encode(), hashlib.sha256).hexdigest()
+
+
+def hash_touchscreen_pin(pin: str) -> str:
+    value = _validate_pin(pin).encode()
+    salt = secrets.token_bytes(16)
+    digest = _hashlib.scrypt(value, salt=salt, n=2**14, r=8, p=1, dklen=32)
+    return "scrypt$16384$8$1$%s$%s" % (base64.urlsafe_b64encode(salt).decode(), base64.urlsafe_b64encode(digest).decode())
+
+
+def verify_touchscreen_pin(pin: str, encoded: str | None) -> bool:
+    try:
+        scheme, n, r, p, salt_raw, expected_raw = str(encoded or "").split("$", 5)
+        if scheme != "scrypt":
+            return False
+        digest = _hashlib.scrypt(_validate_pin(pin).encode(), salt=base64.urlsafe_b64decode(salt_raw), n=int(n), r=int(r), p=int(p), dklen=32)
+        return hmac.compare_digest(digest, base64.urlsafe_b64decode(expected_raw))
+    except (ValueError, TypeError, MemoryError):
+        return False
+
+
+def _validate_touchscreen_permission(permission: str) -> str:
+    value = str(permission or "").upper()
+    if value not in TOUCHSCREEN_PERMISSIONS:
+        raise HTTPException(400, "invalid touchscreen permission")
+    return value
 
 def _validate_username(username: str) -> str:
     clean = str(username or "").strip()
@@ -82,7 +135,7 @@ async def list_users() -> list[dict[str, Any]]:
     async with db.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT username, role, enabled, created_at
+            SELECT username, role, enabled, created_at, touchscreen_pin_enabled, touchscreen_permission
             FROM users
             ORDER BY username
             """
@@ -93,6 +146,8 @@ async def list_users() -> list[dict[str, Any]]:
             "role": row["role"],
             "enabled": bool(row["enabled"]),
             "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "touchscreen_pin_enabled": bool(row.get("touchscreen_pin_enabled", False)),
+            "touchscreen_permission": row.get("touchscreen_permission", "VIEWER"),
         }
         for row in rows
     ]
@@ -121,6 +176,190 @@ async def build_user_snapshot(device_id: str) -> dict[str, Any]:
     revision = module_infra.stable_revision(body)
     signed_body = {**body, "revision": revision}
     return {**signed_body, "checksum": module_infra.stable_revision(signed_body)}
+
+
+async def enroll_touchscreen_pin(username: str, pin: str, permission: str = "VIEWER") -> dict[str, Any]:
+    username = _validate_username(username)
+    pin = _validate_pin(pin)
+    permission = _validate_touchscreen_permission(permission)
+    lookup = touchscreen_pin_lookup(pin)
+    verifier = hash_touchscreen_pin(pin)
+    async with db.acquire() as conn:
+        row = await conn.fetchrow("SELECT id, username, enabled FROM users WHERE username=$1 FOR UPDATE", username)
+        if not row or not row["enabled"]:
+            raise HTTPException(404, "user not found")
+        duplicate = await conn.fetchrow(
+            "SELECT username FROM users WHERE touchscreen_pin_lookup=$1 AND touchscreen_pin_enabled=true AND username<>$2",
+            lookup, username,
+        )
+        if duplicate:
+            raise HTTPException(409, "PIN is already enrolled")
+        await conn.execute(
+            """UPDATE users SET touchscreen_pin_hash=$2, touchscreen_pin_lookup=$3,
+               touchscreen_pin_enabled=true, touchscreen_permission=$4,
+               touchscreen_pin_changed_at=now() WHERE username=$1""",
+            username, verifier, lookup, permission,
+        )
+        await conn.execute("UPDATE touchscreen_sessions SET revoked_at=now(), revoke_reason='pin_reset' WHERE user_id=$1 AND revoked_at IS NULL", row["id"])
+    return {"ok": True, "username": username, "touchscreen_pin_enabled": True, "touchscreen_permission": permission, "sessions_revoked": True}
+
+
+async def disable_touchscreen_pin(username: str) -> dict[str, Any]:
+    username = _validate_username(username)
+    async with db.acquire() as conn:
+        row = await conn.fetchrow("UPDATE users SET touchscreen_pin_enabled=false, touchscreen_pin_lookup=NULL, touchscreen_pin_hash=NULL, touchscreen_pin_changed_at=now() WHERE username=$1 RETURNING id, username", username)
+        if not row:
+            raise HTTPException(404, "user not found")
+        await conn.execute("UPDATE touchscreen_sessions SET revoked_at=now(), revoke_reason='pin_disabled' WHERE user_id=$1 AND revoked_at IS NULL", row["id"])
+    return {"ok": True, "username": username, "touchscreen_pin_enabled": False, "sessions_revoked": True}
+
+
+async def set_touchscreen_permission(username: str, permission: str) -> dict[str, Any]:
+    username = _validate_username(username)
+    permission = _validate_touchscreen_permission(permission)
+    async with db.acquire() as conn:
+        row = await conn.fetchrow("UPDATE users SET touchscreen_permission=$2 WHERE username=$1 AND enabled=true RETURNING id, username, touchscreen_pin_enabled", username, permission)
+        if not row:
+            raise HTTPException(404, "user not found")
+        await conn.execute("UPDATE touchscreen_sessions SET revoked_at=now(), revoke_reason='permission_changed' WHERE user_id=$1 AND revoked_at IS NULL", row["id"])
+    return {"ok": True, "username": username, "touchscreen_permission": permission, "sessions_revoked": True}
+
+
+async def revoke_touchscreen_sessions(username: str) -> dict[str, Any]:
+    username = _validate_username(username)
+    async with db.acquire() as conn:
+        result = await conn.execute("UPDATE touchscreen_sessions SET revoked_at=now(), revoke_reason='admin_revoked' WHERE user_id=(SELECT id FROM users WHERE username=$1) AND revoked_at IS NULL", username)
+    return {"ok": True, "username": username, "sessions_revoked": True, "updated": result}
+
+
+async def authenticate_touchscreen_device(device_id: str, device_token: str) -> dict[str, Any]:
+    """Validate a provisioned touchscreen identity without trusting its headers."""
+    if not device_id or not device_token:
+        raise HTTPException(401, "touchscreen authentication failed")
+    async with db.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT id, device_id, token_hash, enabled, revoked_at, permitted_module_ids
+               FROM touchscreen_devices WHERE device_id=$1""", str(device_id)
+        )
+    if not row or not row["enabled"] or row["revoked_at"]:
+        raise HTTPException(401, "touchscreen authentication failed")
+    if not hmac.compare_digest(str(row["token_hash"]), _token_hash(device_token)):
+        raise HTTPException(401, "touchscreen authentication failed")
+    return dict(row)
+
+
+async def _rate_check(conn, scopes: list[str]) -> None:
+    blocked = await conn.fetchrow(
+        "SELECT scope FROM touchscreen_rate_limits WHERE scope=ANY($1::text[]) AND next_allowed_at > now() LIMIT 1",
+        scopes,
+    )
+    if blocked:
+        raise HTTPException(429, "touchscreen authentication temporarily unavailable")
+
+
+async def _clear_rate_limits(conn, scopes: list[str]) -> None:
+    for scope in scopes:
+        await conn.execute("DELETE FROM touchscreen_rate_limits WHERE scope=$1", scope)
+
+
+async def _record_rate_failure(conn, scopes: list[str]) -> None:
+    for scope in scopes:
+        row = await conn.fetchrow("SELECT failed_attempts FROM touchscreen_rate_limits WHERE scope=$1 FOR UPDATE", scope)
+        attempts = int(row["failed_attempts"] if row else 0) + 1
+        delay = min(settings.touchscreen_rate_limit_max_s, settings.touchscreen_rate_limit_base_s * (2 ** min(attempts - 1, 8)))
+        await conn.execute(
+            """INSERT INTO touchscreen_rate_limits(scope, failed_attempts, next_allowed_at, last_failed_at, updated_at)
+               VALUES($1,$2,now() + ($3::integer * interval '1 second'),now(),now())
+               ON CONFLICT(scope) DO UPDATE SET failed_attempts=$2,
+               next_allowed_at=now() + ($3::integer * interval '1 second'), last_failed_at=now(), updated_at=now()""",
+            scope, attempts, delay,
+        )
+
+
+async def unlock_touchscreen(pin: str, device_id: str, device_token: str) -> dict[str, Any]:
+    device = await authenticate_touchscreen_device(device_id, device_token)
+    scopes = ["global", f"device:{device['device_id']}"]
+    async with db.acquire() as conn:
+        await _rate_check(conn, scopes)
+        lookup = touchscreen_pin_lookup(pin)
+        row = await conn.fetchrow(
+            """SELECT id, username, touchscreen_pin_hash, touchscreen_pin_enabled,
+                      touchscreen_permission, enabled
+               FROM users WHERE touchscreen_pin_lookup=$1""", lookup
+        )
+        if not row or not row["enabled"] or not row["touchscreen_pin_enabled"] or not verify_touchscreen_pin(pin, row["touchscreen_pin_hash"]):
+            await _record_rate_failure(conn, scopes)
+            raise HTTPException(401, "touchscreen authentication failed")
+        await _clear_rate_limits(conn, scopes)
+        token = secrets.token_urlsafe(32)
+        await conn.execute(
+            """INSERT INTO touchscreen_sessions(user_id,device_id,token_hash,permission,idle_expires_at,absolute_expires_at)
+               VALUES($1,$2,$3,$4,now() + ($5::integer * interval '1 second'),now() + ($6::integer * interval '1 second'))""",
+            row["id"], device["id"], _token_hash(token), row["touchscreen_permission"],
+            settings.touchscreen_idle_timeout_s, settings.touchscreen_absolute_timeout_s,
+        )
+    return {
+        "ok": True,
+        "session_token": token,
+        "user": row["username"],
+        "permission": row["touchscreen_permission"],
+        "idle_timeout_seconds": settings.touchscreen_idle_timeout_s,
+        "absolute_timeout_seconds": settings.touchscreen_absolute_timeout_s,
+    }
+
+
+async def require_touchscreen_session(session_token: str, device_id: str, *, refresh: bool = False) -> dict[str, Any]:
+    if not session_token or not device_id:
+        raise HTTPException(401, "touchscreen session required")
+    async with db.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT s.id, s.permission, s.user_id, u.username, u.enabled AS user_enabled,
+                      u.touchscreen_pin_enabled, d.device_id, d.enabled AS device_enabled,
+                      s.idle_expires_at, s.absolute_expires_at
+               FROM touchscreen_sessions s
+               JOIN users u ON u.id=s.user_id
+               JOIN touchscreen_devices d ON d.id=s.device_id
+               WHERE s.token_hash=$1 AND d.device_id=$2 AND s.revoked_at IS NULL
+                 AND s.idle_expires_at > now() AND s.absolute_expires_at > now()""",
+            _token_hash(session_token), str(device_id),
+        )
+        if not row or not row["user_enabled"] or not row["touchscreen_pin_enabled"] or not row["device_enabled"]:
+            raise HTTPException(401, "touchscreen session expired or revoked")
+        if refresh:
+            await conn.execute(
+                "UPDATE touchscreen_sessions SET last_activity_at=now(), idle_expires_at=now() + ($2::integer * interval '1 second') WHERE id=$1",
+                row["id"], settings.touchscreen_idle_timeout_s,
+            )
+    return {"user": row["username"], "permission": row["permission"], "device_id": row["device_id"], "session_id": row["id"]}
+
+
+async def touchscreen_device_permits_logical(device_id: str, logical_name: str) -> bool:
+    async with db.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT d.permitted_module_ids, m.hostname, m.device_id AS module_device_id
+               FROM touchscreen_devices d
+               JOIN device_bindings b ON b.enabled=true
+               JOIN logical_devices ld ON ld.id=b.logical_device_id AND ld.enabled=true
+               JOIN modules m ON m.id=b.module_id
+               WHERE d.device_id=$1 AND ld.logical_name=$2
+               LIMIT 1""",
+            str(device_id), logical_name,
+        )
+    if not row:
+        return False
+    permitted = row["permitted_module_ids"] or []
+    return str(row["hostname"]) in permitted or str(row["module_device_id"]) in permitted
+
+
+async def revoke_touchscreen_session(session_token: str, device_id: str) -> dict[str, Any]:
+    async with db.acquire() as conn:
+        result = await conn.execute(
+            """UPDATE touchscreen_sessions SET revoked_at=now(), revoke_reason='manual_logout'
+               WHERE token_hash=$1 AND device_id=(SELECT id FROM touchscreen_devices WHERE device_id=$2)
+                 AND revoked_at IS NULL""",
+            _token_hash(session_token), str(device_id),
+        )
+    return {"ok": True, "revoked": result}
 
 
 async def _sync_user_directory() -> list[dict[str, Any]]:
