@@ -87,7 +87,11 @@ class HomeControlSimulator:
         self.hvac = hvac_mod.HVACController(self.hvac_output, self.hvac_damper)
         self.hvac.DAMPER_LEAD_S = 0
         self.hvac.FAN_LEAD_S = 0
-        self.hvac.RESTART_LOCKOUT_S = 0
+        # The preview should be responsive immediately for either conditioning
+        # mode.  Set the active, mode-specific lockouts rather than the legacy
+        # compatibility alias.
+        self.hvac.COOL_RESTART_LOCKOUT_S = 0
+        self.hvac.HEAT_RESTART_LOCKOUT_S = 0
         self.hvac.state.mode = hvac_mod.Mode.OFF
         self.hvac.state.setpoint_f = 70
         self.hvac.rooms = {

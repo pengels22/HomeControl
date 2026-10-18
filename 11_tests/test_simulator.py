@@ -29,6 +29,14 @@ async def test_mac_simulator_builds_module_state_and_rmc_frames():
     assert state['sim']['rmc_nodes']
 
 
+@pytest.mark.asyncio
+async def test_simulator_preview_disables_both_mode_specific_restart_lockouts():
+    sim = simulator.HomeControlSimulator()
+
+    assert sim.hvac.COOL_RESTART_LOCKOUT_S == 0
+    assert sim.hvac.HEAT_RESTART_LOCKOUT_S == 0
+
+
 def test_pairing_qr_payload_is_actionable_url_with_secure_payload():
     sim = simulator.HomeControlSimulator()
 

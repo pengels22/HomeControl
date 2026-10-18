@@ -62,7 +62,7 @@ class FakeHVACConn:
 async def test_cool_sequence(monkeypatch):
     events=[]
     h=controller(events)
-    h.RESTART_LOCKOUT_S=0
+    h.COOL_RESTART_LOCKOUT_S=0
     h.state.mode=Mode.COOL; h.state.setpoint_f=70
     h.rooms['Office']=RoomReading('Office',74,True,False)
     h.rooms['Kitchen']=RoomReading('Kitchen',74,True,True,'Kitchen Damper')

@@ -45,6 +45,8 @@ class HVACController:
     HEAT_MIN_RUN_S = ms_to_seconds(hcm_globals.HVAC_Heat_Min_Run)
     COOL_RESTART_LOCKOUT_S = ms_to_seconds(hcm_globals.HVAC_Cool_Restart_Lockout)
     HEAT_RESTART_LOCKOUT_S = ms_to_seconds(hcm_globals.HVAC_Heat_Restart_Lockout)
+    # Backward-compatible name for callers that only need the cooling value.
+    # Control paths must use the dedicated heat/cool values above.
     RESTART_LOCKOUT_S = COOL_RESTART_LOCKOUT_S
 
     def __init__(self, output: Callable[[str,bool], Awaitable[None]], damper: Callable[[RoomReading,bool], Awaitable[None]], globals_=None):
