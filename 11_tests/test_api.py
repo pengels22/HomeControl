@@ -41,6 +41,35 @@ async def test_dev_session_available_when_dev_mode_enabled(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_fire_api_rejects_manual_changes_when_physical_input_is_authoritative(monkeypatch):
+    class PhysicalSafety:
+        fire_active = True
+        def physical_fire_input_authoritative(self):
+            return True
+
+    monkeypatch.setattr(api, 'safety', PhysicalSafety())
+    with pytest.raises(HTTPException) as exc:
+        await api.fire(api.FireStateIn(active=False), {'user': 'admin', 'role': 'ADMIN'})
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_fire_api_allows_only_simulation_backend_injection(monkeypatch):
+    class SimSafety:
+        fire_active = False
+        def physical_fire_input_authoritative(self):
+            return False
+        async def set_fire(self, active, *, source):
+            assert source == 'simulation'
+            self.fire_active = active
+
+    safety = SimSafety()
+    monkeypatch.setattr(api, 'safety', safety)
+    result = await api.fire(api.FireStateIn(active=True), {'user': 'admin', 'role': 'ADMIN'})
+    assert result == {'ok': True, 'fire_active': True}
+
+
+@pytest.mark.asyncio
 async def test_auth_session_returns_current_user():
     result = await api.auth_session({'user': 'patrick', 'role': 'ADMIN'})
 

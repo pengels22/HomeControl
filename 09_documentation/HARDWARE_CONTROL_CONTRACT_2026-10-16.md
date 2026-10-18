@@ -47,6 +47,13 @@ per-module registry; executable paths and argument arrays supplied by a client
 are rejected. Update execution remains disabled unless deployment config
 explicitly enables the already-verified service path.
 
+The systemd service reads `/etc/homecontrol/update-service.env` for the target
+module, hardware revision, public-key file, request-secret file, bind address,
+port, staging root, and explicit execution enable flag. Requests use the
+existing HCM shared-secret HMAC mechanism as a transitional authenticated
+transport boundary; mTLS integration remains a separate deployment task. Each
+operation ID is timestamp-checked and accepted only once.
+
 ## Commissioning prerequisite
 
 Before any output test, verify board identity, bus/address/polarity, supply

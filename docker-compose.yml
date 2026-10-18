@@ -6,7 +6,8 @@ services:
       POSTGRES_USER: homecontrol
       POSTGRES_PASSWORD: homecontrol-dev
     ports:
-      - "5432:5432"
+      # Development-only PostgreSQL; never expose the database on the LAN.
+      - "127.0.0.1:5432:5432"
     volumes:
       - hcm_pg:/var/lib/postgresql/data
       - ./08_database/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro

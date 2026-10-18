@@ -630,7 +630,11 @@ async def rmc_firmware_update(body: RmcFirmwareUpdateIn, user=Depends(require_us
 @router.post('/safety/fire')
 async def fire(body: FireStateIn, user=Depends(require_user)):
     if user['role'] != 'ADMIN': raise HTTPException(403)
-    await safety.set_fire(body.active)
+    if safety is None:
+        raise HTTPException(503, 'safety controller is not configured')
+    if safety.physical_fire_input_authoritative():
+        raise HTTPException(409, 'physical fire input is authoritative; simulation injection is unavailable')
+    await safety.set_fire(body.active, source='simulation')
     return {'ok': True, 'fire_active': safety.fire_active}
 
 @router.post('/safety/maintenance-lockout')

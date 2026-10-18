@@ -1,4 +1,5 @@
 from importlib import import_module
+import asyncio
 
 import pytest
 
@@ -244,6 +245,23 @@ async def test_unknown_fire_inputs_report_fault_and_never_normal(monkeypatch):
     assert sample.fault is True
     assert controller.fire_active is False
     assert ('fault', 'fire_input_fault', 'fire input unknown or disconnected') in reporter.reports
+
+
+@pytest.mark.asyncio
+async def test_stable_physical_high_reasserts_fire_after_software_state_drift(monkeypatch):
+    conn = FakeConn()
+    reporter = Reporter()
+    relays = safety_relays_mod.HCMSafetyRelayController()
+    monkeypatch.setattr(safety_mod.db, 'acquire', lambda: FakeAcquire(conn))
+    monkeypatch.setattr(safety_mod.notifications, 'send', lambda n: asyncio.sleep(0))
+    controller = SafetyController(FakeHVAC(), heartbeat=reporter, safety_relays=relays)
+    relays.set_simulated_input('fire_alarm_s', True)
+    await controller.sample_fire_input_from_backend(0.0)
+    assert controller.fire_active is True
+    controller.fire_active = False
+    await controller.sample_fire_input_from_backend(0.1)
+    assert controller.fire_active is True
+    assert len([row for row in conn.executed if row[1] == 'fire']) == 2
 
 
 @pytest.mark.asyncio

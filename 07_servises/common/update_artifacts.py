@@ -57,6 +57,7 @@ def verify_artifact(
     target_module: str,
     hardware_revision: str,
     trusted_public_key: bytes | None,
+    staging_root: Path = Path('/var/lib/homecontrol/updates/staging'),
     signature_verifier: Callable[[bytes, bytes, bytes], None] | None = None,
 ) -> VerifiedArtifact:
     required = ("artifact_id", "target_module", "hardware_revision", "version", "path", "sha256", "installer", "signature")
@@ -81,9 +82,16 @@ def verify_artifact(
     except Exception as exc:
         raise ArtifactError("artifact signature verification failed") from exc
     path = Path(str(artifact["path"]))
+    root = staging_root.resolve()
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise ArtifactError("artifact path is unavailable") from exc
+    if path.is_symlink() or root not in resolved.parents or not resolved.is_file():
+        raise ArtifactError("artifact path is outside the update staging directory")
     if not path.is_file():
         raise ArtifactError("artifact path is unavailable")
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
     if not hmac.compare_digest(digest, str(artifact["sha256"]).lower()):
         raise ArtifactError("artifact checksum mismatch")
-    return VerifiedArtifact(str(artifact["artifact_id"]), target_module.upper(), hardware_revision, str(artifact["version"]), path, installer)
+    return VerifiedArtifact(str(artifact["artifact_id"]), target_module.upper(), hardware_revision, str(artifact["version"]), resolved, installer)

@@ -92,6 +92,14 @@ async def test_off_opens_hvac_calls_immediately():
 
 
 @pytest.mark.asyncio
+async def test_force_off_reasserts_all_outputs_when_cached_state_is_false():
+    events = []
+    h = controller(events)
+    await h.force_off()
+    assert events == [('COOL', False), ('HEAT', False), ('FAN', False)]
+
+
+@pytest.mark.asyncio
 async def test_fan_mode_runs_until_changed_even_without_occupied_rooms():
     events = []
     h = controller(events)

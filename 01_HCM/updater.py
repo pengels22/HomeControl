@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import os
+import time
+import uuid
 from pathlib import Path
 from importlib import import_module
 from typing import Any
 
 from . import db
 from .registry import registry
+from .settings import settings
 
 protocol = import_module('07_servises.common.protocol')
 rmc_firmware = import_module('07_servises.common.rmc_firmware')
@@ -41,9 +46,20 @@ class UpdateOrchestrator:
     async def _request_update(self, ip: str, artifact: dict[str, Any]) -> dict:
         reader, writer = await asyncio.open_connection(ip, self.update_port)
         try:
+            secret_path = getattr(self.globals, 'Update_Request_Secret_File', None) or settings.update_request_secret_file
+            if not secret_path or not Path(secret_path).is_file():
+                raise RuntimeError('update request authentication secret is unavailable')
+            secret = Path(secret_path).read_bytes().strip()
+            operation_id = str(uuid.uuid4())
+            timestamp = float(time.time())
+            request_id = str(uuid.uuid4())
+            payload = {'artifact': artifact}
+            canonical = json.dumps({'type': 'update_run', 'payload': payload, 'request_id': request_id, 'operation_id': operation_id, 'artifact_id': str(artifact.get('artifact_id', '')), 'timestamp': timestamp}, sort_keys=True, separators=(',', ':')).encode()
             await protocol.write_frame(writer, {
                 'type': 'update_run',
-                'payload': {'artifact': artifact},
+                'payload': payload,
+                'request_id': request_id,
+                'auth': {'operation_id': operation_id, 'artifact_id': str(artifact.get('artifact_id', '')), 'timestamp': timestamp, 'mac': hmac.new(secret, canonical, hashlib.sha256).hexdigest()},
             })
             return (await protocol.read_frame(reader)).get('payload', {})
         finally:

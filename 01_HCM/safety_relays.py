@@ -35,6 +35,7 @@ class SafetyRelay:
 
 
 class SimulatedSafetyRelayBackend:
+    physical_input_authoritative = False
     def __init__(self):
         self.states: dict[str, bool] = {}
         self.input_states: dict[str, bool | None] = {
@@ -200,3 +201,4 @@ class HCMSafetyRelayController:
         close = getattr(self.backend, 'close', None)
         if close is not None:
             close()
+    physical_input_authoritative = True

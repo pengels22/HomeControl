@@ -10,8 +10,8 @@ Device types:
   HCM, SIM, LCM, RCM, PNL, CONFLICT, LAB
 
 Examples:
-  10_scripts/provision_device_config.sh RCM orangepi@192.168.60.20
-  10_scripts/provision_device_config.sh LCM root@192.168.60.30 /tmp/homecontrol-install
+  10_scripts/provision_device_config.sh RCM orangepi@192.168.20.20
+  10_scripts/provision_device_config.sh LCM root@192.168.20.30 /tmp/homecontrol-install
 
 Environment passed to remote installer:
   HC_REPO_URL, HC_RELEASE_SHA, HC_BRANCH, HC_INSTALL_ROOT, HC_SKIP_START

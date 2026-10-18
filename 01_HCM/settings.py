@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     module_host: str = '0.0.0.0'
     module_port: int = hcm_globals.API_Module_Port
     update_port: int = hcm_globals.API_Update_Port
+    update_request_secret_file: Path | None = Path('/etc/homecontrol/update-request.secret')
     database_url: str | None = None
     config_root: Path = Path('06_config')
     dev_mode: bool = hcm_globals.HCM_Dev_Mode

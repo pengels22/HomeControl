@@ -94,6 +94,21 @@ class FakeSessionConn:
         return self.row
 
 
+class FakePasswordConn:
+    def __init__(self):
+        self.executed = []
+
+    async def execute(self, query, *args):
+        self.executed.append((query, args))
+
+    async def fetchrow(self, query, *args):
+        if 'UPDATE users' in query and 'SET password_hash' in query:
+            return {'username': 'patrick', 'role': 'ADMIN', 'enabled': True, 'created_at': FakeDateTime()}
+        if query.startswith('SELECT username, password_hash'):
+            return {'username': 'patrick', 'password_hash': auth.hash_password('old password long')}
+        raise AssertionError(query)
+
+
 @pytest.mark.asyncio
 async def test_persistent_session_uses_current_enabled_role(monkeypatch):
     conn = FakeSessionConn({'username': 'patrick', 'role': 'READONLY'})
@@ -101,6 +116,20 @@ async def test_persistent_session_uses_current_enabled_role(monkeypatch):
     monkeypatch.setattr(auth, '_token_hash', lambda token: 'hash')
     result = await auth.require_user('Bearer token')
     assert result == {'user': 'patrick', 'role': 'READONLY'}
+
+
+@pytest.mark.asyncio
+async def test_password_reset_and_change_clear_login_rate_state(monkeypatch):
+    conn = FakePasswordConn()
+    cleared = []
+    monkeypatch.setattr(auth.db, 'acquire', lambda: FakeAcquire(conn))
+    async def clear(_conn, username):
+        cleared.append(username)
+    monkeypatch.setattr(auth, '_clear_normal_login_rate', clear)
+
+    await auth.reset_user_password('patrick', 'new password long')
+    await auth.change_own_password('patrick', 'old password long', 'newer password long')
+    assert cleared == ['patrick', 'patrick']
 
 
 def test_password_hash_does_not_store_plain_text_and_verifies():
@@ -173,6 +202,17 @@ async def test_password_login_locks_after_five_failures_and_clears_on_success(mo
     conn.login_limits['patrick']['next_allowed_at'] = None
     token = await auth.login_password('patrick', 'correct horse battery staple')
     assert token and 'patrick' not in conn.login_limits
+
+
+@pytest.mark.asyncio
+async def test_malformed_login_username_is_rejected_before_rate_limit_storage(monkeypatch):
+    async def unexpected_acquire():
+        raise AssertionError('malformed username must not access the database')
+
+    monkeypatch.setattr(auth.db, 'acquire', unexpected_acquire)
+    with pytest.raises(HTTPException) as exc:
+        await auth.login_password('bad username!', 'irrelevant')
+    assert exc.value.status_code == 400
 
 
 @pytest.mark.asyncio

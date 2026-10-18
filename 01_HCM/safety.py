@@ -101,9 +101,9 @@ class SafetyController:
             await self.heartbeat.fault('fire_input_fault', 'fire input unknown or disconnected')
         else:
             await self.heartbeat.fault('fire_input_fault', None)
-        if sample.changed:
+        if not sample.fault and self.fire_active != sample.fire_active:
             await self.heartbeat.status('fire_alarm_s', 'active' if sample.fire_active else 'normal')
-            await self.set_fire(sample.fire_active)
+            await self.set_fire(sample.fire_active, source='physical')
         return sample
 
     async def sample_alarm_contact(self, level: bool | None, now: float | None = None):
@@ -187,7 +187,12 @@ class SafetyController:
         self.maintenance_lockout_active = bool(active)
         await self.heartbeat.status('maintenance_lockout', 'active' if active else 'inactive')
 
-    async def set_fire(self, active: bool):
+    def physical_fire_input_authoritative(self) -> bool:
+        return bool(getattr(self.safety_relays and self.safety_relays.backend, 'physical_input_authoritative', False))
+
+    async def set_fire(self, active: bool, *, source: str = 'software'):
+        if self.physical_fire_input_authoritative() and source != 'physical':
+            raise PermissionError('physical fire input is authoritative')
         if active == self.fire_active:
             return
         self.fire_active = active

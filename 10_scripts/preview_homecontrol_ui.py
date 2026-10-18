@@ -805,7 +805,6 @@ class PreviewState:
                 "source": "preview_fixture",
                 "interfaces": [
                     {"name": "eth0", "ipv4": ["192.168.20.27/24"], "ipv6": ["fe80::20:27/64"], "status": "Up", "network": "192.168.20.0/24"},
-                    {"name": "eth0.60", "ipv4": ["192.168.60.27/24"], "ipv6": [], "status": "Up", "network": "192.168.60.0/24"},
                     {"name": "tailscale0", "ipv4": ["100.64.10.27/32"], "ipv6": ["fd7a:115c:a1e0::27/128"], "status": "Up", "network": "100.64.10.27/32"},
                     {"name": "spare0", "ipv4": [], "ipv6": [], "status": "Down", "network": None},
                 ],

@@ -290,6 +290,7 @@ async def _normal_login_rate_check(conn, username: str) -> None:
         )
         if active:
             raise HTTPException(429, "login temporarily unavailable")
+        await conn.execute("DELETE FROM auth_login_rate_limits WHERE scope=$1", username)
 
 
 async def _normal_login_failure(conn, username: str) -> None:
@@ -510,6 +511,7 @@ async def reset_user_password(username: str, password: str) -> dict[str, Any]:
         if not row:
             raise HTTPException(404, "user not found")
         await conn.execute("UPDATE user_sessions SET revoked_at=now() WHERE username=$1 AND revoked_at IS NULL", username)
+        await _clear_normal_login_rate(conn, username)
     result = {
         "ok": True,
         "username": row["username"],
@@ -530,9 +532,11 @@ async def change_own_password(username: str, current_password: str, new_password
             raise HTTPException(401, "invalid current password")
         await conn.execute("UPDATE users SET password_hash=$2 WHERE username=$1", username, hash_password(new_password))
         await conn.execute("UPDATE user_sessions SET revoked_at=now() WHERE username=$1 AND revoked_at IS NULL", username)
+        await _clear_normal_login_rate(conn, username)
     return {"ok": True, "username": username, "sessions_revoked": True, "synchronization": await _safe_sync_user_directory()}
 
 async def login_password(username: str, password: str) -> str:
+    username = _validate_username(username)
     async with db.acquire() as conn:
         await _normal_login_rate_check(conn, username)
         row = await conn.fetchrow(
