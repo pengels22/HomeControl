@@ -18,6 +18,7 @@ import importlib.util
 import json
 import os
 import random
+import re
 import statistics
 import threading
 import resource
@@ -490,19 +491,32 @@ def run_local_diagnostics(coord: Coordinator, report_dir: Path) -> None:
 
 def verify_output_inhibition() -> dict[str, Any]:
     """Verify the repository safety contract before any simulated mutation."""
-    import yaml
-
     paths = [ROOT / "06_config" / item for item in ("01_HCM/hardware_pins.yaml", "03_LCM/hardware_pins.yaml", "04_RCM/hardware_pins.yaml")]
     checked = []
     for path in paths:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        if data.get("physical_output_enabled") is not False:
-            raise RuntimeError(f"physical output gate is not disabled in {path}")
-        for name, section in (data.get("outputs") or {}).items():
-            if not isinstance(section, dict):
-                continue
-            if section.get("real_output_enabled") is True or section.get("commissioned_channels"):
-                raise RuntimeError(f"commissioning gate is open for {path}:{name}")
+        text = path.read_text(encoding="utf-8")
+        try:
+            import yaml
+        except ModuleNotFoundError:
+            # The coordinator must also work with a stock macOS Python.  This
+            # fallback intentionally understands only the deny-by-default
+            # fields used by this gate and fails closed for ambiguous values.
+            top_level = re.search(r"(?m)^physical_output_enabled:\s*(true|false)\s*$", text, re.IGNORECASE)
+            if not top_level or top_level.group(1).lower() != "false":
+                raise RuntimeError(f"physical output gate is ambiguous in {path}")
+            if re.search(r"(?m)^\s+real_output_enabled:\s*true\s*$", text, re.IGNORECASE):
+                raise RuntimeError(f"commissioning gate is open in {path}")
+            if re.search(r"(?m)^\s+commissioned_channels:\s*\[[^\]]*[^\s\[\],][^\]]*\]\s*$", text):
+                raise RuntimeError(f"commissioned channels are present in {path}")
+        else:
+            data = yaml.safe_load(text) or {}
+            if data.get("physical_output_enabled") is not False:
+                raise RuntimeError(f"physical output gate is not disabled in {path}")
+            for name, section in (data.get("outputs") or {}).items():
+                if not isinstance(section, dict):
+                    continue
+                if section.get("real_output_enabled") is True or section.get("commissioned_channels"):
+                    raise RuntimeError(f"commissioning gate is open for {path}:{name}")
         checked.append(str(path.relative_to(ROOT)))
     return {"checked_manifests": checked, "physical_output_enabled": False, "commissioned_channels": [], "mock_transports_only": True}
 
@@ -531,6 +545,9 @@ def run_remote_diagnostics(coord: Coordinator, *, skip_remote: bool) -> None:
         "identity": "hostname; uname -m; date -u +%FT%TZ",
         "storage": "df -Pk /",
     }
+    resource_command = "printf 'loadavg='; cat /proc/loadavg 2>/dev/null || true; printf 'memory='; awk '/MemTotal|MemAvailable/ {printf \"%s=%sKB \", $1, $2}' /proc/meminfo 2>/dev/null || true; printf '\ntemperature='; for f in /sys/class/thermal/thermal_zone*/temp; do [ -r \"$f\" ] && printf '%s=%sC ' \"$f\" \"$(awk '{print $1/1000}' \"$f\")\"; done; printf '\n'"
+    time_command = "timedatectl show -p NTPSynchronized -p NTPOffsetUSec -p TimeUSec 2>/dev/null || date -u +%FT%TZ"
+    supervision_command = "python3 - <<'PY'\nimport json, urllib.request\ntry:\n data=json.load(urllib.request.urlopen('http://127.0.0.1:6004/status', timeout=3))\n status=data.get('status', {})\n print('supervision_status={} registry_entries={}'.format(status.get('state', status.get('supervision_state', 'available')), len(status.get('registry', {}))))\nexcept Exception as exc:\n print('supervision_status=unavailable reason={}'.format(type(exc).__name__))\n raise SystemExit(2)\nPY"
     safety_commands = {
         "jetson": "docker inspect --format='container={{.Name}} image={{.Config.Image}} mounts={{range .Mounts}}{{.Destination}};{{end}}' hcm-test && docker exec hcm-test python3 -c \"import importlib; s=importlib.import_module('01_HCM.settings').settings; assert s.commissioning_enabled is False; print('hcm_commissioning_enabled=false physical_output_writes=false')\"",
         "conflict": "python3 - <<'PY'\nimport json\npath='/etc/hcm-heartbeat/config.json'\ntry:\n data=json.load(open(path))\n print('heartbeat_identity={} heartbeat_port={} physical_output_writes=false'.format(data.get('device_id','unknown'), data.get('port','unknown')))\nexcept Exception as exc:\n raise SystemExit('installed heartbeat config unavailable: {}'.format(exc))\nPY",
@@ -555,6 +572,17 @@ def run_remote_diagnostics(coord: Coordinator, *, skip_remote: bool) -> None:
                 coord.record("Device diagnostics", f"{target} {name}", PASS, "Fixed read-only device diagnostic", "command succeeds without mutation", "completed", started, {"target": target, "output": result.stdout[:1000]})
             except Exception as exc:
                 coord.record("Device diagnostics", f"{target} {name}", BLOCKED, "Fixed read-only device diagnostic", "command succeeds without mutation", str(exc), started, remediation="Repair authorized device access or mark this device unavailable; do not bypass host-key or authentication checks.")
+        for name, command in (("resources", resource_command), ("time_sync", time_command), ("supervision", supervision_command)):
+            if name == "supervision" and target == "lab1":
+                continue
+            started = time.monotonic()
+            try:
+                result = tx.execute(target, command, timeout=10, step_name=f"{target}:{name}", read_only=True)
+                subsystem = "Live supervision" if name == "supervision" else "Live resources"
+                coord.record(subsystem, f"{target} {name}", PASS, "Read-only remote resource, clock or supervision sample", "sample is collected without mutation", "sample collected", started, {"target": target, "output": result.stdout[:1200]})
+            except Exception as exc:
+                subsystem = "Live supervision" if name == "supervision" else "Live resources"
+                coord.record(subsystem, f"{target} {name}", BLOCKED, "Read-only remote resource, clock or supervision sample", "sample is collected without mutation", str(exc), started, remediation="Record the unavailable measurement; do not replace it with an assumed healthy value.")
         started = time.monotonic()
         try:
             result = tx.execute(target, safety_commands[target], timeout=20, step_name=f"{target}:installed_safety_state", read_only=True)
@@ -613,18 +641,21 @@ def overall_status(results: list[Result]) -> str:
 @contextmanager
 def run_lock(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
-    handle = path.open("a+")
+    lock_dir = Path(str(path) + ".d")
     try:
-        import fcntl
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except (ImportError, BlockingIOError) as exc:
-        handle.close()
+        lock_dir.mkdir()
+    except FileExistsError as exc:
         raise RuntimeError("another HomeControl system test is already running") from exc
+    marker = lock_dir / "owner"
+    marker.write_text(f"pid={os.getpid()}\nrun_started={now_iso()}\n", encoding="utf-8")
     try:
-        yield handle
+        yield marker
     finally:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        handle.close()
+        try:
+            marker.unlink()
+            lock_dir.rmdir()
+        except OSError:
+            pass
 
 
 def build_parser() -> argparse.ArgumentParser:
