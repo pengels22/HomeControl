@@ -8,7 +8,7 @@ hardware:
   can:
     controller: MCP2515
     transceiver: TJA1050
-    speed_bps: 250000
+    speed_bps: 125000
     mcp_clock: 8000000
     cs_pin: D10
     int_pin: D2

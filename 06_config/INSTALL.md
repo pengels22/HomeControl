@@ -206,7 +206,7 @@ devices use the unified framework directly.
 
 VLAN 20 is the current development/control network. VLAN 40 is the future
 production control network, but its subnet and module addresses are not approved
-yet. VLAN 60 is reserved for Unified Heartbeat V3 supervisory traffic and must
+yet. The current development deployment uses VLAN 20 for HCM and supervisory traffic and must
 not be used for provisioning or normal module control.
 
 ## RMC

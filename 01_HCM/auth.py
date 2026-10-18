@@ -276,6 +276,42 @@ async def _record_rate_failure(conn, scopes: list[str]) -> None:
         )
 
 
+async def _normal_login_rate_check(conn, username: str) -> None:
+    row = await conn.fetchrow(
+        "SELECT failed_attempts, next_allowed_at FROM auth_login_rate_limits WHERE scope=$1",
+        username,
+    )
+    if row and row["next_allowed_at"] is not None:
+        # PostgreSQL performs the timestamp comparison; a non-null value here
+        # is only written for an active five-minute lockout.
+        active = await conn.fetchrow(
+            "SELECT 1 FROM auth_login_rate_limits WHERE scope=$1 AND next_allowed_at > now()",
+            username,
+        )
+        if active:
+            raise HTTPException(429, "login temporarily unavailable")
+
+
+async def _normal_login_failure(conn, username: str) -> None:
+    row = await conn.fetchrow(
+        "SELECT failed_attempts FROM auth_login_rate_limits WHERE scope=$1 FOR UPDATE",
+        username,
+    )
+    attempts = int(row["failed_attempts"] if row else 0) + 1
+    await conn.execute(
+        """INSERT INTO auth_login_rate_limits(scope, failed_attempts, next_allowed_at, last_failed_at, updated_at)
+           VALUES($1,$2,CASE WHEN $2 >= 5 THEN now() + interval '5 minutes' ELSE NULL END,now(),now())
+           ON CONFLICT(scope) DO UPDATE SET failed_attempts=$2,
+           next_allowed_at=CASE WHEN $2 >= 5 THEN now() + interval '5 minutes' ELSE NULL END,
+           last_failed_at=now(), updated_at=now()""",
+        username, attempts,
+    )
+
+
+async def _clear_normal_login_rate(conn, username: str) -> None:
+    await conn.execute("DELETE FROM auth_login_rate_limits WHERE scope=$1", username)
+
+
 async def unlock_touchscreen(pin: str, device_id: str, device_token: str) -> dict[str, Any]:
     device = await authenticate_touchscreen_device(device_id, device_token)
     scopes = ["global", f"device:{device['device_id']}"]
@@ -498,13 +534,22 @@ async def change_own_password(username: str, current_password: str, new_password
 
 async def login_password(username: str, password: str) -> str:
     async with db.acquire() as conn:
+        await _normal_login_rate_check(conn, username)
         row = await conn.fetchrow(
             "SELECT username, role, password_hash FROM users WHERE username=$1 AND enabled=true",
             username,
         )
-    if not row or not verify_password(password, row["password_hash"]):
-        raise HTTPException(401, "invalid username/password")
-    return await create_persistent_session(row["username"], row["role"])
+        if not row or not verify_password(password, row["password_hash"]):
+            await _normal_login_failure(conn, username)
+            raise HTTPException(401, "invalid username/password")
+        await _clear_normal_login_rate(conn, username)
+        token = secrets.token_urlsafe(32)
+        await conn.execute(
+            """INSERT INTO user_sessions(username,token_hash,role,expires_at)
+               VALUES($1,$2,$3,now() + ($4::integer * interval '1 second'))""",
+            row["username"], _token_hash(token), row["role"], settings.auth_session_ttl_s,
+        )
+        return token
 
 async def create_login_challenge(username: str) -> dict[str, Any]:
     async with db.acquire() as conn:
@@ -649,16 +694,18 @@ async def require_user(authorization: str | None = Header(default=None)) -> dict
         raise HTTPException(401, 'missing bearer token')
     token = authorization[7:]
     sess = _sessions.get(token)
-    if sess and sess[2] >= time.time():
+    if sess and settings.dev_mode and sess[2] >= time.time():
         return {'user': sess[0], 'role': sess[1]}
     async with db.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT username, role
-            FROM user_sessions
-            WHERE token_hash=$1
-              AND revoked_at IS NULL
-              AND expires_at > now()
+            SELECT u.username, u.role
+            FROM user_sessions s
+            JOIN users u ON u.username=s.username
+            WHERE s.token_hash=$1
+              AND u.enabled=true
+              AND s.revoked_at IS NULL
+              AND s.expires_at > now()
             """,
             _token_hash(token),
         )

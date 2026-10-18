@@ -9,7 +9,7 @@ Keep device identity, IPs, passwords, pin maps and wiring in their owners.
 # REPO | Default simulated analog-input voltage.
 Analog_Input_Simulated_Default_V = 0.0
 
-# REPO | SIM CAN config; mismatch with RMC firmware 250000 must be resolved before deployment.
+# REPO | Shared RMC/SIM classical CAN bitrate.
 CAN_Bitrate = 125000
 
 # REPO | CAN support enabled.
@@ -89,4 +89,3 @@ Web_Enabled = True
 
 # REPO | SIM web port; per-module deployment setting.
 Web_Port = 8092
-

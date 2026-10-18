@@ -21,6 +21,7 @@ class FakeAuthConn:
     def __init__(self):
         self.users = {}
         self.sessions = []
+        self.login_limits = {}
         self.pairing = {}
         self.next_pairing_id = 1
 
@@ -32,9 +33,22 @@ class FakeAuthConn:
         if 'INSERT INTO user_sessions' in query:
             self.sessions.append(args)
             return
+        if 'auth_login_rate_limits' in query:
+            if query.startswith('DELETE'):
+                self.login_limits.pop(args[0], None)
+            else:
+                self.login_limits[args[0]] = {'failed_attempts': args[1], 'next_allowed_at': object() if args[1] >= 5 else None}
+            return
         raise AssertionError(f'unexpected execute: {query}')
 
     async def fetchrow(self, query, *args):
+        if 'auth_login_rate_limits' in query:
+            row = self.login_limits.get(args[0])
+            if 'next_allowed_at > now()' in query:
+                return row if row and row.get('next_allowed_at') is not None else None
+            if 'FOR UPDATE' in query:
+                return row
+            return row
         if 'FROM users WHERE username=$1' in query:
             return self.users.get(args[0])
         if 'INSERT INTO pairing_keys' in query:
@@ -70,6 +84,23 @@ class FakeAuthConn:
 class FakeDateTime:
     def isoformat(self):
         return '2026-10-01T12:00:00'
+
+
+class FakeSessionConn:
+    def __init__(self, row):
+        self.row = row
+
+    async def fetchrow(self, query, *args):
+        return self.row
+
+
+@pytest.mark.asyncio
+async def test_persistent_session_uses_current_enabled_role(monkeypatch):
+    conn = FakeSessionConn({'username': 'patrick', 'role': 'READONLY'})
+    monkeypatch.setattr(auth.db, 'acquire', lambda: FakeAcquire(conn))
+    monkeypatch.setattr(auth, '_token_hash', lambda token: 'hash')
+    result = await auth.require_user('Bearer token')
+    assert result == {'user': 'patrick', 'role': 'READONLY'}
 
 
 def test_password_hash_does_not_store_plain_text_and_verifies():
@@ -123,6 +154,25 @@ async def test_password_login_rejects_bad_password(monkeypatch):
         await auth.login_password('patrick', 'wrong password')
 
     assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_password_login_locks_after_five_failures_and_clears_on_success(monkeypatch):
+    conn = FakeAuthConn()
+    monkeypatch.setattr(auth.db, 'acquire', lambda: FakeAcquire(conn))
+    await auth.create_user('patrick', 'correct horse battery staple', 'ADMIN')
+
+    for _ in range(5):
+        with pytest.raises(HTTPException) as exc:
+            await auth.login_password('patrick', 'wrong password')
+        assert exc.value.status_code == 401
+    with pytest.raises(HTTPException) as exc:
+        await auth.login_password('patrick', 'correct horse battery staple')
+    assert exc.value.status_code == 429
+
+    conn.login_limits['patrick']['next_allowed_at'] = None
+    token = await auth.login_password('patrick', 'correct horse battery staple')
+    assert token and 'patrick' not in conn.login_limits
 
 
 @pytest.mark.asyncio

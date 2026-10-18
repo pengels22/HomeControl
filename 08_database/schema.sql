@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS logical_devices (
 CREATE TABLE IF NOT EXISTS output_intents (
     id BIGSERIAL PRIMARY KEY,
     logical_device_id BIGINT NOT NULL REFERENCES logical_devices(id) ON DELETE CASCADE,
-    source TEXT NOT NULL CHECK (source IN ('life_safety','local_override','user','rules')),
+    source TEXT NOT NULL CHECK (source IN ('life_safety','local_override','user','rules','schedule','scene')),
     command JSONB NOT NULL,
     active BOOLEAN NOT NULL DEFAULT TRUE,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -230,6 +230,14 @@ CREATE TABLE IF NOT EXISTS touchscreen_rate_limits (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS auth_login_rate_limits (
+    scope TEXT PRIMARY KEY,
+    failed_attempts INTEGER NOT NULL DEFAULT 0 CHECK (failed_attempts >= 0),
+    next_allowed_at TIMESTAMPTZ,
+    last_failed_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS auth_challenges (
     id BIGSERIAL PRIMARY KEY,
     username TEXT NOT NULL REFERENCES users(username) ON DELETE CASCADE,
@@ -318,6 +326,7 @@ CREATE INDEX IF NOT EXISTS idx_output_intents_active ON output_intents(logical_d
 CREATE INDEX IF NOT EXISTS idx_output_arbitration_events_created ON output_arbitration_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_output_arbitration_events_device_channel ON output_arbitration_events(device_id, channel_id);
 CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token_hash) WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_user_sessions_active_user ON user_sessions(username, expires_at) WHERE revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_auth_challenges_challenge ON auth_challenges(challenge) WHERE consumed_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_pairing_keys_hash ON pairing_keys(pairing_token_hash) WHERE used_at IS NULL;
 

@@ -38,19 +38,19 @@ class UpdateOrchestrator:
         if rc != 0:
             raise RuntimeError(f'firewall hook failed ({action} {ip}) rc={rc}')
 
-    async def _request_update(self, ip: str, command: list[str] | None = None) -> dict:
+    async def _request_update(self, ip: str, artifact: dict[str, Any]) -> dict:
         reader, writer = await asyncio.open_connection(ip, self.update_port)
         try:
             await protocol.write_frame(writer, {
                 'type': 'update_run',
-                'payload': {'command': command or ['sudo', 'apt-get', 'update']},
+                'payload': {'artifact': artifact},
             })
             return (await protocol.read_frame(reader)).get('payload', {})
         finally:
             writer.close()
             await writer.wait_closed()
 
-    async def update_module(self, hostname: str, command: list[str] | None = None, return_timeout_s: int | None = None) -> dict:
+    async def update_module(self, hostname: str, artifact: dict[str, Any], return_timeout_s: int | None = None) -> dict:
         async with self._lock:
             async with db.acquire() as conn:
                 row = await conn.fetchrow('SELECT device_id, module_uuid::text AS module_uuid, ip_address FROM modules WHERE hostname=$1', hostname)
@@ -59,7 +59,7 @@ class UpdateOrchestrator:
             module_key, ip = row['device_id'] or str(row['module_uuid']), str(row['ip_address'])
             await self._firewall('open', ip)
             try:
-                result = await self._request_update(ip, command)
+                result = await self._request_update(ip, artifact)
                 if not result.get('ok') and not result.get('dry_run'):
                     raise RuntimeError(f'update failed: {result}')
                 deadline = asyncio.get_running_loop().time() + (return_timeout_s if return_timeout_s is not None else self.module_return_timeout_s)

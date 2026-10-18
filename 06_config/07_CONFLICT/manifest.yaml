@@ -26,7 +26,7 @@ persistent_data:
   - /var/lib/homecontrol-heartbeat
 network_services:
   - name: heartbeat
-    address: 192.168.60.2
+    address: 192.168.20.26
     port: 6004
 authentication:
   required: true

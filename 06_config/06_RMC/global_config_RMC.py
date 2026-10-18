@@ -6,8 +6,8 @@ This is a template; the module runtime does not automatically read this file.
 Keep device identity, IPs, passwords, pin maps and wiring in their owners.
 """
 
-# REPO | RMC Arduino firmware configuration; conflicts with SIM 125000.
-CAN_Bitrate = 250000
+# REPO | Shared RMC/SIM classical CAN bitrate.
+CAN_Bitrate = 125000
 
 # REPO | RMC CAN heartbeat frame interval, ms; separate from Unified V3.
 Heartbeat_Interval = 10000
@@ -23,4 +23,3 @@ Serial_Baud = 115200
 
 # REPO | Arduino sensor telemetry frame interval, ms.
 Telemetry_Interval = 5000
-

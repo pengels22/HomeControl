@@ -96,4 +96,4 @@ def test_phase3_pinned_values_are_available():
     assert hcm.Heartbeat_TCP_Port == 6004
     assert hcm.Door_Open_Pulse == 3000
     assert sim.Hexa_12V_Restart_Off_Time == 5000
-    assert sim.CAN_Bitrate != rmc.CAN_Bitrate
+    assert sim.CAN_Bitrate == rmc.CAN_Bitrate == 125000

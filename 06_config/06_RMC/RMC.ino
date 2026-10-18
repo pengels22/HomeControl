@@ -85,7 +85,7 @@ static const uint8_t PIN_DIP3 = 7;
 // These two values MUST match the MCP2515 board / SIM bus.
 // Common MCP2515 modules are 8 MHz or 16 MHz.
 // Change only here if your hardware differs.
-#define RMC_CAN_SPEED CAN_250KBPS
+#define RMC_CAN_SPEED CAN_125KBPS
 #define RMC_MCP_CLOCK MCP_8MHZ
 
 // Reporting defaults. These were not previously pinned and may be changed here.

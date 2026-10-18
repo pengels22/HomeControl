@@ -38,6 +38,15 @@ legacy documentation only and remain recorded in
 The current adapters are discovery-only or mocked. No bus write, GPIO write,
 Shelly request, or commissioning test is included in this milestone.
 
+## Verified update artifacts
+
+Module update requests carry signed artifact metadata only. HCM and the module
+update service verify the target module, hardware revision, SHA-256 digest and
+Ed25519 signature before execution. The installer is selected from a fixed
+per-module registry; executable paths and argument arrays supplied by a client
+are rejected. Update execution remains disabled unless deployment config
+explicitly enables the already-verified service path.
+
 ## Commissioning prerequisite
 
 Before any output test, verify board identity, bus/address/polarity, supply

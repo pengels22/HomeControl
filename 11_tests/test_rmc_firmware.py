@@ -34,7 +34,7 @@ def test_rmc_firmware_frame_plan_uses_classical_can_payloads_and_target_node():
 def test_rmc_build_time_config_uses_global_values():
     cfg = rmc_fw.build_time_config()
 
-    assert cfg['CAN_BITRATE'] == 250000
+    assert cfg['CAN_BITRATE'] == 125000
     assert cfg['RMC_FIRMWARE_BLOCK_SIZE'] == 4
     assert cfg['TELEMETRY_INTERVAL_MS'] == 5000
 

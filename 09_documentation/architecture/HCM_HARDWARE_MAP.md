@@ -227,8 +227,8 @@ The following require confirmation before production hardware use:
 - MCP23017 addressing and bus topology.
 - LCM DAC output scaling and electrical interface to LED drivers.
 - Shelly dimmer integration details.
-- CAN bitrate consistency: `sim.yaml` uses 125000 bps while RMC config/firmware
-  references 250000 bps.
+- CAN bitrate consistency: active SIM, RMC configuration, and RMC firmware now
+  use the shared 125000 bps classical-CAN contract.
 - Fuse sizing and terminal schedules.
 - Maintenance-lock electrical behavior for outputs that may also be required by
   life-safety actions.

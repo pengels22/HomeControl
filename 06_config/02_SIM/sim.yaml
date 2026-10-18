@@ -15,10 +15,10 @@ identity:
 networks:
   control_vlan: 20
   production_control_vlan: 40
-  heartbeat_vlan: 60
-  heartbeat_conflict_address: 192.168.60.2
+  heartbeat_vlan: 20
+  heartbeat_conflict_address: 192.168.20.26
   heartbeat_port: 6004
-  note: VLAN 60 is reserved for Unified Heartbeat V3 supervisory traffic only.
+  note: Current development deployment uses the VLAN 20 Ethernet path.
 io:
   mode: auto
 tls:
