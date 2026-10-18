@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+"""Run or inspect additive HomeControl PostgreSQL migrations."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import importlib
+import json
+
+
+async def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument('command', choices=('migrate', 'status'))
+    args = parser.parse_args()
+    migrations = importlib.import_module('01_HCM.db_migrations')
+    if args.command == 'migrate':
+        result = await migrations.migrate()
+    else:
+        result = await migrations.status()
+    print(json.dumps(result, default=str))
+
+
+if __name__ == '__main__':
+    asyncio.run(main())

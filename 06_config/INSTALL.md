@@ -176,7 +176,9 @@ at startup:
 
 - `HCM_DEV_MODE=true` or `HC_DEV_MODE=true` forces simulated IO.
 - `HC_IO_MODE=simulated` or `HC_IO_MODE=real` overrides config.
-- `io.mode: auto` in module config resolves to real IO when dev mode is not set.
+- `io.mode: auto` is fail-safe and resolves to simulated I/O. Select `real`
+  explicitly only for an approved deployment; physical commissioning gates
+  remain independently required.
 
 This lets development pages and the Mac simulator exercise the same command
 paths while keeping physical buses untouched until hardware deployment.

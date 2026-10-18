@@ -73,6 +73,11 @@ class UpdateOrchestrator:
             if not row:
                 raise KeyError(hostname)
             module_key, ip = row['device_id'] or str(row['module_uuid']), str(row['ip_address'])
+            async with db.acquire() as conn:
+                before = await conn.fetchrow(
+                    'SELECT last_seen, software_version FROM modules WHERE hostname=$1', hostname
+                )
+            before_seen = before['last_seen'] if before else None
             await self._firewall('open', ip)
             try:
                 result = await self._request_update(ip, artifact)
@@ -80,9 +85,22 @@ class UpdateOrchestrator:
                     raise RuntimeError(f'update failed: {result}')
                 deadline = asyncio.get_running_loop().time() + (return_timeout_s if return_timeout_s is not None else self.module_return_timeout_s)
                 while asyncio.get_running_loop().time() < deadline:
-                    conn = registry.connections.get(module_key)
-                    if conn and conn.last_heartbeat:
-                        return {'ok': True, 'module': hostname, 'update': result, 'verified': True}
+                    connection = registry.connections.get(module_key)
+                    async with db.acquire() as conn:
+                        current = await conn.fetchrow(
+                            'SELECT last_seen, software_version FROM modules WHERE hostname=$1', hostname
+                        )
+                    newer_heartbeat = bool(current and current['last_seen'] and (before_seen is None or current['last_seen'] > before_seen))
+                    if connection and connection.last_heartbeat and newer_heartbeat:
+                        expected = str(artifact.get('version') or artifact.get('software_version') or '')
+                        version_ok = not expected or str(current['software_version'] or '') == expected
+                        return {
+                            'ok': True,
+                            'module': hostname,
+                            'update': result,
+                            'verified': version_ok,
+                            'verification': {'new_heartbeat': True, 'reported_version': current['software_version'], 'version_match': version_ok},
+                        }
                     await asyncio.sleep(self.module_poll_interval_s)
                 raise TimeoutError(f'{hostname} did not return heartbeat after update')
             finally:

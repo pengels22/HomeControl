@@ -444,19 +444,25 @@ $('login-form').addEventListener('submit',login);$('refresh').addEventListener('
 
         @app.get('/health')
         async def offline_health():
+            # Keep emergency health useful without exposing detailed config,
+            # logs, and component metadata on an unauthenticated route.
             status = await self.web_status()
             return {
-                key: status[key]
-                for key in (
-                    'module_type',
-                    'identity',
-                    'software_version',
-                    'uptime_seconds',
-                    'hcm_heartbeat_health',
-                    'component_health',
-                    'active_faults',
-                )
+                'ok': not bool(status['active_faults']),
+                'module_type': status['module_type'],
+                'identity': {
+                    key: status['identity'].get(key)
+                    for key in ('module_type', 'device_id', 'hostname', 'simulation', 'physical_outputs_enabled')
+                },
+                'software_version': status['software_version'],
+                'uptime_seconds': status['uptime_seconds'],
+                'hcm_heartbeat_health': status['hcm_heartbeat_health'],
+                'active_fault_count': len(status['active_faults']),
             }
+
+        @app.get('/api/module/diagnostics')
+        async def diagnostics(user=Depends(require_hcm_user)):
+            return await self.web_status()
 
         @app.get('/api/module/config')
         async def config(user=Depends(require_hcm_user)):

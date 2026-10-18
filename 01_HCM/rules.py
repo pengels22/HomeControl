@@ -8,6 +8,9 @@ log = logging.getLogger(__name__)
 class RulesEngine:
     """First-pass polling rules engine. Exact rule schema can evolve without changing device bindings."""
     def __init__(self): self.running=True
+    def status(self):
+        return {'execution': 'not_implemented', 'stored_rules_active': False, 'reason': 'rule schema is not approved'}
+
     async def run(self):
         while self.running:
             await asyncio.sleep(1)

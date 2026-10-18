@@ -14,6 +14,7 @@ dependencies = [
   "smbus2>=0.5,<1",
   "qrcode>=7.4,<9",
   "cryptography>=43,<47",
+  "gpiod>=2.2; platform_system == 'Linux'",
 ]
 
 [project.optional-dependencies]
@@ -25,3 +26,4 @@ homecontrol = "homecontrol_cli:main"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["."]
+markers = ["hardware: explicit hardware readiness/commissioning tests"]

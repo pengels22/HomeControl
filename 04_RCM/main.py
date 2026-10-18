@@ -14,6 +14,8 @@ common_infra = import_module('07_servises.common.module_infra')
 common_profiles = import_module('07_servises.common.hardware_profiles')
 common_commissioning = import_module('07_servises.common.commissioning')
 common_drivers = import_module('07_servises.common.physical_drivers')
+common_factory = import_module('07_servises.common.hardware_factory')
+state_confidence = import_module('07_servises.common.state_confidence')
 
 class RCMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
@@ -43,7 +45,10 @@ class RCMAgent(common_agent.ModuleAgent):
         # Real I/O mode never accepts a simulation command, even while the
         # manifest keeps physical outputs disabled.
         self.simulation = self.io_mode != 'real'
-        self.driver_bundle = common_drivers.build_lab1_mock_drivers() if config.get('mock_hardware') else None
+        hardware_mode = 'mock' if config.get('mock_hardware') else self.io_mode
+        self.driver_bundle = common_factory.build_hardware_bundle('RCM', {**config, 'hardware_mode': hardware_mode}, self.hardware_profile)
+        if self.driver_bundle.mode in {'simulated', 'disabled'}:
+            self.driver_bundle = None
         if self.driver_bundle:
             self.driver_bundle['rcm_relays'].initialize()
         self.relays = common_hw.DigitalBank(names)
@@ -93,6 +98,7 @@ class RCMAgent(common_agent.ModuleAgent):
                 for channel, (component, index) in self.relay_hardware_map.items()
             },
             'state_confidence': 'commanded_only_no_contact_feedback',
+            'state_confidence_label': state_confidence.COMMANDED if self.io_mode == 'real' else state_confidence.SIMULATED,
             'io_mode': self.io_mode,
             'pinout': {
                 channel: {
@@ -140,7 +146,10 @@ class RCMAgent(common_agent.ModuleAgent):
             return {'ok': True, 'safety': self.safety.snapshot(), 'arbitration': decisions}
         if payload.get('op') == 'set_relay':
             ch = payload['channel'].upper()
-            if payload.get('physical_write_requested') and not common_commissioning.physical_write_allowed(self.hardware_profile, ch):
+            physical_requested = bool(payload.get('physical_write_requested'))
+            if physical_requested and self.io_mode != 'real':
+                return {'ok': False, 'error': 'physical output mode is not real', 'channel': ch, 'physical_outputs_commanded': False}
+            if physical_requested and not common_commissioning.physical_write_allowed(self.hardware_profile, ch):
                 return {'ok': False, 'error': 'physical channel is not explicitly commissioned', 'channel': ch, 'physical_outputs_commanded': False}
             decision = self.safety.decide(common_safety.OutputRequest(
                 self.identity.get('device_id'),
@@ -148,13 +157,15 @@ class RCMAgent(common_agent.ModuleAgent):
                 payload,
                 payload.get('source', 'module_api'),
             ))
-            if payload.get('physical_write_requested'):
+            physical_commanded = False
+            if physical_requested:
                 if not self.driver_bundle:
                     return {'ok': False, 'error': 'physical driver is not configured', 'channel': ch, 'physical_outputs_commanded': False}
                 self.driver_bundle['rcm_relays'].set_channel(
                     common_infra.RCM_RELAY_CHANNELS.index(ch),
                     bool(decision.final_command.get('value', False)),
                 )
+                physical_commanded = True
             self.relays.set(ch, bool(decision.final_command.get('value', False)))
             entry = self.pinout.get(ch)
             hardware_address = (
@@ -170,7 +181,8 @@ class RCMAgent(common_agent.ModuleAgent):
                 'requested_value': bool(payload['value']),
                 'state_confidence': 'commanded_only_no_contact_feedback',
                 'arbitration': decision.as_dict(),
-                'physical_output_commanded': False,
+                'physical_output_commanded': physical_commanded,
+                'state_confidence_label': state_confidence.OUTPUT_LATCH_READBACK if physical_commanded else (state_confidence.COMMANDED if self.io_mode == 'real' else state_confidence.SIMULATED),
                 'physical_write_allowed': common_commissioning.physical_write_allowed(self.hardware_profile, ch),
             }
         if payload.get('op') == 'all_off':

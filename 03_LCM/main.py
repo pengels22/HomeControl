@@ -13,6 +13,8 @@ common_infra = import_module('07_servises.common.module_infra')
 common_profiles = import_module('07_servises.common.hardware_profiles')
 common_commissioning = import_module('07_servises.common.commissioning')
 common_drivers = import_module('07_servises.common.physical_drivers')
+common_factory = import_module('07_servises.common.hardware_factory')
+state_confidence = import_module('07_servises.common.state_confidence')
 
 class LCMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
@@ -28,7 +30,10 @@ class LCMAgent(common_agent.ModuleAgent):
         self.lv_dimmer_map = {str(i): channel for i, channel in enumerate(common_infra.LCM_ANALOG_DIMMER_CHANNELS, start=9)}
         self.hv_dimmer_map = {str(i): channel for i, channel in enumerate(common_infra.LCM_HV_DIMMER_CHANNELS, start=19)}
         self.io_mode = common_io.io_mode(config)
-        self.driver_bundle = common_drivers.build_lab1_mock_drivers() if config.get('mock_hardware') else None
+        hardware_mode = 'mock' if config.get('mock_hardware') else self.io_mode
+        self.driver_bundle = common_factory.build_hardware_bundle('LCM', {**config, 'hardware_mode': hardware_mode}, self.hardware_profile)
+        if self.driver_bundle.mode in {'simulated', 'disabled'}:
+            self.driver_bundle = None
         if self.driver_bundle:
             self.driver_bundle['lcm_relays'].initialize()
             self.driver_bundle['lcm_pwm'].initialize()
@@ -125,6 +130,7 @@ class LCMAgent(common_agent.ModuleAgent):
                 for name, driver in (self.driver_bundle or {}).items()
                 if hasattr(driver, 'diagnostics')
             } or {'mode': 'not_instantiated'},
+            'state_confidence_label': state_confidence.COMMANDED if self.io_mode == 'real' else state_confidence.SIMULATED,
         }
 
     def _percent(self, payload):
@@ -137,33 +143,39 @@ class LCMAgent(common_agent.ModuleAgent):
         logical = str(channel).upper()
         if logical in self.relay_map:
             physical = self.relay_map[logical]
-            if payload.get('physical_write_requested') and not common_commissioning.physical_write_allowed(self.hardware_profile, physical):
+            physical_requested = bool(payload.get('physical_write_requested'))
+            if physical_requested and self.io_mode != 'real':
+                return {'ok': False, 'error': 'physical output mode is not real', 'channel': logical, 'physical_outputs_commanded': False}
+            if physical_requested and not common_commissioning.physical_write_allowed(self.hardware_profile, physical):
                 return {'ok': False, 'error': 'physical channel is not explicitly commissioned', 'channel': logical, 'physical_outputs_commanded': False}
             decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), physical, payload, payload.get('source', 'module_api')))
-            if payload.get('physical_write_requested'):
+            if physical_requested:
                 if not self.driver_bundle:
                     return {'ok': False, 'error': 'physical driver is not configured', 'channel': logical, 'physical_outputs_commanded': False}
                 self.driver_bundle['lcm_relays'].set_channel(int(physical) - 1, bool(decision.final_command.get('value', False)))
             self.relays.set(physical, bool(decision.final_command.get('value', False)))
-            return {'ok': True, 'kind': 'relay', 'channel': logical, 'physical': physical, 'value': self.relays.get(physical), 'arbitration': decision.as_dict()}
+            return {'ok': True, 'kind': 'relay', 'channel': logical, 'physical': physical, 'value': self.relays.get(physical), 'physical_output_commanded': physical_requested, 'state_confidence_label': state_confidence.OUTPUT_LATCH_READBACK if physical_requested else state_confidence.SIMULATED, 'arbitration': decision.as_dict()}
         if logical in self.relays.values:
             decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), logical, payload, payload.get('source', 'module_api')))
             self.relays.set(logical, bool(decision.final_command.get('value', False)))
             return {'ok': True, 'kind': 'relay', 'channel': logical, 'value': self.relays.get(logical), 'arbitration': decision.as_dict()}
         if logical in self.hv_dimmer_map:
             physical = self.hv_dimmer_map[logical]
-            if payload.get('physical_write_requested') and not common_commissioning.physical_write_allowed(self.hardware_profile, physical):
+            physical_requested = bool(payload.get('physical_write_requested'))
+            if physical_requested and self.io_mode != 'real':
+                return {'ok': False, 'error': 'physical output mode is not real', 'channel': logical, 'physical_outputs_commanded': False}
+            if physical_requested and not common_commissioning.physical_write_allowed(self.hardware_profile, physical):
                 return {'ok': False, 'error': 'physical channel is not explicitly commissioned', 'channel': logical, 'physical_outputs_commanded': False}
             bounded = {**payload, 'percent': self._clamp_percent(self._percent(payload))}
             decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), physical, bounded, payload.get('source', 'module_api')))
-            if payload.get('physical_write_requested'):
+            if physical_requested:
                 if not self.driver_bundle:
                     return {'ok': False, 'error': 'physical driver is not configured', 'channel': logical, 'physical_outputs_commanded': False}
                 self.driver_bundle['shelly_1' if int(physical) < 21 else 'shelly_2'].set_brightness(
                     f"light:{(int(physical) - 19) % 2}", float(decision.final_command.get('percent', 0))
                 )
             self.hv_dimmers.set_percent(physical, float(decision.final_command.get('percent', 0.0)))
-            return {'ok': True, 'kind': 'hv_dimmer', 'channel': logical, 'physical': physical, **self.hv_dimmers.snapshot()[physical], 'arbitration': decision.as_dict()}
+            return {'ok': True, 'kind': 'hv_dimmer', 'channel': logical, 'physical': physical, **self.hv_dimmers.snapshot()[physical], 'physical_output_commanded': physical_requested, 'state_confidence_label': state_confidence.OUTPUT_LATCH_READBACK if physical_requested else state_confidence.SIMULATED, 'arbitration': decision.as_dict()}
         if logical in self.hv_dimmers.values:
             bounded = {**payload, 'percent': self._clamp_percent(self._percent(payload))}
             decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), logical, bounded, payload.get('source', 'module_api')))
@@ -171,16 +183,19 @@ class LCMAgent(common_agent.ModuleAgent):
             return {'ok': True, 'kind': 'hv_dimmer', 'channel': logical, **self.hv_dimmers.snapshot()[logical], 'arbitration': decision.as_dict()}
         if logical in self.lv_dimmer_map:
             physical = self.lv_dimmer_map[logical]
-            if payload.get('physical_write_requested') and not common_commissioning.physical_write_allowed(self.hardware_profile, physical):
+            physical_requested = bool(payload.get('physical_write_requested'))
+            if physical_requested and self.io_mode != 'real':
+                return {'ok': False, 'error': 'physical output mode is not real', 'channel': logical, 'physical_outputs_commanded': False}
+            if physical_requested and not common_commissioning.physical_write_allowed(self.hardware_profile, physical):
                 return {'ok': False, 'error': 'physical channel is not explicitly commissioned', 'channel': logical, 'physical_outputs_commanded': False}
             bounded = {**payload, 'percent': self._clamp_percent(self._percent(payload))}
             decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), physical, bounded, payload.get('source', 'module_api')))
-            if payload.get('physical_write_requested'):
+            if physical_requested:
                 if not self.driver_bundle:
                     return {'ok': False, 'error': 'physical driver is not configured', 'channel': logical, 'physical_outputs_commanded': False}
                 self.driver_bundle['lcm_pwm'].set_percent(int(physical) - 9, float(decision.final_command.get('percent', 0)))
             self.lv_dimmers.set_percent(physical, float(decision.final_command.get('percent', 0.0)))
-            return {'ok': True, 'kind': 'lv_dimmer', 'channel': logical, 'physical': physical, **self.lv_dimmers.snapshot()[physical], 'arbitration': decision.as_dict()}
+            return {'ok': True, 'kind': 'lv_dimmer', 'channel': logical, 'physical': physical, **self.lv_dimmers.snapshot()[physical], 'physical_output_commanded': physical_requested, 'state_confidence_label': state_confidence.OUTPUT_LATCH_READBACK if physical_requested else state_confidence.SIMULATED, 'arbitration': decision.as_dict()}
         if logical in self.lv_dimmers.values:
             bounded = {**payload, 'percent': self._clamp_percent(self._percent(payload))}
             decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), logical, bounded, payload.get('source', 'module_api')))

@@ -13,6 +13,7 @@ from .hvac import HVACController
 from .safety import SafetyController
 from .safety_relays import HCMSafetyRelayController
 from .rules import RulesEngine
+from .notifications import notifications
 from . import api
 from . import storage
 from .devices import command_logical
@@ -34,7 +35,10 @@ def build_safety_relays():
     if settings.safety_input_backend == 'simulated':
         return HCMSafetyRelayController()
     if settings.safety_input_backend == 'linux':
-        return HCMSafetyRelayController.from_linux()
+        try:
+            return HCMSafetyRelayController.from_linux()
+        except Exception as exc:
+            raise RuntimeError('HCM_SAFETY_INPUT_BACKEND=linux requires accessible gpiod inputs; refusing simulated fallback') from exc
     raise RuntimeError('HCM_SAFETY_INPUT_BACKEND must be simulated or linux')
 
 
@@ -47,6 +51,8 @@ rules = RulesEngine()
 api.hvac = hvac
 api.safety = safety
 api.safety_relays = safety_relays
+api.rules_engine = rules
+api.notification_service = notifications
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

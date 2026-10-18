@@ -353,15 +353,19 @@ class DebouncedInput:
         return None
 
 
-def build_lab1_mock_drivers() -> dict[str, Any]:
+def build_lab1_mock_drivers(profile: dict[str, Any] | None = None) -> dict[str, Any]:
     """Instantiate production driver classes with recording, non-physical transports."""
     transport = MockI2CTransport()
     bus = LockedI2C(transport)
+    profile = profile or {}
+    i2c = profile.get('buses', {}).get('i2c', {})
+    mcp_address = int(str(i2c.get('mcp2', {}).get('address', 0x27)), 0)
+    pwm_address = int(str(i2c.get('pca9685', {}).get('address', 0x40)), 0)
     return {
         "i2c_transport": transport,
         "rcm_relays": XL9535RelayDriver(bus),
-        "lcm_relays": MCP23017RelayDriver(bus, 0x27),
-        "lcm_pwm": PCA9685Driver(bus, 0x40, 1000),
+        "lcm_relays": MCP23017RelayDriver(bus, mcp_address),
+        "lcm_pwm": PCA9685Driver(bus, pwm_address, int(i2c.get('pca9685', {}).get('frequency_hz', 1000))),
         "shelly_1": MockShellyTransport(),
         "shelly_2": MockShellyTransport(),
         "gpio": MockGPIOTransport(),

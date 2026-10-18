@@ -30,9 +30,14 @@ def io_mode(config: dict[str, Any] | None = None) -> str:
         return "simulated"
     io_cfg = cfg.get("io", {})
     mode = io_cfg.get("mode", cfg.get("io_mode", "simulated"))
-    if str(mode).lower() == "auto":
-        return "real"
-    return str(mode).lower()
+    normalized = str(mode).lower()
+    if normalized == "auto":
+        # Auto detection must never turn a field device into a writer.  Real
+        # mode is an explicit deployment choice and remains commissioning-gated.
+        return "simulated"
+    if normalized not in {"simulated", "real", "mock", "disabled"}:
+        raise ValueError("io.mode must be simulated, real, mock, or disabled")
+    return normalized
 
 
 def real_io_enabled(config: dict[str, Any] | None = None) -> bool:

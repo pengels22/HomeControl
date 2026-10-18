@@ -28,4 +28,11 @@ class NotificationService:
                 n.title, n.body, n.priority, n.category, json.dumps(n.data or {})
             )
 
+    def status(self) -> dict[str, Any]:
+        return {
+            'persisted': True,
+            'push_delivered': False,
+            'delivery_adapter': 'not_configured',
+        }
+
 notifications = NotificationService()

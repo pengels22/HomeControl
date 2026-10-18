@@ -424,7 +424,7 @@ def run_stress_scenarios(coord: Coordinator, *, duration_s: float, concurrency: 
         coord.metrics.extend([sample_metrics("isolated_hcm", active_workers=concurrency, requests=hcm["requests"]), sample_metrics("isolated_conflict", active_workers=concurrency, requests=conflict["requests"])])
         return {"hcm": hcm, "conflict": conflict, "concurrent": True, "physical_outputs": False}
 
-    coord.run_step("HCM stress", "bounded isolated read-only workload", combined, description="Run HCM-shaped workload concurrently with Conflict-shaped heartbeat processing", expected="bounded throughput/latency metrics with zero errors and no physical writes", timeout_s=duration_s + 15.0)
+    coord.run_step("HCM stress", "bounded isolated read-only workload", combined, description="Synthetic HCM-shaped workload; no production request volume implied", expected="bounded synthetic throughput/latency metrics with zero errors and no physical writes", timeout_s=duration_s + 15.0)
 
 
 def run_communications_fixture(coord: Coordinator) -> None:

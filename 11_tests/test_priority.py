@@ -44,6 +44,8 @@ class FakePriorityConn:
         raise AssertionError(f'unexpected fetchrow: {query}')
 
     async def fetch(self, query, *args):
+        if 'FROM logical_devices d' in query and 'WHERE d.logical_name=$1' in query:
+            return [await self.fetchrow(query, *args)]
         if 'FROM output_intents' in query:
             rows = []
             for source, command in self.intents.get(args[0], {}).items():

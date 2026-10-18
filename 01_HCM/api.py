@@ -77,8 +77,13 @@ async def health():
     payload = {'ok': True}
     if safety is not None:
         payload['fire_life_safety'] = safety.status_payload()
+        payload['safety_inputs'] = {
+            'fire_alarm_s': payload['fire_life_safety'].get('fire_alarm_s'),
+            'fire_alarm_P': payload['fire_life_safety'].get('fire_alarm_P'),
+        }
     else:
         payload['fire_life_safety'] = {'status': 'Unavailable', 'source': 'hcm_safety_controller'}
+        payload['safety_inputs'] = {'fire_alarm_s': {'state': 'unknown'}, 'fire_alarm_P': {'state': 'unknown'}}
     return payload
 
 @router.post('/auth/dev-session')

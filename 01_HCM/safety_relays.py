@@ -117,12 +117,21 @@ class HCMSafetyRelayController:
         self._pulse_tasks: dict[str, asyncio.Task] = {}
 
     def status(self) -> dict[str, Any]:
+        def input_status(name: str) -> dict[str, Any]:
+            try:
+                value = self.read_input(name)
+            except Exception as exc:
+                return {'state': 'unknown', 'health': 'fault', 'error': str(exc)}
+            return {
+                'state': 'unknown' if value is None else ('high' if value else 'low'),
+                'health': 'ok' if value is not None else 'unknown',
+            }
         return {
-            'mode': 'simulated_gpio',
+            'mode': 'linux_gpio' if self.backend.physical_input_authoritative else 'simulated_gpio',
             'maintenance_lockout_exempt': True,
-            'fire_alarm_s': self.read_input('fire_alarm_s'),
-            'fire_alarm_P': self.read_input('fire_alarm_P'),
-            'alarm_contact': self.read_input('alarm_contact'),
+            'fire_alarm_s': input_status('fire_alarm_s'),
+            'fire_alarm_P': input_status('fire_alarm_P'),
+            'alarm_contact': input_status('alarm_contact'),
             'relays': {name: relay.as_dict() for name, relay in self.relays.items()},
         }
 

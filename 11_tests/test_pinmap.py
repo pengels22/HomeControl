@@ -63,7 +63,7 @@ async def test_rcm_simulation_command_never_uses_physical_output_path():
 
 @pytest.mark.asyncio
 async def test_rcm_simulation_command_is_rejected_in_real_io_mode():
-    agent = rcm.RCMAgent({'io_mode': 'real'})
+    agent = rcm.RCMAgent({'io_mode': 'real', 'mock_hardware': True})
 
     result = await agent.apply_command({
         'op': 'simulate_relay',
@@ -97,7 +97,7 @@ def test_physical_bench_does_not_commission_without_explicit_channel_allowlist()
 
 @pytest.mark.asyncio
 async def test_uncommissioned_physical_request_is_rejected_without_output_command():
-    agent = rcm.RCMAgent({'io_mode': 'real'})
+    agent = rcm.RCMAgent({'io_mode': 'real', 'mock_hardware': True})
     result = await agent.apply_command({
         'op': 'set_relay', 'channel': 'A1', 'value': True, 'physical_write_requested': True,
     })

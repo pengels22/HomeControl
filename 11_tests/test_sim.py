@@ -62,6 +62,46 @@ async def test_module_agent_reports_to_local_heartbeat_v3_socket(tmp_path):
     ]
 
 
+@pytest.mark.asyncio
+async def test_sim_mock_can_receiver_decodes_and_attributes_frames():
+    transport = common_can.MockCANTransport()
+    agent = sim.SIMAgent({
+        'can_enabled': True,
+        'can_interfaces': [{'name': 'can0', 'label': 'CAN A', 'enabled': True}],
+        'can_transports': {'can0': transport},
+    })
+    arbitration_id, data = common_can.encode_rmc_telemetry(
+        3, presence=True, temperature_c=21, humidity_pct=45, lux=300, aqi=1,
+    )
+    await agent.start_can_receivers()
+    try:
+        await transport.inject(arbitration_id, data)
+        for _ in range(20):
+            if '3' in agent.rmc_nodes:
+                break
+            await sim.asyncio.sleep(0.01)
+        state = await agent.collect_state()
+    finally:
+        await agent.stop_can_receivers()
+
+    assert state['rmc_nodes']['3']['can_interface'] == 'can0'
+    assert state['rmc_nodes']['3']['online'] is True
+    assert state['can_receiver']['interfaces'] == ['can0']
+
+
+@pytest.mark.asyncio
+async def test_sim_physical_firmware_update_fails_closed_without_bootloader_transport():
+    agent = sim.SIMAgent({'io_mode': 'real', 'can_interfaces': [{'name': 'can0', 'enabled': True}]})
+    result = await agent.perform_rmc_firmware_update({'package': {'session_id': 'test'}})
+
+    assert result == {
+        'ok': False,
+        'error': 'physical_rmc_bootloader_transport_not_implemented',
+        'simulation': False,
+        'physical_commands_sent': False,
+    }
+
+
 def test_sim_can_setup_plan_loads_gs_usb_for_hexa_board():
     cfg = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
 

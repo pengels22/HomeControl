@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import logging
 from typing import Any
 from importlib import import_module
 from . import db
@@ -7,6 +8,7 @@ from .priority import OutputSource, active_intent, coerce_source, record_intent
 from .registry import registry
 
 safety_arbiter_mod = import_module('07_servises.common.safety_arbiter')
+log = logging.getLogger(__name__)
 
 class MaintenanceLockedError(PermissionError):
     pass
@@ -78,7 +80,9 @@ async def _dispatch_with_arbitration(row, command: dict[str, Any], source: Outpu
                 decision.inhibited,
             )
     except Exception:
-        pass
+        # Audit persistence must never block a safety/output command, but a
+        # silent failure makes arbitration history falsely look complete.
+        log.exception('failed to persist output arbitration event')
     return {
         **result,
         'source': source.value,
@@ -94,17 +98,19 @@ async def command_logical(
 ) -> dict[str, Any]:
     src = coerce_source(source)
     async with db.acquire() as conn:
-        row = await conn.fetchrow('''
+        rows = await conn.fetch('''
             SELECT d.id AS logical_device_id, m.hostname, d.maintenance_locked, b.channel, b.binding_type, b.metadata
             FROM logical_devices d
             JOIN device_bindings b ON b.logical_device_id=d.id
             JOIN modules m ON m.id=b.module_id
             WHERE d.logical_name=$1 AND d.enabled=true AND b.enabled=true
             ORDER BY b.id
-            LIMIT 1
         ''', logical_name)
-    if not row:
+    if not rows:
         raise KeyError(f'no binding for {logical_name}')
+    if len(rows) > 1:
+        raise RuntimeError(f'ambiguous enabled bindings for {logical_name}')
+    row = rows[0]
     logical_device_id = int(row['logical_device_id'])
     if row['maintenance_locked']:
         return await _dispatch_with_arbitration(row, command, src, safety_conditions)

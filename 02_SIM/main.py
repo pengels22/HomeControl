@@ -27,6 +27,10 @@ class SIMAgent(common_agent.ModuleAgent):
         self.rmc_nodes = {}
         self.io_mode = common_io.io_mode(config)
         self.can_network = common_can.SocketCANNetwork.from_config(config)
+        self.can_transports = dict(config.get('can_transports', {}))
+        self.can_receive_tasks: dict[str, asyncio.Task] = {}
+        self.can_receive_faults: dict[str, str] = {}
+        self.rmc_node_timeout_s = float(config.get('rmc_node_timeout_seconds', 15))
         self.rmc_sensor_stack = config.get('rmc_sensor_stack', common_can.RMC_SENSOR_DEFINITIONS)
         self.hexa_board = config.get('hexa_board', {})
         self.hexa_dio_state = self._initial_output_state('dio', 'channels')
@@ -241,8 +245,16 @@ class SIMAgent(common_agent.ModuleAgent):
         return decoded
 
     async def collect_state(self):
+        now = time.time()
+        nodes = {}
+        for address, node in self.rmc_nodes.items():
+            item = dict(node)
+            age = None if item.get('last_seen') is None else max(0.0, now - float(item['last_seen']))
+            item['age_seconds'] = age
+            item['online'] = age is not None and age <= self.rmc_node_timeout_s
+            nodes[address] = item
         return {
-            'rmc_nodes': self.rmc_nodes,
+            'rmc_nodes': nodes,
             'io_mode': self.io_mode,
             'can': self.can_network.snapshot(),
             'hexa_board': self.hexa_state(),
@@ -253,9 +265,57 @@ class SIMAgent(common_agent.ModuleAgent):
                 'sessions': {k: v.to_dict() for k, v in self.rmc_update_sessions.items()},
             },
             'last_scan': time.time(),
+            'can_receiver': {
+                'interfaces': sorted(self.can_receive_tasks),
+                'faults': dict(self.can_receive_faults),
+                'mode': self.io_mode,
+            },
         }
 
+    async def _receive_can(self, interface: str, transport):
+        while self.running:
+            try:
+                arbitration_id, data = await transport.recv()
+                self._record_rmc_frame(interface, arbitration_id, data)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self.can_receive_faults[interface] = str(exc)
+                await asyncio.sleep(0.1)
+
+    async def start_can_receivers(self):
+        """Start only explicitly configured interfaces; never scan CAN devices."""
+        for item in self.config.get('can_interfaces', []):
+            interface = str(item.get('name', ''))
+            if not interface or not bool(item.get('enabled', self.config.get('can_enabled', False))):
+                continue
+            transport = self.can_transports.get(interface)
+            if transport is None and self.io_mode == 'real':
+                transport = common_can.LinuxSocketCANTransport(interface)
+            if transport is None:
+                continue
+            await transport.start()
+            self.can_receive_tasks[interface] = asyncio.create_task(self._receive_can(interface, transport))
+
+    async def stop_can_receivers(self):
+        for task in self.can_receive_tasks.values():
+            task.cancel()
+        if self.can_receive_tasks:
+            await asyncio.gather(*self.can_receive_tasks.values(), return_exceptions=True)
+        for transport in self.can_transports.values():
+            close = getattr(transport, 'close', None)
+            if close is not None:
+                await close()
+        self.can_receive_tasks.clear()
+
     async def perform_rmc_firmware_update(self, payload):
+        if self.io_mode == 'real':
+            return {
+                'ok': False,
+                'error': 'physical_rmc_bootloader_transport_not_implemented',
+                'simulation': False,
+                'physical_commands_sent': False,
+            }
         package = payload['package']
         target = payload.get('target', {})
         session_id = str(package.get('session_id') or payload.get('session_id'))
@@ -406,6 +466,13 @@ class SIMAgent(common_agent.ModuleAgent):
         if payload.get('op') == 'rmc_firmware_update':
             return await self.perform_rmc_firmware_update(payload)
         return await super().apply_command(payload)
+
+    async def run(self):
+        await self.start_can_receivers()
+        try:
+            await super().run()
+        finally:
+            await self.stop_can_receivers()
 
 async def main():
     logging.basicConfig(level=logging.INFO)

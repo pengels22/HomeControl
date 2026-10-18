@@ -4,6 +4,7 @@ import pytest
 
 
 drivers = import_module('07_servises.common.physical_drivers')
+factory = import_module('07_servises.common.hardware_factory')
 
 
 def test_xl9535_initializes_safe_and_preserves_other_bits():
@@ -99,3 +100,26 @@ def test_mock_i2c_retains_bounded_diagnostics_but_counts_all_operations():
         transport.write_byte_data(0x20, index, index)
     assert len(transport.operations) == 2
     assert transport.operation_count == 5
+
+
+def test_hardware_factory_keeps_simulated_and_disabled_modes_nonphysical():
+    simulated = factory.build_hardware_bundle('RCM', {'hardware_mode': 'simulated'})
+    disabled = factory.build_hardware_bundle('LCM', {'hardware_mode': 'disabled'})
+
+    assert simulated.mode == 'simulated'
+    assert simulated.transport_type == 'none'
+    assert simulated.rcm_relays is None
+    assert disabled.mode == 'disabled'
+    assert disabled.lcm_pwm is None
+
+
+def test_hardware_factory_mock_mode_uses_manifest_addresses():
+    bundle = factory.build_hardware_bundle(
+        'LCM',
+        {'hardware_mode': 'mock'},
+        {'buses': {'i2c': {'mcp2': {'address': '0x27'}, 'pca9685': {'address': '0x40', 'frequency_hz': 1000}}}},
+    )
+
+    assert bundle.mode == 'mock'
+    assert bundle.lcm_relays.address == 0x27
+    assert bundle.lcm_pwm.address == 0x40

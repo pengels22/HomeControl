@@ -131,3 +131,16 @@ def test_update_runtime_configuration_disabled_may_start_without_key(monkeypatch
         monkeypatch.delenv(name, raising=False)
     configured = service.UpdateService.from_environment()
     assert configured.allow_execute is False
+
+
+def test_update_replay_store_survives_service_restart(tmp_path):
+    first = service.UpdateService(request_secret=b'secret', clock=lambda: 1000.0, replay_store_path=tmp_path / 'replay.sqlite3')
+    first._record_operation('operation-1', 'artifact-1')
+    second = service.UpdateService(request_secret=b'secret', clock=lambda: 1001.0, replay_store_path=tmp_path / 'replay.sqlite3')
+    request = {'type': 'update_run', 'payload': {'artifact': {'artifact_id': 'artifact-1'}}, 'request_id': 'request-1'}
+    fields = {'operation_id': 'operation-1', 'artifact_id': 'artifact-1', 'timestamp': 1001.0}
+    canonical = json.dumps({**request, **fields}, sort_keys=True, separators=(',', ':')).encode()
+    request['auth'] = {**fields, 'mac': __import__('hmac').new(b'secret', canonical, __import__('hashlib').sha256).hexdigest()}
+
+    with pytest.raises(ValueError, match='duplicate'):
+        second._authenticate_update_request(request, request['payload'])

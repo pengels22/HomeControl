@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import socket
+import struct
 import subprocess
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 
 RMC_FRAME_KIND = {
@@ -60,6 +62,85 @@ RMC_FAULT_BITS = {
     0x04: "ens160",
     0x08: "can",
 }
+
+
+class CanTransport(Protocol):
+    async def start(self) -> None: ...
+    async def recv(self) -> tuple[int, list[int]]: ...
+    async def send(self, arbitration_id: int, data: list[int]) -> None: ...
+    async def close(self) -> None: ...
+
+
+@dataclass
+class MockCANTransport:
+    """Deterministic CAN seam; it never opens a kernel CAN device."""
+
+    frames: asyncio.Queue[tuple[int, list[int]]] = field(default_factory=asyncio.Queue)
+    sent: list[tuple[int, list[int]]] = field(default_factory=list)
+    started: bool = False
+
+    async def start(self) -> None:
+        self.started = True
+
+    async def recv(self) -> tuple[int, list[int]]:
+        if not self.started:
+            raise RuntimeError("mock CAN transport is not started")
+        return await self.frames.get()
+
+    async def send(self, arbitration_id: int, data: list[int]) -> None:
+        if not self.started:
+            raise RuntimeError("mock CAN transport is not started")
+        self.sent.append((int(arbitration_id), [int(v) & 0xFF for v in data]))
+
+    async def inject(self, arbitration_id: int, data: list[int]) -> None:
+        await self.frames.put((int(arbitration_id), [int(v) & 0xFF for v in data]))
+
+    async def close(self) -> None:
+        self.started = False
+
+
+class LinuxSocketCANTransport:
+    """Single configured Linux SocketCAN interface using CAN_RAW frames."""
+
+    def __init__(self, interface: str):
+        self.interface = str(interface)
+        self.socket: socket.socket | None = None
+
+    async def start(self) -> None:
+        if not hasattr(socket, "AF_CAN"):
+            raise RuntimeError("Linux SocketCAN is unavailable on this platform")
+        sock = socket.socket(socket.AF_CAN, socket.SOCK_RAW, socket.CAN_RAW)
+        try:
+            sock.bind((self.interface,))
+            sock.setblocking(False)
+        except Exception:
+            sock.close()
+            raise
+        self.socket = sock
+
+    async def recv(self) -> tuple[int, list[int]]:
+        if self.socket is None:
+            raise RuntimeError("SocketCAN transport is not started")
+        raw = await asyncio.get_running_loop().sock_recv(self.socket, 16)
+        if len(raw) < 16:
+            raise RuntimeError("malformed SocketCAN frame")
+        can_id, can_dlc = struct.unpack("=IB3x", raw[:8])
+        if can_id & 0x80000000:
+            raise RuntimeError("extended SocketCAN frames are not supported by the RMC protocol")
+        length = min(int(can_dlc), 8)
+        return can_id & 0x1FFFFFFF, list(raw[8:8 + length])
+
+    async def send(self, arbitration_id: int, data: list[int]) -> None:
+        if self.socket is None:
+            raise RuntimeError("SocketCAN transport is not started")
+        payload = bytes(int(v) & 0xFF for v in data[:8])
+        frame = struct.pack("=IB3x8s", int(arbitration_id), len(payload), payload.ljust(8, b"\0"))
+        await asyncio.get_running_loop().sock_sendall(self.socket, frame)
+
+    async def close(self) -> None:
+        if self.socket is not None:
+            self.socket.close()
+            self.socket = None
 
 
 @dataclass(slots=True)
