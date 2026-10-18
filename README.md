@@ -49,9 +49,9 @@ media control, wall-panel management, and life-safety orchestration.
   running devices yet.
 - VLAN 40: future dedicated production HCM control network. The subnet and
   module pools are not approved yet.
-- VLAN 60: permanent heartbeat/supervisory network only, using Unified
+- Heartbeat/supervision currently uses the VLAN 20 Ethernet path and Unified
   Heartbeat V3 on TCP 6004.
-- Conflict Manager heartbeat address: `192.168.60.2` on `eth0.60`.
+- Conflict Manager heartbeat address: `192.168.20.26`.
 - VLAN 140: not applicable to this HCM installation.
 
 Modules self-identify using the normalized MAC address of the designated
@@ -61,7 +61,8 @@ HCM assigns hostnames and approved control-network addressing, records the
 assignment, and pushes the base configuration for that module type.
 Control-network assignment is configured in `06_config/01_HCM/hcm.yaml`;
 VLAN 20 is the active development/control profile, VLAN 40 is disabled until an
-approved subnet is supplied, and VLAN 60 is not valid for module-control pools.
+approved subnet is supplied, and the unimplemented VLAN 60 migration is not an
+active prerequisite.
 
 ### Module communication
 
@@ -80,9 +81,10 @@ approved subnet is supplied, and VLAN 60 is not valid for module-control pools.
   2. Life Safety
   3. Local Override
   4. HCM Rules/User Commands
-- VLAN 60 carries heartbeat/supervisory traffic only and has no normal Internet access.
+- Heartbeat/supervisory traffic remains isolated by the current protected VLAN 20
+  path and TCP 6004 listener.
 - During updates, HCM temporarily opens egress only for the module being updated.
-- HCM control-network NTP is provided on the approved control network, not VLAN 60.
+- HCM control-network NTP is provided on the approved control network.
 - Local-first and no-code administration are design goals.
 
 ## Current implementation status
@@ -131,7 +133,7 @@ logic.
 
 - Current development/control network: VLAN 20
 - Future production/control network: VLAN 40, subnet not yet approved
-- Heartbeat/supervisory network: VLAN 60, Conflict Manager at `192.168.60.2`
+- Heartbeat/supervisory path: current VLAN 20 Ethernet, Conflict Manager at `192.168.20.26`
 
 ### 02_SIM
 

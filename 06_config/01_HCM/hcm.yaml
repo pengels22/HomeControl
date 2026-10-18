@@ -28,11 +28,11 @@ network:
           PNL: null
         note: Production control subnet and pools require explicit approval before assignment.
   heartbeat_supervisory:
-    vlan: 60
-    conflict_manager_address: 192.168.60.2
+    vlan: 20
+    conflict_manager_address: 192.168.20.26
     port: 6004
     implementation: 00_Heartbeat Unified Heartbeat V3
-    note: VLAN 60 is heartbeat/supervisory only; no normal module control traffic.
+    note: Current development deployment uses the VLAN 20 Ethernet path; the VLAN 60 migration is not active.
   vlan140:
     applicable: false
 services:

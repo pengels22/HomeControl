@@ -72,6 +72,12 @@ def test_overall_status_does_not_count_skip_as_pass():
     assert runner.overall_status([result]) == "INCOMPLETE"
 
 
+def test_overall_status_allows_explicit_live_stress_guard_as_expected_skip():
+    runner = load_runner()
+    result = runner.Result("Live stress/resources", "production workload guard", runner.BLOCKED, "d", "e", "not executed", 0)
+    assert runner.overall_status([result]) == "PASS_WITH_EXPECTED_SKIPS"
+
+
 def test_isolated_supervision_failure_aborts_workload_and_returns_nonzero(tmp_path):
     result = run_fixture(tmp_path, "--inject-supervision-failure")
     assert result.returncode == 2
@@ -95,3 +101,61 @@ def test_full_skip_remote_blocks_scenarios_before_any_workload(tmp_path):
     report = json.loads((Path(summary["report_dir"]) / "report.json").read_text())
     assert any(item["name"] == "independent output inhibition gate" and item["status"] == "BLOCKED" for item in report["results"]) is False
     assert any(item["name"] == "bounded isolated read-only workload" and item["status"] == "BLOCKED" for item in report["results"])
+
+
+def test_live_matrix_checks_registered_module_to_hcm_listener(monkeypatch):
+    runner = load_runner()
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"modules":[{"hostname":"lab1","ip_address":"192.168.20.36","online":true}]}'
+
+    def fake_urlopen(request, timeout):
+        assert request.full_url == "http://192.168.20.27:8080/api/v1/modules"
+        assert request.headers["Authorization"] == "Bearer test-token"
+        assert timeout == 5
+        return Response()
+
+    class Socket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def fake_connect(address, timeout):
+        assert address == ("192.168.20.27", 6501)
+        assert timeout == 3
+        return Socket()
+
+    monkeypatch.setenv("HC_SYSTEM_TEST_HCM_URL", "http://192.168.20.27:8080")
+    monkeypatch.setenv("HC_SYSTEM_TEST_HCM_TOKEN", "test-token")
+    monkeypatch.setattr(runner.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(runner.socket, "create_connection", fake_connect)
+    coord = runner.Coordinator(deadline=runner.time.monotonic() + 10, run_id="matrix", report_dir=Path("/tmp"))
+
+    runner.run_live_communications(coord, skip_remote=False)
+
+    assert coord.results[-1].status == runner.PASS
+    assert coord.communication_matrix == [{
+        "source": "lab1",
+        "destination": "hcm",
+        "protocol": "tls-tcp",
+        "port": 6501,
+        "expected": True,
+        "registered": True,
+        "online": True,
+        "address": "192.168.20.27",
+        "coverage": "live_registry",
+        "authentication": "not_probed",
+        "note": "module initiates authenticated control session to HCM",
+        "actual": "PASS",
+        "latency_ms": None,
+        "error": None,
+    }]

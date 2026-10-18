@@ -71,9 +71,11 @@ sudo hcm-heartbeat show
 ```
 To test dropped response: stop Conflict's v3 service for >=20s, then check Jetson status and restart it. `systemctl` automatically restarts on crashes, not deliberately stopped services.
 
-## VLAN 60 Heartbeat Network
+## Historical VLAN 60 migration notes
 
-VLAN 60 is permanently reserved for heartbeat/supervisory traffic. On Conflict,
+The following describes an unimplemented historical migration and is not part of
+the current deployment. Do not apply it during system-test preparation. If a
+future network migration is separately approved, on Conflict,
 change `bind_address` and `advertise_ip` to `192.168.60.2`, change
 `identity_interface` to `eth0` when installed, and give `eth0.60` address
 `192.168.60.2/24` with proper routing/VLAN tagging. On devices change
