@@ -139,8 +139,7 @@ HCM_MODULE_HOST=0.0.0.0
 HCM_MODULE_PORT=6501
 ```
 
-5. Build a reviewed image from an approved commit while preserving the Phase 4
-   rollback image/container and the two existing Docker networks. Do not alter
+5. Build a reviewed image from an approved commit while preserving the currently verified rollback path and the existing Docker networks. Do not alter
    PostgreSQL, storage, Heartbeat V3, watchdog, systemd dependencies or Docker
    network topology.
 
@@ -166,8 +165,7 @@ sudo docker exec hcm-test python -m py_compile 01_HCM/registry.py
 
 ## Rollback Notes
 
-- Keep the previous Phase 4 image and rollback container until mTLS listener
-  validation is complete.
+- Keep a verified rollback image/container until mTLS listener validation is complete.
 - Roll back by stopping the new HCM container and restoring the prior HCM
   container/image through the existing `hcm.service` workflow.
 - Do not roll back PostgreSQL migrations automatically. This mTLS change does
