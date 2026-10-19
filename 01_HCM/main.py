@@ -11,7 +11,7 @@ from . import db
 from .registry import registry
 from .hvac import HVACController
 from .safety import SafetyController
-from .safety_relays import HCMSafetyRelayController
+from .safety_relays import HCMSafetyRelayController, UnavailableLinuxSafetyInputBackend
 from .rules import RulesEngine
 from .notifications import notifications
 from . import api
@@ -38,12 +38,13 @@ def build_safety_relays():
         try:
             return HCMSafetyRelayController.from_linux()
         except Exception as exc:
-            raise RuntimeError('HCM_SAFETY_INPUT_BACKEND=linux requires accessible gpiod inputs; refusing simulated fallback') from exc
+            log.error('Physical safety inputs unavailable; reporting Unknown: %s', exc)
+            return HCMSafetyRelayController(backend=UnavailableLinuxSafetyInputBackend())
     raise RuntimeError('HCM_SAFETY_INPUT_BACKEND must be simulated or linux')
 
 
-# Physical GPIO monitoring is opt-in and remains disabled by the default
-# simulated backend until wiring and pinmux commissioning is approved.
+# Linux inputs are the default. An explicit simulated setting is for development;
+# an unavailable physical backend remains physical authority with Unknown inputs.
 safety_relays = build_safety_relays()
 hvac = HVACController(hvac_output, hvac_damper)
 safety = SafetyController(hvac, safety_relays=safety_relays)

@@ -26,3 +26,9 @@ jobs:
       - name: Active configuration safety checks
         run: |
           ! grep -RInE '192\.168\.60|CAN_250KBPS|250000' 02_SIM 04_RCM 06_config/02_SIM 06_config/04_RCM 06_config/06_RMC
+      - name: JavaScript syntax
+        run: node --check 01_HCM/www/app.js
+      - name: Build and verify HCM deployment image (no GPIO or app lifespan)
+        run: |
+          docker build --build-arg HCM_GIT_SHA="$GITHUB_SHA" -f 06_config/01_HCM/Dockerfile.live -t hcm-ci .
+          docker run --rm --network none hcm-ci python 10_scripts/hcm_verify.py --expected-sha "$GITHUB_SHA"

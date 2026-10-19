@@ -196,7 +196,7 @@ async function renderDashboard() {
   const fireActive = String(fireStatus || "").toLowerCase() === "active";
   const fireSource = safetyStatus?.physical_input_authoritative ? "Physical input" : safetyStatus ? "Simulation" : "Unavailable";
   const conflictReported = statusKnown(conflictStatus);
-  const fireReported = statusKnown(fireStatus);
+  const fireReported = ["Normal", "Active", "Unknown"].includes(fireStatus);
   const moduleTotals = moduleTypeTotals(modules);
   const attention = attentionItems({
     offlineModules,
@@ -228,7 +228,7 @@ async function renderDashboard() {
       <article class="summary dashboard-card">
         <span>Fire / Life Safety</span>
         <strong>${esc(fireActive ? "FIRE ACTIVE" : fireReported ? fireStatus : "Unavailable")}</strong>
-        <p>${fireReported ? `${esc(fireSource)} · ${safetyStatus.fire_alarm_s?.state || "Unknown"}` : "No authenticated safety status reported"}</p>
+        <p>${fireReported ? `${esc(fireSource)} · ${fireStatus === "Unknown" ? "input fault / unknown" : safetyStatus.fire_alarm_s?.state || "Unknown"}` : "No authenticated safety status reported"}</p>
       </article>
       <button class="summary dashboard-card" type="button" data-open-lockouts>
         <span>Maintenance Lockouts</span>

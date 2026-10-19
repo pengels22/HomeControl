@@ -14,6 +14,10 @@ COPY requirements.txt .
 RUN python -m pip install --no-cache-dir -r requirements.txt
 COPY . .
 
+ARG HCM_GIT_SHA
+RUN python 10_scripts/hcm_build_info.py "$HCM_GIT_SHA" \
+    && python 10_scripts/hcm_verify.py --expected-sha "$HCM_GIT_SHA"
+
 USER 10001:10001
 EXPOSE 8080
 CMD ["python", "-m", "uvicorn", "01_HCM.main:app", "--host", "0.0.0.0", "--port", "8080"]

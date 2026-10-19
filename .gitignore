@@ -39,3 +39,6 @@ venv/
 # Temporary files
 tmp/
 temp/
+
+# Generated inside the HCM deployment image
+01_HCM/build_info.json

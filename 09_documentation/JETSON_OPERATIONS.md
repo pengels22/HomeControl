@@ -98,3 +98,20 @@ Keep database credentials, update secrets, HMAC keys, TLS private keys, and
 touchscreen PIN secrets outside Git, reports, and command lines. A healthy HCM
 dashboard, database, or watchdog does not validate physical I/O or field wiring.
 Inspect the live host before changing anything if it differs from this guide.
+
+## Build identity and safety-route acceptance
+
+See [the safety/deployment audit](HCM_SAFETY_DEPLOYMENT_AUDIT.md) for the code-only
+findings and the independent Conflict/HCM input paths. The Jetson Docker build
+requires `--build-arg HCM_GIT_SHA=<full-release-SHA>`. Runtime identity is available
+at `/api/v1/version`; updating Git alone does not update the running image.
+After an approved deployment, run:
+
+```sh
+python3 10_scripts/hcm_verify.py --url http://192.168.20.27:8080 --expected-sha <full-release-SHA>
+```
+
+This reads version, health, the unauthenticated safety-status response (must be
+401), and static JavaScript. It does not read GPIO or trigger fire actions.
+The deployment helper runs these checks before declaring success and restores
+the original container on failure. It preserves the independent host services.

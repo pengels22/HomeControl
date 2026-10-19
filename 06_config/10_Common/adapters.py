@@ -337,9 +337,9 @@ class JetsonDockerAdapter(BaseAdapter):
         rollback_name = self._rollback_container_name(deployment_id or artifact.release)
         return super().steps(artifact, deployment_id=deployment_id) + [
             AdapterStep("preflight_docker_layout", self._docker_preflight_command()),
-            AdapterStep("build_hcm_image", f"sudo docker build -t {image} -f {release_dir}/06_config/01_HCM/Dockerfile.live {release_dir}", changes_system=True, timeout=600),
+            AdapterStep("build_hcm_image", f"sudo docker build --build-arg HCM_GIT_SHA={artifact.release} -t {image} -f {release_dir}/06_config/01_HCM/Dockerfile.live {release_dir}", changes_system=True, timeout=600),
             AdapterStep("verify_hcm_image_git", f"sudo docker run --rm --user 10001:10001 {image} git --version", changes_system=True, timeout=60),
-            AdapterStep("replace_hcm_container", f"sudo python3 {release_dir}/10_scripts/hcm_docker_deploy.py deploy --image {image} --rollback-name {rollback_name} --deployment-id {deployment_id or artifact.release}", changes_system=True, timeout=180),
+            AdapterStep("replace_hcm_container", f"sudo python3 {release_dir}/10_scripts/hcm_docker_deploy.py deploy --image {image} --expected-sha {artifact.release} --rollback-name {rollback_name} --deployment-id {deployment_id or artifact.release}", changes_system=True, timeout=180),
             AdapterStep("verify_hcm_api", self._hcm_health_command(), timeout=60),
             AdapterStep("record_release", f"printf '%s\\n' {artifact.release} | sudo tee {self.release_marker()} >/dev/null", changes_system=True),
         ]
@@ -399,7 +399,7 @@ class JetsonDockerAdapter(BaseAdapter):
             "url='http://{}:{}/api/v1/health'.format(host,port)\n"
         )
 
-    def _hcm_health_command(self) -> str:
+    def _hcm_health_command(self, verify_release=False) -> str:
         return (
             "systemctl is-active --quiet hcm.service && "
             "sudo -n docker ps --format '{{.Names}}' | grep -qx hcm-test && "
@@ -413,6 +413,11 @@ class JetsonDockerAdapter(BaseAdapter):
             " status=r.getcode()\n"
             "assert status == 200, status\n"
             "print('hcm_api_endpoint={} http_status=200'.format(url))\n"
+            + ("from pathlib import Path\n"
+               "expected=Path('/etc/hcm/homecontrol-release').read_text().strip()\n"
+               "with urllib.request.urlopen(url.replace('/health','/version'), timeout=5) as r:\n"
+               " assert json.load(r)['git_sha'] == expected, 'runtime release mismatch'\n"
+               if verify_release else "") +
             "PY"
         )
 
@@ -427,7 +432,7 @@ class JetsonDockerAdapter(BaseAdapter):
     def no_change_health_steps(self) -> list[AdapterStep]:
         return [
             AdapterStep("hcm_docker_layout", self._docker_preflight_command()),
-            AdapterStep("hcm_health", self._hcm_health_command()),
+            AdapterStep("hcm_health", self._hcm_health_command(verify_release=True)),
         ]
 
     def release_marker(self) -> str:

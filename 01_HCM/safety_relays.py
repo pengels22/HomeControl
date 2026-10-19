@@ -70,11 +70,17 @@ class SimulatedSafetyRelayBackend:
 class LinuxSafetyInputBackend:
     """Explicit read-only Jetson GPIO backend for the two safety inputs."""
 
+    physical_input_authoritative = True
+
     def __init__(self, signals: dict[str, dict[str, Any]]):
-        self.inputs = {
-            name: physical_drivers.LinuxGPIOInputTransport(entry['gpiochip'], int(entry['line']), 'homecontrol-' + name)
-            for name, entry in signals.items()
-        }
+        self.inputs = {}
+        try:
+            for name, entry in signals.items():
+                self.inputs[name] = physical_drivers.LinuxGPIOInputTransport(
+                    entry['gpiochip'], int(entry['line']), 'homecontrol-' + name)
+        except Exception:
+            self.close()
+            raise
 
     def read(self, relay: SafetyRelay) -> bool:
         if relay.name not in self.inputs:
@@ -87,6 +93,17 @@ class LinuxSafetyInputBackend:
     def close(self) -> None:
         for input_ in self.inputs.values():
             input_.close()
+
+
+class UnavailableLinuxSafetyInputBackend:
+    """Configured physical authority with unavailable inputs; never simulation."""
+    physical_input_authoritative = True
+
+    def read(self, relay):
+        return None
+
+    async def write(self, relay, active):
+        raise ValueError('safety GPIO inputs are read-only')
 
 
 class HCMSafetyRelayController:
@@ -210,4 +227,3 @@ class HCMSafetyRelayController:
         close = getattr(self.backend, 'close', None)
         if close is not None:
             close()
-    physical_input_authoritative = True

@@ -1,0 +1,467 @@
+path	line	component/classification	term:count (case-insensitive, overlapping search terms)
+00_Heartbeat/README.md	161	Conflict/Heartbeat supervision and independent input support	fire:2
+00_Heartbeat/gpio_inputs.py	49	Conflict/Heartbeat supervision and independent input support	fire:2,fire_alarm:2,fire_alarm_s:1,fire_alarm_P:1
+00_Heartbeat/gpio_inputs.py	52	Conflict/Heartbeat supervision and independent input support	fire:1
+00_Heartbeat/gpio_inputs.py	70	Conflict/Heartbeat supervision and independent input support	fire:2,fire_alarm:2,fire_alarm_s:1,fire_alarm_P:1
+00_Heartbeat/gpio_inputs.py	78	Conflict/Heartbeat supervision and independent input support	fire:2,fire_alarm:2,fire_alarm_s:1,fire_alarm_P:1
+00_Heartbeat/gpio_inputs.py	82	Conflict/Heartbeat supervision and independent input support	fire:1
+00_Heartbeat/gpio_inputs.py	91	Conflict/Heartbeat supervision and independent input support	fire:2,fire_alarm:2,fire_alarm_s:1,fire_alarm_P:1
+00_Heartbeat/gpio_inputs.py	101	Conflict/Heartbeat supervision and independent input support	fire:1,fire_alarm:1,fire_alarm_s:1
+00_Heartbeat/hcm_heartbeat.py	658	Conflict/Heartbeat supervision and independent input support	safety_inputs:1
+00_Heartbeat/hcm_heartbeat.py	659	Conflict/Heartbeat supervision and independent input support	fire:1,fire_alarm:1,fire_alarm_s:1
+00_Heartbeat/hcm_heartbeat.py	660	Conflict/Heartbeat supervision and independent input support	fire:1,fire_alarm:1,fire_alarm_P:1
+00_Heartbeat/hcm_heartbeat.py	662	Conflict/Heartbeat supervision and independent input support	safety_inputs:1
+00_Heartbeat/hcm_heartbeat.py	663	Conflict/Heartbeat supervision and independent input support	fire:1
+00_Heartbeat/hcm_heartbeat.py	674	Conflict/Heartbeat supervision and independent input support	safety_inputs:2
+01_HCM/api.py	12	HCM authority/API/UI	fire:1
+01_HCM/api.py	85	HCM authority/API/UI	fire:1,life_safety:1
+01_HCM/api.py	86	HCM authority/API/UI	safety_inputs:1
+01_HCM/api.py	87	HCM authority/API/UI	fire:3,fire_alarm:2,fire_alarm_s:2,life_safety:1
+01_HCM/api.py	88	HCM authority/API/UI	fire:3,fire_alarm:2,fire_alarm_P:2,life_safety:1
+01_HCM/api.py	91	HCM authority/API/UI	fire:1,life_safety:1
+01_HCM/api.py	92	HCM authority/API/UI	fire:2,fire_alarm:2,fire_alarm_s:1,fire_alarm_P:1,safety_inputs:1
+01_HCM/api.py	647	HCM authority/API/UI	fire:1
+01_HCM/api.py	648	HCM authority/API/UI	fire:2
+01_HCM/api.py	652	HCM authority/API/UI	fire:1
+01_HCM/api.py	653	HCM authority/API/UI	fire:1
+01_HCM/api.py	654	HCM authority/API/UI	fire:1
+01_HCM/api.py	655	HCM authority/API/UI	fire:2
+01_HCM/api.py	670	HCM authority/API/UI	fire:2,life_safety:1
+01_HCM/api.py	679	HCM authority/API/UI	fire:2,life_safety:1
+01_HCM/main.py	13	HCM authority/API/UI	SafetyController:1
+01_HCM/main.py	50	HCM authority/API/UI	SafetyController:1
+01_HCM/main.py	85	HCM authority/API/UI	fire:1
+01_HCM/management.py	1882	HCM authority/API/UI	fire:1
+01_HCM/models.py	72	HCM authority/API/UI	fire:1
+01_HCM/priority.py	12	HCM authority/API/UI	life_safety:2
+01_HCM/priority.py	21	HCM authority/API/UI	life_safety:1
+01_HCM/safety.py	13	HCM authority/API/UI	fire:2
+01_HCM/safety.py	46	HCM authority/API/UI	SafetyController:1
+01_HCM/safety.py	50	HCM authority/API/UI	fire:1
+01_HCM/safety.py	55	HCM authority/API/UI	fire:1
+01_HCM/safety.py	58	HCM authority/API/UI	fire:3
+01_HCM/safety.py	59	HCM authority/API/UI	fire:1
+01_HCM/safety.py	60	HCM authority/API/UI	fire:1
+01_HCM/safety.py	62	HCM authority/API/UI	fire:2
+01_HCM/safety.py	63	HCM authority/API/UI	fire:1
+01_HCM/safety.py	66	HCM authority/API/UI	fire:2
+01_HCM/safety.py	68	HCM authority/API/UI	fire:1
+01_HCM/safety.py	75	HCM authority/API/UI	fire:1
+01_HCM/safety.py	76	HCM authority/API/UI	fire:1
+01_HCM/safety.py	77	HCM authority/API/UI	fire:1
+01_HCM/safety.py	78	HCM authority/API/UI	fire:1
+01_HCM/safety.py	86	HCM authority/API/UI	fire:3
+01_HCM/safety.py	89	HCM authority/API/UI	fire:2
+01_HCM/safety.py	92	HCM authority/API/UI	fire:2
+01_HCM/safety.py	93	HCM authority/API/UI	fire:1
+01_HCM/safety.py	94	HCM authority/API/UI	fire:2,fire_alarm:1,fire_alarm_s:1
+01_HCM/safety.py	95	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+01_HCM/safety.py	96	HCM authority/API/UI	fire:1
+01_HCM/safety.py	99	HCM authority/API/UI	fire:1
+01_HCM/safety.py	101	HCM authority/API/UI	fire:1
+01_HCM/safety.py	102	HCM authority/API/UI	fire:1
+01_HCM/safety.py	104	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_s:1
+01_HCM/safety.py	105	HCM authority/API/UI	fire:2
+01_HCM/safety.py	107	HCM authority/API/UI	fire:1
+01_HCM/safety.py	108	HCM authority/API/UI	fire:2
+01_HCM/safety.py	109	HCM authority/API/UI	fire:2,fire_alarm:1,fire_alarm_s:1
+01_HCM/safety.py	110	HCM authority/API/UI	fire:2
+01_HCM/safety.py	130	HCM authority/API/UI	fire:1
+01_HCM/safety.py	145	HCM authority/API/UI	fire:1
+01_HCM/safety.py	147	HCM authority/API/UI	fire:1
+01_HCM/safety.py	149	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_s:1
+01_HCM/safety.py	152	HCM authority/API/UI	fire:1
+01_HCM/safety.py	160	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+01_HCM/safety.py	167	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+01_HCM/safety.py	168	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+01_HCM/safety.py	174	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+01_HCM/safety.py	175	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+01_HCM/safety.py	177	HCM authority/API/UI	fire:1
+01_HCM/safety.py	181	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+01_HCM/safety.py	183	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+01_HCM/safety.py	187	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+01_HCM/safety.py	194	HCM authority/API/UI	fire:1
+01_HCM/safety.py	197	HCM authority/API/UI	fire:1
+01_HCM/safety.py	198	HCM authority/API/UI	fire:1
+01_HCM/safety.py	199	HCM authority/API/UI	fire:1
+01_HCM/safety.py	200	HCM authority/API/UI	fire:1
+01_HCM/safety.py	202	HCM authority/API/UI	fire:1
+01_HCM/safety.py	204	HCM authority/API/UI	fire:1
+01_HCM/safety.py	205	HCM authority/API/UI	fire:1,fire_alarm:1
+01_HCM/safety.py	206	HCM authority/API/UI	fire:2,fire_alarm:1
+01_HCM/safety.py	211	HCM authority/API/UI	fire:2,life_safety:1
+01_HCM/safety.py	214	HCM authority/API/UI	fire:1
+01_HCM/safety.py	232	HCM authority/API/UI	life_safety:1
+01_HCM/safety.py	233	HCM authority/API/UI	fire:1
+01_HCM/safety.py	238	HCM authority/API/UI	life_safety:1
+01_HCM/safety_relays.py	12	HCM authority/API/UI	fire:2,fire_alarm:2
+01_HCM/safety_relays.py	42	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_s:1
+01_HCM/safety_relays.py	43	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+01_HCM/safety_relays.py	65	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_s:1
+01_HCM/safety_relays.py	66	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_s:1
+01_HCM/safety_relays.py	118	HCM authority/API/UI	fire:2,fire_alarm:2,fire_alarm_s:1
+01_HCM/safety_relays.py	124	HCM authority/API/UI	fire:5,fire_alarm:4,fire_alarm_s:4
+01_HCM/safety_relays.py	125	HCM authority/API/UI	fire:5,fire_alarm:4,fire_alarm_P:4
+01_HCM/safety_relays.py	127	HCM authority/API/UI	fire:2,fire_alarm:1,fire_alarm_s:1
+01_HCM/safety_relays.py	128	HCM authority/API/UI	fire:2,fire_alarm:1,fire_alarm_P:1
+01_HCM/safety_relays.py	130	HCM authority/API/UI	fire:1
+01_HCM/safety_relays.py	149	HCM authority/API/UI	fire:2,fire_alarm:2,fire_alarm_s:2
+01_HCM/safety_relays.py	150	HCM authority/API/UI	fire:2,fire_alarm:2,fire_alarm_P:2
+01_HCM/updater.py	28	HCM authority/API/UI	fire:1
+01_HCM/updater.py	32	HCM authority/API/UI	fire:1
+01_HCM/updater.py	40	HCM authority/API/UI	fire:1
+01_HCM/updater.py	44	HCM authority/API/UI	fire:1
+01_HCM/updater.py	81	HCM authority/API/UI	fire:1
+01_HCM/updater.py	108	HCM authority/API/UI	fire:1
+01_HCM/www/app.js	195	HCM authority/API/UI	fire:1
+01_HCM/www/app.js	196	HCM authority/API/UI	fire:2
+01_HCM/www/app.js	197	HCM authority/API/UI	fire:1
+01_HCM/www/app.js	199	HCM authority/API/UI	fire:2
+01_HCM/www/app.js	207	HCM authority/API/UI	fire:1
+01_HCM/www/app.js	229	HCM authority/API/UI	fire:1
+01_HCM/www/app.js	230	HCM authority/API/UI	fire:4
+01_HCM/www/app.js	231	HCM authority/API/UI	fire:4,fire_alarm:1,fire_alarm_s:1
+01_HCM/www/app.js	309	HCM authority/API/UI	fire:1
+01_HCM/www/app.js	321	HCM authority/API/UI	fire:2
+02_SIM/main.py	435	SIM commanded safety/local safe-off only	fire:1
+03_LCM/main.py	69	LCM commanded safety/local safe-off only	fire:1
+04_RCM/main.py	75	RCM commanded safety/local safe-off only	fire:1
+06_config/01_HCM/Pinout.md	24	Configuration/manifests/deployment (component in path)	fire:1
+06_config/01_HCM/Pinout.md	27	Configuration/manifests/deployment (component in path)	fire:1
+06_config/01_HCM/global_var.py	62	Configuration/manifests/deployment (component in path)	fire:2
+06_config/01_HCM/global_var.py	63	Configuration/manifests/deployment (component in path)	fire:1
+06_config/01_HCM/global_var.py	64	Configuration/manifests/deployment (component in path)	fire:1
+06_config/01_HCM/global_var.py	65	Configuration/manifests/deployment (component in path)	fire:1
+06_config/01_HCM/global_var.py	67	Configuration/manifests/deployment (component in path)	fire:1
+06_config/01_HCM/hardware_pins.yaml	49	Configuration/manifests/deployment (component in path)	fire:1,fire_alarm:1,fire_alarm_s:1
+06_config/01_HCM/hardware_pins.yaml	51	Configuration/manifests/deployment (component in path)	fire:1,fire_alarm:1,fire_alarm_P:1
+06_config/01_HCM/hardware_pins.yaml	62	Configuration/manifests/deployment (component in path)	fire:1,fire_alarm:1,fire_alarm_s:1
+06_config/01_HCM/hardware_pins.yaml	63	Configuration/manifests/deployment (component in path)	fire:1,fire_alarm:1,fire_alarm_P:1
+06_config/01_HCM/hcm.yaml	43	Configuration/manifests/deployment (component in path)	fire:1
+06_config/07_CONFLICT/hardware_pins.yaml	11	Configuration/manifests/deployment (component in path)	fire:1,fire_alarm:1,fire_alarm_s:1
+06_config/07_CONFLICT/hardware_pins.yaml	23	Configuration/manifests/deployment (component in path)	fire:1,fire_alarm:1,fire_alarm_P:1
+07_servises/common/fire_alarm_config.py	1	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/fire_alarm_config.py	11	Shared arbitration/input primitives and operational services	fire:2,fire_alarm:2,fire_alarm_s:1,fire_alarm_P:1
+07_servises/common/fire_alarm_config.py	14	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/fire_alarm_config.py	18	Shared arbitration/input primitives and operational services	fire:1,fire_alarm:1,fire_alarm_s:1
+07_servises/common/fire_alarm_config.py	22	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/fire_alarm_config.py	27	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/fire_alarm_config.py	31	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/fire_alarm_config.py	33	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/fire_alarm_config.py	35	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/fire_alarm_config.py	38	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/fire_input.py	7	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/fire_input.py	8	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/fire_input.py	13	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/fire_input.py	14	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/fire_input.py	18	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/fire_input.py	30	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/fire_input.py	33	Shared arbitration/input primitives and operational services	fire:2
+07_servises/common/fire_input.py	40	Shared arbitration/input primitives and operational services	fire:2
+07_servises/common/fire_input.py	44	Shared arbitration/input primitives and operational services	fire:2
+07_servises/common/fire_input.py	48	Shared arbitration/input primitives and operational services	fire:2
+07_servises/common/fire_input.py	50	Shared arbitration/input primitives and operational services	fire:2
+07_servises/common/global_config.py	30	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/global_config.py	31	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/safety_arbiter.py	11	Shared arbitration/input primitives and operational services	fire:2
+07_servises/common/safety_arbiter.py	12	Shared arbitration/input primitives and operational services	fire:2
+07_servises/common/safety_arbiter.py	19	Shared arbitration/input primitives and operational services	life_safety:2
+07_servises/common/safety_arbiter.py	171	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/safety_arbiter.py	174	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/safety_arbiter.py	175	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/safety_arbiter.py	181	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/safety_arbiter.py	185	Shared arbitration/input primitives and operational services	fire:1
+07_servises/common/safety_arbiter.py	189	Shared arbitration/input primitives and operational services	fire:1
+07_servises/firewall_update_hook.sh	3	Shared arbitration/input primitives and operational services	fire:1
+08_database/007_auth_and_intent_cleanup.sql	7	Persistence/schema; no independent authority	life_safety:1
+08_database/schema.sql	55	Persistence/schema; no independent authority	life_safety:1
+09_documentation/HCM_OPERATIONS.md	166	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HCM_OPERATIONS.md	168	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HCM_OPERATIONS.md	175	Documentation; historical material is not runtime authority	fire:2,fire_alarm:1,fire_alarm_s:1
+09_documentation/HCM_OPERATIONS.md	176	Documentation; historical material is not runtime authority	fire:1,fire_alarm:1,fire_alarm_P:1
+09_documentation/HCM_OPERATIONS.md	177	Documentation; historical material is not runtime authority	fire:2,fire_alarm:1,fire_alarm_s:1
+09_documentation/HCM_OPERATIONS.md	178	Documentation; historical material is not runtime authority	fire:1,fire_alarm:1,fire_alarm_P:1
+09_documentation/HCM_OPERATIONS.md	186	Documentation; historical material is not runtime authority	fire:1,fire_alarm:1,fire_alarm_s:1
+09_documentation/HCM_OPERATIONS.md	187	Documentation; historical material is not runtime authority	fire:2,fire_alarm:1,fire_alarm_P:1,SafetyController:1
+09_documentation/HCM_OPERATIONS.md	188	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HCM_OPERATIONS.md	195	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	17	Documentation; historical material is not runtime authority	SafetyController:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	19	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	20	Documentation; historical material is not runtime authority	fire:2,fire_alarm:2,fire_alarm_s:1,fire_alarm_P:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	23	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	67	Documentation; historical material is not runtime authority	SafetyController:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	74	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	85	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	86	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	87	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	88	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	95	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	102	Documentation; historical material is not runtime authority	safety_inputs:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	103	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	104	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	112	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	114	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	115	Documentation; historical material is not runtime authority	fire:2
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	119	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	120	Documentation; historical material is not runtime authority	fire:2,SafetyController:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	121	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	129	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HCM_SAFETY_DEPLOYMENT_AUDIT.md	130	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HOMECONTROL_SYSTEM_TEST_RUNBOOK.md	108	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HOMECONTROL_SYSTEM_TEST_RUNBOOK.md	152	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HomeControl_Full_System_Pinout_v1.md	67	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HomeControl_Full_System_Pinout_v1.md	88	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HomeControl_Full_System_Pinout_v1.md	109	Documentation; historical material is not runtime authority	fire:1
+09_documentation/HomeControl_Full_System_Pinout_v1.md	113	Documentation; historical material is not runtime authority	fire:2
+09_documentation/HomeControl_Full_System_Pinout_v1.md	262	Documentation; historical material is not runtime authority	fire:2
+09_documentation/HomeControl_Full_System_Pinout_v1.md	267	Documentation; historical material is not runtime authority	fire:1
+09_documentation/JETSON_OPERATIONS.md	93	Documentation; historical material is not runtime authority	fire:1
+09_documentation/JETSON_OPERATIONS.md	115	Documentation; historical material is not runtime authority	fire:1
+09_documentation/PRODUCTION_WEB_UI_2026-10-13.md	14	Documentation; historical material is not runtime authority	fire:1
+09_documentation/TOUCHSCREEN_IMPLEMENTATION.md	55	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/COMMISSIONING_AND_VALIDATION.md	208	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/COMMISSIONING_AND_VALIDATION.md	210	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/GLOSSARY.md	78	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/GLOSSARY.md	80	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/GLOSSARY.md	81	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/GLOSSARY.md	158	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/HARDWARE_MODULES_AND_IO.md	192	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/HARDWARE_MODULES_AND_IO.md	239	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/HARDWARE_MODULES_AND_IO.md	248	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/HOMECONTROL_SYSTEM_WHITE_PAPER.md	35	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/HOMECONTROL_SYSTEM_WHITE_PAPER.md	236	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/HOMECONTROL_SYSTEM_WHITE_PAPER.md	244	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/HOMECONTROL_SYSTEM_WHITE_PAPER.md	260	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/HOMECONTROL_SYSTEM_WHITE_PAPER.md	262	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/HOMECONTROL_SYSTEM_WHITE_PAPER.md	264	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/HOMECONTROL_SYSTEM_WHITE_PAPER.md	277	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/HOMECONTROL_SYSTEM_WHITE_PAPER.md	279	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/HOMECONTROL_SYSTEM_WHITE_PAPER.md	281	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/HOMECONTROL_SYSTEM_WHITE_PAPER.md	291	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/HOMECONTROL_SYSTEM_WHITE_PAPER.md	321	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/HOMECONTROL_SYSTEM_WHITE_PAPER.md	429	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/IMPLEMENTATION_STATUS.md	29	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/IMPLEMENTATION_STATUS.md	31	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/IMPLEMENTATION_STATUS.md	32	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/IMPLEMENTATION_STATUS.md	97	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/IMPLEMENTATION_STATUS.md	106	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/IMPLEMENTATION_STATUS.md	108	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/IMPLEMENTATION_STATUS.md	122	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	7	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	9	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	16	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	22	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	36	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	40	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	54	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	56	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	71	Documentation; historical material is not runtime authority	fire:2
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	73	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	79	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	85	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	87	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	91	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	93	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	96	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	107	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	143	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	168	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	194	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	204	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md	214	Documentation; historical material is not runtime authority	fire:1
+09_documentation/whitepapers/README.md	29	Documentation; historical material is not runtime authority	life_safety:1
+10_scripts/audit_fire_authority.py	2	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/audit_fire_authority.py	8	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/audit_fire_authority.py	9	Operational/test/preview tooling; no independent authority	fire:4,fire_alarm:3,fire_alarm_s:1,fire_alarm_P:1,life_safety:1,SafetyController:1,safety_inputs:1
+10_scripts/homecontrol_system_test.py	330	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/homecontrol_system_test.py	333	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/homecontrol_system_test.py	334	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/homecontrol_system_test.py	335	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/homecontrol_system_test.py	336	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/homecontrol_system_test.py	337	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/homecontrol_system_test.py	338	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/homecontrol_system_test.py	339	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/homecontrol_system_test.py	343	Operational/test/preview tooling; no independent authority	fire:3,fire_alarm:2,fire_alarm_s:1,fire_alarm_P:1
+10_scripts/homecontrol_system_test.py	345	Operational/test/preview tooling; no independent authority	fire:3
+10_scripts/homecontrol_system_test.py	528	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/homecontrol_system_test.py	624	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/homecontrol_system_test.py	734	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/preview_homecontrol_ui.py	983	Operational/test/preview tooling; no independent authority	fire:1,life_safety:1
+10_scripts/preview_homecontrol_ui.py	999	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/preview_homecontrol_ui.py	1003	Operational/test/preview tooling; no independent authority	fire:1,fire_alarm:1,fire_alarm_s:1
+10_scripts/preview_homecontrol_ui.py	1004	Operational/test/preview tooling; no independent authority	fire:1,fire_alarm:1,fire_alarm_P:1
+10_scripts/simulate_homecontrol.py	72	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/simulate_homecontrol.py	73	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/simulate_homecontrol.py	220	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/simulate_homecontrol.py	221	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/simulate_homecontrol.py	222	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/simulate_homecontrol.py	223	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/simulate_homecontrol.py	226	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/simulate_homecontrol.py	247	Operational/test/preview tooling; no independent authority	fire:2,fire_alarm:1
+10_scripts/simulate_homecontrol.py	248	Operational/test/preview tooling; no independent authority	fire:2
+10_scripts/simulate_homecontrol.py	273	Operational/test/preview tooling; no independent authority	fire:1,fire_alarm:1
+10_scripts/simulate_homecontrol.py	274	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/simulate_homecontrol.py	275	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/simulate_homecontrol.py	279	Operational/test/preview tooling; no independent authority	life_safety:1
+10_scripts/simulate_homecontrol.py	281	Operational/test/preview tooling; no independent authority	life_safety:1
+10_scripts/simulate_homecontrol.py	284	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/simulate_homecontrol.py	285	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/simulate_homecontrol.py	286	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/simulate_homecontrol.py	976	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/simulate_homecontrol.py	977	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/simulate_homecontrol.py	978	Operational/test/preview tooling; no independent authority	fire:1,fire_alarm:1
+10_scripts/simulate_homecontrol.py	981	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/simulate_homecontrol.py	982	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/simulate_homecontrol.py	983	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/touchscreen_app.py	143	Operational/test/preview tooling; no independent authority	fire:1
+10_scripts/touchscreen_hardware/jetson_adapter.py	16	Operational/test/preview tooling; no independent authority	fire:1
+11_tests/test_api.py	44	Software test coverage	fire:1
+11_tests/test_api.py	46	Software test coverage	fire:1
+11_tests/test_api.py	47	Software test coverage	fire:1
+11_tests/test_api.py	52	Software test coverage	fire:2
+11_tests/test_api.py	57	Software test coverage	fire:1
+11_tests/test_api.py	59	Software test coverage	fire:1
+11_tests/test_api.py	60	Software test coverage	fire:1
+11_tests/test_api.py	62	Software test coverage	fire:1
+11_tests/test_api.py	64	Software test coverage	fire:1
+11_tests/test_api.py	68	Software test coverage	fire:2
+11_tests/test_api.py	69	Software test coverage	fire:1
+11_tests/test_api.py	79	Software test coverage	fire:1
+11_tests/test_api.py	82	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_api.py	83	Software test coverage	fire:1,fire_alarm:1,fire_alarm_P:1
+11_tests/test_api.py	90	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_fire_alarm_config.py	5	Software test coverage	fire:1,fire_alarm:1
+11_tests/test_fire_alarm_config.py	11	Software test coverage	fire:1
+11_tests/test_fire_alarm_config.py	12	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_fire_alarm_config.py	13	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_fire_alarm_config.py	14	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_fire_alarm_config.py	15	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_fire_alarm_config.py	16	Software test coverage	fire:1,fire_alarm:1,fire_alarm_P:1
+11_tests/test_fire_alarm_config.py	17	Software test coverage	fire:1,fire_alarm:1,fire_alarm_P:1
+11_tests/test_fire_alarm_config.py	18	Software test coverage	fire:1,fire_alarm:1,fire_alarm_P:1
+11_tests/test_fire_alarm_config.py	22	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_fire_alarm_config.py	23	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_fire_alarm_config.py	24	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_fire_alarm_config.py	25	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_fire_alarm_config.py	26	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_fire_alarm_config.py	27	Software test coverage	fire:1,fire_alarm:1,fire_alarm_P:1
+11_tests/test_fire_alarm_config.py	28	Software test coverage	fire:1,fire_alarm:1,fire_alarm_P:1
+11_tests/test_fire_alarm_config.py	29	Software test coverage	fire:1,fire_alarm:1,fire_alarm_P:1
+11_tests/test_fire_alarm_config.py	37	Software test coverage	fire:1
+11_tests/test_hcm_runtime_contract.py	40	Software test coverage	SafetyController:1
+11_tests/test_hcm_runtime_contract.py	44	Software test coverage	fire:1
+11_tests/test_hcm_runtime_contract.py	45	Software test coverage	fire:1
+11_tests/test_hcm_runtime_contract.py	75	Software test coverage	SafetyController:1
+11_tests/test_hcm_runtime_contract.py	76	Software test coverage	fire:1
+11_tests/test_hcm_runtime_contract.py	81	Software test coverage	fire:1,fire_alarm:1,fire_alarm_P:1
+11_tests/test_hcm_runtime_contract.py	83	Software test coverage	fire:1
+11_tests/test_hcm_runtime_contract.py	94	Software test coverage	SafetyController:1
+11_tests/test_hcm_runtime_contract.py	95	Software test coverage	fire:1
+11_tests/test_hcm_runtime_contract.py	97	Software test coverage	fire:1
+11_tests/test_hcm_runtime_contract.py	103	Software test coverage	fire:1
+11_tests/test_hcm_runtime_contract.py	106	Software test coverage	fire:2
+11_tests/test_hcm_safety_relays.py	18	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_hcm_safety_relays.py	19	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_hcm_safety_relays.py	20	Software test coverage	fire:1,fire_alarm:1,fire_alarm_P:1
+11_tests/test_hcm_safety_relays.py	21	Software test coverage	fire:1,fire_alarm:1,fire_alarm_P:1
+11_tests/test_heartbeat_gpio_inputs.py	11	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_heartbeat_gpio_inputs.py	12	Software test coverage	fire:1,fire_alarm:1,fire_alarm_P:1
+11_tests/test_heartbeat_gpio_inputs.py	15	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_heartbeat_gpio_inputs.py	16	Software test coverage	fire:1,fire_alarm:1,fire_alarm_P:1
+11_tests/test_pinmap.py	16	Software test coverage	fire:1
+11_tests/test_preview_homecontrol_ui.py	100	Software test coverage	fire:1
+11_tests/test_preview_homecontrol_ui.py	114	Software test coverage	fire:1
+11_tests/test_preview_homecontrol_ui.py	147	Software test coverage	fire:1,life_safety:1
+11_tests/test_safety.py	10	Software test coverage	SafetyController:2
+11_tests/test_safety.py	57	Software test coverage	fire:1
+11_tests/test_safety.py	76	Software test coverage	SafetyController:1
+11_tests/test_safety.py	77	Software test coverage	fire:1
+11_tests/test_safety.py	79	Software test coverage	fire:1
+11_tests/test_safety.py	83	Software test coverage	fire:1,life_safety:1
+11_tests/test_safety.py	84	Software test coverage	fire:1,life_safety:1
+11_tests/test_safety.py	87	Software test coverage	fire:1
+11_tests/test_safety.py	88	Software test coverage	fire:1
+11_tests/test_safety.py	92	Software test coverage	fire:1
+11_tests/test_safety.py	93	Software test coverage	SafetyController:1
+11_tests/test_safety.py	94	Software test coverage	fire:1
+11_tests/test_safety.py	97	Software test coverage	fire:1
+11_tests/test_safety.py	98	Software test coverage	fire:1
+11_tests/test_safety.py	103	Software test coverage	SafetyController:1
+11_tests/test_safety.py	104	Software test coverage	fire:1
+11_tests/test_safety.py	107	Software test coverage	life_safety:1
+11_tests/test_safety.py	109	Software test coverage	fire:1
+11_tests/test_safety.py	116	Software test coverage	fire:1
+11_tests/test_safety.py	134	Software test coverage	SafetyController:1
+11_tests/test_safety.py	135	Software test coverage	fire:1
+11_tests/test_safety.py	136	Software test coverage	fire:1
+11_tests/test_safety.py	144	Software test coverage	fire:1
+11_tests/test_safety.py	170	Software test coverage	SafetyController:1
+11_tests/test_safety.py	172	Software test coverage	fire:1
+11_tests/test_safety.py	174	Software test coverage	fire:1
+11_tests/test_safety.py	176	Software test coverage	fire:1
+11_tests/test_safety.py	178	Software test coverage	fire:1
+11_tests/test_safety.py	182	Software test coverage	fire:1
+11_tests/test_safety.py	188	Software test coverage	SafetyController:1
+11_tests/test_safety.py	197	Software test coverage	fire:1
+11_tests/test_safety.py	209	Software test coverage	SafetyController:1
+11_tests/test_safety.py	226	Software test coverage	SafetyController:1
+11_tests/test_safety.py	241	Software test coverage	fire:2,fire_alarm:1,fire_alarm_s:1
+11_tests/test_safety.py	246	Software test coverage	SafetyController:1
+11_tests/test_safety.py	248	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_safety.py	249	Software test coverage	fire:1
+11_tests/test_safety.py	250	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_safety.py	251	Software test coverage	fire:1
+11_tests/test_safety.py	252	Software test coverage	fire:1
+11_tests/test_safety.py	253	Software test coverage	fire:1
+11_tests/test_safety.py	254	Software test coverage	fire:1
+11_tests/test_safety.py	256	Software test coverage	fire:1,fire_alarm:1,fire_alarm_P:1
+11_tests/test_safety.py	259	Software test coverage	fire:1
+11_tests/test_safety.py	260	Software test coverage	fire:1,fire_alarm:1,fire_alarm_P:1
+11_tests/test_safety.py	264	Software test coverage	fire:1
+11_tests/test_safety.py	269	Software test coverage	SafetyController:1
+11_tests/test_safety.py	270	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_safety.py	271	Software test coverage	fire:1
+11_tests/test_safety.py	273	Software test coverage	fire:1
+11_tests/test_safety.py	274	Software test coverage	fire:2
+11_tests/test_safety.py	278	Software test coverage	fire:1
+11_tests/test_safety.py	284	Software test coverage	SafetyController:1
+11_tests/test_safety.py	285	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_safety.py	286	Software test coverage	fire:1
+11_tests/test_safety.py	287	Software test coverage	fire:1
+11_tests/test_safety.py	288	Software test coverage	fire:1
+11_tests/test_safety.py	289	Software test coverage	fire:1
+11_tests/test_safety.py	290	Software test coverage	fire:1
+11_tests/test_safety.py	291	Software test coverage	fire:1
+11_tests/test_safety.py	296	Software test coverage	SafetyController:1
+11_tests/test_safety.py	298	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_safety.py	299	Software test coverage	fire:1,fire_alarm:1,fire_alarm_P:1
+11_tests/test_safety.py	300	Software test coverage	fire:1
+11_tests/test_safety.py	302	Software test coverage	fire:1,fire_alarm:1,fire_alarm_s:1
+11_tests/test_safety.py	303	Software test coverage	fire:1,fire_alarm:1,fire_alarm_P:1
+11_tests/test_safety_arbiter.py	8	Software test coverage	fire:2
+11_tests/test_safety_arbiter.py	40	Software test coverage	fire:1
+11_tests/test_safety_arbiter.py	41	Software test coverage	fire:1
+11_tests/test_safety_arbiter.py	45	Software test coverage	fire:1
+11_tests/test_safety_arbiter.py	48	Software test coverage	fire:1
+11_tests/test_safety_arbiter.py	49	Software test coverage	fire:1
+11_tests/test_safety_arbiter.py	55	Software test coverage	fire:1
+11_tests/test_safety_arbiter.py	59	Software test coverage	fire:1
+11_tests/test_safety_arbiter.py	67	Software test coverage	fire:1
+11_tests/test_safety_arbiter.py	68	Software test coverage	fire:1
+11_tests/test_safety_arbiter.py	71	Software test coverage	fire:1
+11_tests/test_safety_arbiter.py	91	Software test coverage	fire:1
+11_tests/test_safety_arbiter.py	93	Software test coverage	fire:1
+11_tests/test_safety_arbiter.py	96	Software test coverage	life_safety:1
+11_tests/test_safety_arbiter.py	113	Software test coverage	fire:1
+11_tests/test_safety_arbiter.py	114	Software test coverage	fire:2
+11_tests/test_safety_arbiter.py	116	Software test coverage	fire:1
+11_tests/test_safety_arbiter.py	117	Software test coverage	fire:1
+11_tests/test_safety_arbiter.py	118	Software test coverage	fire:1
+11_tests/test_safety_arbiter.py	119	Software test coverage	fire:1
+11_tests/test_safety_arbiter.py	123	Software test coverage	fire:1
+11_tests/test_touchscreen_app.py	157	Software test coverage	fire:1
+AGENTS.md	42	Repository policy/build/support documentation	fire:1
+AGENTS.md	85	Repository policy/build/support documentation	fire:1
+README.md	18	Repository policy/build/support documentation	life_safety:1
+README.md	61	Repository policy/build/support documentation	fire:1
+README.md	72	Repository policy/build/support documentation	fire:1

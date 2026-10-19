@@ -73,6 +73,11 @@ hvac = None
 safety = None
 safety_relays = None
 
+@router.get('/version')
+async def version():
+    from .build_info import build_info
+    return build_info()
+
 @router.get('/health')
 async def health():
     payload = {'ok': True}

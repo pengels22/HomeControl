@@ -3,6 +3,7 @@
 import argparse
 import http.client
 import json
+import re
 import socket
 import sys
 import time
@@ -280,8 +281,10 @@ def recover_original_container(active_name, rollback_name, original_id, health_u
     )
 
 
-def deploy(image, name, rollback_name, health_url, timeout, deployment_id=None):
-    # type: (str, str, str, Optional[str], int, Optional[str]) -> None
+def deploy(image, name, rollback_name, health_url, timeout, deployment_id=None, expected_sha=None):
+    # type: (str, str, str, Optional[str], int, Optional[str], Optional[str]) -> None
+    if not re.fullmatch("[0-9a-f]{40}", expected_sha or ""):
+        raise DockerDeployError("expected full release SHA is required")
     source = inspect_container(name)
     source_id = full_container_id(source)
     if not source_id:
@@ -328,6 +331,12 @@ def deploy(image, name, rollback_name, health_url, timeout, deployment_id=None):
             raise DockerDeployError("failure starting replacement container {} image {}: {}".format(name, image, exc))
         try:
             healthcheck(name, health_url, timeout)
+            try:
+                from hcm_verify import verify_runtime
+                url = health_url or published_health_url(name)
+                verify_runtime(url.rsplit('/api/v1/health', 1)[0], expected_sha)
+            except Exception as exc:
+                raise DockerDeployError('replacement release verification failed: {}'.format(exc))
         except DockerDeployError as exc:
             raise DockerDeployError("failure verifying replacement health for {} image {}: {}".format(name, image, exc))
         print("replacement_container name={} image={} health=ok".format(name, image), flush=True)
@@ -371,6 +380,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=("deploy", "rollback"))
     parser.add_argument("--image")
+    parser.add_argument("--expected-sha")
     parser.add_argument("--name", default="hcm-test")
     parser.add_argument("--rollback-name", required=True)
     parser.add_argument("--deployment-id")
@@ -378,10 +388,10 @@ def main(argv=None):
     parser.add_argument("--timeout", type=int, default=60)
     args = parser.parse_args(argv)
     if args.action == "deploy":
-        if not args.image:
-            parser.error("--image is required for deploy")
+        if not args.image or not args.expected_sha:
+            parser.error("--image and --expected-sha are required for deploy")
         try:
-            deploy(args.image, name=args.name, rollback_name=args.rollback_name, health_url=args.health_url, timeout=args.timeout, deployment_id=args.deployment_id)
+            deploy(args.image, name=args.name, rollback_name=args.rollback_name, health_url=args.health_url, timeout=args.timeout, deployment_id=args.deployment_id, expected_sha=args.expected_sha)
         except DockerDeployError as exc:
             print(str(exc), file=sys.stderr)
             return 1

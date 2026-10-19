@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 import importlib.util
 import json
 import os
@@ -1406,7 +1407,7 @@ def test_hcm_docker_deploy_refuses_existing_rollback_container(monkeypatch):
     monkeypatch.setattr(module, "remove_container", lambda name: removed.append(name))
 
     with pytest.raises(module.DockerDeployError, match="already exists"):
-        module.deploy("new-image", name="hcm-test", rollback_name="hcm-rollback-hc-old", health_url=None, timeout=1, deployment_id="hc-new")
+        module.deploy("new-image", expected_sha="a" * 40, name="hcm-test", rollback_name="hcm-rollback-hc-old", health_url=None, timeout=1, deployment_id="hc-new")
 
     assert removed == []
 
@@ -1546,7 +1547,8 @@ def test_jetson_post_replace_verification_failure_uses_deployment_specific_frame
     assert "hcm-rollback-" + "7" * 40 not in rollback_commands[0]
 
 
-def test_hcm_docker_deploy_rolls_back_when_health_check_fails(monkeypatch):
+@pytest.mark.parametrize("failure", ["health", "runtime_identity"])
+def test_hcm_docker_deploy_rolls_back_when_health_check_fails(monkeypatch, failure):
     module = load_script_module("hcm_docker_deploy_rollback_test", "10_scripts/hcm_docker_deploy.py")
     calls = []
     containers = {"hcm-test": "old-container-id"}
@@ -1582,8 +1584,12 @@ def test_hcm_docker_deploy_rolls_back_when_health_check_fails(monkeypatch):
 
     def fake_healthcheck(name, url, timeout):
         calls.append(("health", name))
-        raise module.DockerDeployError("health failed")
+        if failure == "health":
+            raise module.DockerDeployError("health failed")
 
+    def fail_verification(*args):
+        raise RuntimeError("runtime SHA mismatch")
+    monkeypatch.setitem(sys.modules, "hcm_verify", SimpleNamespace(verify_runtime=fail_verification))
     monkeypatch.setattr(module, "inspect_container", fake_inspect)
     monkeypatch.setattr(module, "create_clone", fake_create_clone)
     monkeypatch.setattr(module, "stop_container", fake_stop)
@@ -1592,8 +1598,8 @@ def test_hcm_docker_deploy_rolls_back_when_health_check_fails(monkeypatch):
     monkeypatch.setattr(module, "remove_container", fake_remove)
     monkeypatch.setattr(module, "healthcheck", fake_healthcheck)
 
-    with pytest.raises(module.DockerDeployError, match="health failed"):
-        module.deploy("new-image", name="hcm-test", rollback_name="hcm-rollback-before-deploy", health_url=None, timeout=1)
+    with pytest.raises(module.DockerDeployError, match="health failed" if failure == "health" else "runtime SHA mismatch"):
+        module.deploy("new-image", expected_sha="a" * 40, name="hcm-test", rollback_name="hcm-rollback-before-deploy", health_url=None, timeout=1)
 
     assert ("rename", "hcm-test", "hcm-rollback-before-deploy") in calls
     assert ("remove", "hcm-test") in calls
@@ -1631,7 +1637,7 @@ def test_hcm_docker_deploy_restores_previous_when_create_fails(monkeypatch):
     monkeypatch.setattr(module, "healthcheck", lambda name, url, timeout: calls.append(("health", name)))
 
     with pytest.raises(module.DockerDeployError, match="create failed"):
-        module.deploy("new-image", name="hcm-test", rollback_name="hcm-rollback-hc-new", health_url=None, timeout=1, deployment_id="hc-new")
+        module.deploy("new-image", expected_sha="a" * 40, name="hcm-test", rollback_name="hcm-rollback-hc-new", health_url=None, timeout=1, deployment_id="hc-new")
 
     assert ("rename", "hcm-test", "hcm-rollback-hc-new") in calls
     assert ("rename", "hcm-rollback-hc-new", "hcm-test") in calls
@@ -1695,7 +1701,7 @@ def test_hcm_docker_deploy_reports_stage_failures_and_attempts_safe_recovery(sta
     monkeypatch.setattr(module, "healthcheck", lambda name, url, timeout: calls.append(("health", name)))
 
     with pytest.raises(module.DockerDeployError, match=message):
-        module.deploy("new-image", name="hcm-test", rollback_name="hcm-rollback-hc-new", health_url=None, timeout=1)
+        module.deploy("new-image", expected_sha="a" * 40, name="hcm-test", rollback_name="hcm-rollback-hc-new", health_url=None, timeout=1)
 
     assert containers.get("hcm-test") == "old-container-id"
     assert "hcm-rollback-hc-new" not in containers
@@ -1725,7 +1731,7 @@ def test_hcm_docker_deploy_identity_mismatch_requires_manual_intervention(monkey
     monkeypatch.setattr(module, "rename_container", fake_rename)
 
     with pytest.raises(module.DockerDeployError, match="manual intervention required"):
-        module.deploy("new-image", name="hcm-test", rollback_name="hcm-rollback-hc-new", health_url=None, timeout=1)
+        module.deploy("new-image", expected_sha="a" * 40, name="hcm-test", rollback_name="hcm-rollback-hc-new", health_url=None, timeout=1)
 
     assert containers == {"hcm-rollback-hc-new": "unexpected-container-id"}
 
