@@ -1,8 +1,16 @@
 # AGENTS.md
 
-## Mandatory Phase 4 implementation instructions (2026-10-10)
+## Mandatory implementation instructions
 
-Before touching HCM Phase 4, **read [Phase 4 Codex implementation contract](09_documentation/PHASE4_CODEX_IMPLEMENTATION_2026-10-10.md)**, this complete file, README and the relevant 09_documentation runbooks. Inspect current code/migrations and propose minimal changes before editing. Do not silently revert the verified Ethernet-first VLAN 20 migration or revive older Wi-Fi routing requirements. Current Conflict endpoint is 192.168.20.26, Jetson is 192.168.20.27, and the old rule 1100/hcm-routing prerequisite were retired. Historic references below to Conflict on 192.168.60.2 and VLAN 60 are **future target architecture, not the installed deployment**. Explicit approval is required for deployed host changes.
+Before changing HCM, read this file, `README.md`, the authoritative
+[white-paper index](09_documentation/whitepapers/README.md), and the relevant
+operational runbooks. Inspect current code and migrations and propose minimal
+changes before editing. Do not silently revert the verified Ethernet-first VLAN
+20 deployment or revive older Wi-Fi routing requirements. Current Conflict
+endpoint is `192.168.20.26`, Jetson is `192.168.20.27`, and the old rule
+1100/hcm-routing prerequisite were retired. References to Conflict on
+`192.168.60.2` and VLAN 60 are historical/future planning only, not the
+installed deployment. Explicit approval is required for deployed host changes.
 
 
 ## Active watchdog reference (2026-10-10)
@@ -28,7 +36,7 @@ architecture unless a change is explicitly approved.
 - Do not create direct app-to-module control paths.
 - VLAN 20 is the current HCM development/control network; do not migrate running devices yet.
 - VLAN 40 is reserved for the future production HCM control network; do not invent a subnet.
-- VLAN 60 is permanently reserved for heartbeat and supervisory traffic on TCP 6004.
+- VLAN 60 is a future heartbeat/supervisory option; it is not active in the current deployment.
 - VLAN 140 is not applicable to this HCM installation.
 - Life-safety behavior must remain separated from convenience automation.
 - Maintenance Lockout has higher output priority than Fire/Life Safety.
@@ -41,8 +49,8 @@ architecture unless a change is explicitly approved.
 
 - Current development/control VLAN: 20
 - Future production/control VLAN: 40, subnet not yet approved
-- Heartbeat/supervisory VLAN: 60
-- Conflict Manager heartbeat address: 192.168.60.2 on eth0.60
+- Current heartbeat/supervisory path: VLAN 20, TCP 6004
+- Future VLAN 60 address: `192.168.60.2` on `eth0.60` (not deployed)
 - Heartbeat TCP port: 6004
 - Unified Heartbeat V3 in `00_Heartbeat/` is the standard implementation
 - Device IDs are normalized MAC addresses from the designated physical interface:
