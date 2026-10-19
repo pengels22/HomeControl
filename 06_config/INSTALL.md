@@ -51,7 +51,7 @@ Do not use the old native virtual-environment installer to repair or upgrade the
 
 Use:
 
-[Jetson deployment runbook](../09_documentation/JETSON_HCM_DEPLOYMENT_2026-10-10.md)
+[Jetson operations guide](../09_documentation/JETSON_OPERATIONS.md)
 
 ## Linux field modules
 

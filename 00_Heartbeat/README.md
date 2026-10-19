@@ -108,8 +108,8 @@ Use the repository deployment framework rather than historical V1/V2 migration i
 
 Current deployment references:
 
-- [Jetson HCM deployment](../09_documentation/JETSON_HCM_DEPLOYMENT_2026-10-10.md)
-- [Unified configuration/deployment framework](../09_documentation/UNIFIED_CONFIGURATION_DEPLOYMENT_2026-10-11.md)
+- [Jetson operations](../09_documentation/JETSON_OPERATIONS.md)
+- [HCM operations](../09_documentation/HCM_OPERATIONS.md)
 
 Do not replace or restart an otherwise healthy Heartbeat V3 service as a side effect of ordinary HCM container updates.
 

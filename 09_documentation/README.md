@@ -14,19 +14,13 @@ These documents supersede older design snapshots and milestone notes.
 
 The following files remain because they contain current operational detail that is more specific than the white papers:
 
-- [Fire alarm GPIO implementation](FIRE_ALARM_GPIO_IMPLEMENTATION_2026-10-17.md)
-- [Central user synchronization](HCM_CENTRAL_USER_SYNC_2026-10-14.md)
-- [Module role switching](HCM_MODULE_ROLE_SWITCHING_2026-10-10.md)
-- [mTLS module identity deployment](HCM_MTLS_MODULE_IDENTITY_DEPLOYMENT_2026-10-10.md)
+- [HCM operations, identity, safety, and deployment](HCM_OPERATIONS.md)
 - [System test runbook](HOMECONTROL_SYSTEM_TEST_RUNBOOK.md)
 - [Full system pinout](HomeControl_Full_System_Pinout_v1.md)
-- [Jetson HCM deployment runbook](JETSON_HCM_DEPLOYMENT_2026-10-10.md)
-- [Jetson HCM watchdog](JETSON_HCM_WATCHDOG_2026-10-10.md)
-- [Jetson systemd reference](JETSON_SYSTEMD_REFERENCE.md)
+- [Jetson operations, deployment, and watchdog](JETSON_OPERATIONS.md)
 - [Main branch protection](MAIN_BRANCH_PROTECTION.md)
 - [Production web UI](PRODUCTION_WEB_UI_2026-10-13.md)
 - [Touchscreen implementation](TOUCHSCREEN_IMPLEMENTATION.md)
-- [Unified configuration/deployment framework](UNIFIED_CONFIGURATION_DEPLOYMENT_2026-10-11.md)
 
 Dated filenames record when a subsystem/runbook was created or validated; they are not separate architecture authorities.
 
