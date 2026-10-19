@@ -54,6 +54,18 @@ async def test_lcm_canonical_ids_reach_each_physical_driver():
 
 
 @pytest.mark.asyncio
+async def test_lcm_confidence_distinguishes_real_software_and_device_commands():
+    real = lcm.LCMAgent({'io': {'mode': 'real'}, 'mock_hardware': True, 'hardware_profile': _profile('LCM')})
+    software = await real.apply_command({'op': 'set_channel', 'channel': 'A1', 'value': True})
+    assert software['state_confidence_label'] == 'COMMANDED'
+    physical = await real.apply_command({'op': 'set_channel', 'channel': 'HV-1', 'percent': 20, 'physical_write_requested': True})
+    assert physical['state_confidence_label'] == 'DEVICE_REPORTED'
+    simulated = lcm.LCMAgent({})
+    result = await simulated.apply_command({'op': 'set_channel', 'channel': '10-1', 'percent': 20})
+    assert result['state_confidence_label'] == 'SIMULATED'
+
+
+@pytest.mark.asyncio
 async def test_lcm_safety_shutdown_attempts_relay_pwm_and_shelly_off():
     agent = lcm.LCMAgent({'io': {'mode': 'real'}, 'mock_hardware': True, 'hardware_profile': _profile('LCM')})
     for channel, value in [('A1', True), ('10-1', 50), ('HV-1', 50)]:
@@ -69,3 +81,30 @@ def test_real_factory_requires_explicit_i2c_mapping():
     factory = import_module('07_servises.common.hardware_factory')
     with pytest.raises(ValueError, match='explicit Linux bus mapping'):
         factory.build_hardware_bundle('RCM', {'hardware_mode': 'real'}, {'outputs': {}})
+
+
+def test_bench_testing_is_exact_target_only_and_not_a_production_gate():
+    commissioning = import_module('07_servises.common.commissioning')
+    profile = {'module_type': 'RCM', 'verification': {'status': 'BENCH_TESTING'}, 'outputs': {'relays': {'channels': ['A1']}}}
+    assert commissioning.physical_write_allowed(profile, 'A1') is False
+    assert commissioning.bench_test_write_allowed(profile, 'A1', True, 'RCM', 'A1') is True
+    assert commissioning.bench_test_write_allowed(profile, 'A1', True, 'RCM', '*') is False
+    assert commissioning.bench_test_write_allowed(profile, 'A1', True, 'LCM', 'A1') is False
+
+
+def test_profile_lifecycle_accepts_bench_testing_but_keeps_it_nonphysical():
+    for status in ('DESIGN_APPROVED', 'BENCH_TESTING', 'BENCH_TESTED', 'SIMULATED'):
+        profile = _profile('RCM')
+        profile['verification']['status'] = status
+        profile['physical_output_enabled'] = False
+        validated = profiles.validate_profile(profile, 'RCM')
+        commissioning = import_module('07_servises.common.commissioning')
+        assert commissioning.physical_write_allowed(validated.data, 'A1') is False
+
+
+def test_hcm_binding_execution_mode_is_the_only_physical_wire_selector():
+    devices = import_module('01_HCM.devices')
+    row = {'metadata': {'execution_mode': 'physical'}, 'channel': 'A1'}
+    assert devices._payload(row, {'op': 'set_relay', 'value': True})['physical_write_requested'] is True
+    simulated = devices._payload({'metadata': {}, 'channel': 'A1'}, {'op': 'set_relay', 'value': True, 'physical_write_requested': True})
+    assert 'physical_write_requested' not in simulated

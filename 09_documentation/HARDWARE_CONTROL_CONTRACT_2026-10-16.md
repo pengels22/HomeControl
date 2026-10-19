@@ -17,16 +17,23 @@ are rejected.
 ## Physical safety gate
 
 `SIMULATED` is the default. `PHYSICAL_BENCH` is descriptive only and never
-authorizes a write. A physical write requires all of the following in the
-hardware manifest:
+authorizes a write. A normal physical write requires all of the following in
+the hardware manifest:
 
-1. `physical_output_enabled: true`.
-2. The output section's `real_output_enabled: true`.
-3. The exact channel is listed in that section's `commissioned_channels`.
+1. verification status `COMMISSIONED`.
+2. `physical_output_enabled: true`.
+3. The requested channel exists in the authoritative output section.
+4. The output section's `real_output_enabled: true`.
 
 Environment variables, touchscreen settings, and command payloads cannot enable
-commissioning. Current RCM and LCM manifests contain no commissioned channels,
-so physical writes remain disabled.
+commissioning. Current RCM and LCM manifests are non-commissioned, so physical
+writes remain disabled. Durable binding metadata may select
+`execution_mode: physical`; HCM translates that to its wire flag, while the
+module independently enforces this gate. The default is `simulated`.
+
+`BENCH_TESTING` is accepted as a lifecycle state but is rejected by normal
+module commands. Only the opt-in `12_hardware_tests` harness may authorize one
+exact module/channel target during a separately approved hardware test.
 
 ## Active hardware contracts
 

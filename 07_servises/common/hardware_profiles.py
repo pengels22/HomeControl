@@ -112,7 +112,7 @@ def validate_profile(data: dict[str, Any], expected_module: str | None = None) -
         spi_seen[key] = str(name)
 
     verification = data.get("verification", {}) or {}
-    if str(verification.get("status", "UNVERIFIED")).upper() not in {"DESIGN_APPROVED", "SIMULATED", "BENCH_TESTED", "COMMISSIONED", "UNVERIFIED"}:
+    if str(verification.get("status", "UNVERIFIED")).upper() not in {"DESIGN_APPROVED", "BENCH_TESTING", "SIMULATED", "BENCH_TESTED", "COMMISSIONED", "UNVERIFIED"}:
         raise HardwareProfileError(f"{module_type} has invalid verification status")
     if data.get("physical_output_enabled") and str(verification.get("status")).upper() != "COMMISSIONED":
         raise HardwareProfileError(f"{module_type} cannot enable physical outputs before commissioning")

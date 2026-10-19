@@ -22,10 +22,24 @@ def _metadata(row) -> dict[str, Any]:
 
 
 def _payload(row, command: dict[str, Any]) -> dict[str, Any]:
-    payload = dict(_metadata(row))
+    binding_metadata = _metadata(row)
+    payload = dict(binding_metadata)
     payload.update(command)
     if 'channel' not in payload and row['channel']:
         payload['channel'] = row['channel']
+    # Binding metadata is durable HCM authority. A request payload cannot
+    # upgrade a simulated binding to physical execution.
+    configured_mode = binding_metadata.get('execution_mode')
+    mode = str(configured_mode or 'simulated').lower()
+    if mode not in {'simulated', 'physical'}:
+        raise ValueError('execution_mode must be simulated or physical')
+    if configured_mode is not None:
+        payload['execution_mode'] = mode
+        payload['physical_write_requested'] = mode == 'physical'
+    else:
+        # Preserve the established simulated wire shape. Physical execution
+        # is only requested when durable binding metadata explicitly selects it.
+        payload.pop('physical_write_requested', None)
     return payload
 
 

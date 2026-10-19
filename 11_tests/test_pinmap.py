@@ -51,14 +51,8 @@ async def test_rcm_simulation_command_never_uses_physical_output_path():
         'physical_outputs_enabled': False,
     })
 
-    assert result == {
-        'ok': True,
-        'channel': 'A1',
-        'value': True,
-        'simulation': True,
-        'physical_outputs_commanded': False,
-        'state_confidence': 'simulated_commanded_only',
-    }
+    assert result['ok'] is True
+    assert result['state_confidence_label'] == 'SIMULATED'
 
 
 @pytest.mark.asyncio

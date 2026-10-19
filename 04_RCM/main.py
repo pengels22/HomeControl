@@ -147,6 +147,7 @@ class RCMAgent(common_agent.ModuleAgent):
                 'simulation': True,
                 'physical_outputs_commanded': False,
                 'state_confidence': 'simulated_commanded_only',
+                'state_confidence_label': state_confidence.SIMULATED,
             }
         if payload.get('op') == 'safety_state':
             conditions = payload.get('conditions', {})
@@ -157,9 +158,9 @@ class RCMAgent(common_agent.ModuleAgent):
             ch = payload['channel'].upper()
             physical_requested = bool(payload.get('physical_write_requested'))
             if physical_requested and self.io_mode != 'real':
-                return {'ok': False, 'error': 'physical output mode is not real', 'channel': ch, 'physical_outputs_commanded': False}
+                return {'ok': False, 'error': 'io_mode_not_real', 'channel': ch, 'physical_outputs_commanded': False, 'state_confidence_label': state_confidence.UNKNOWN}
             if physical_requested and not common_commissioning.physical_write_allowed(self.hardware_profile, ch):
-                return {'ok': False, 'error': 'physical channel is not explicitly commissioned', 'channel': ch, 'physical_outputs_commanded': False}
+                return {'ok': False, 'error': common_commissioning.physical_write_denial_reason(self.hardware_profile, ch), 'channel': ch, 'physical_outputs_commanded': False, 'state_confidence_label': state_confidence.UNKNOWN}
             decision = self.safety.decide(common_safety.OutputRequest(
                 self.identity.get('device_id'),
                 ch,
