@@ -1,164 +1,134 @@
-# Jetson Xavier NX HCM Deployment Runbook
+# Jetson HCM Deployment Runbook
 
-## Phase 4 deployment verification — 2026-10-10 (current)
+**Purpose:** current operational reference for the verified Jetson development HCM deployment.
 
-The Jetson development HCM now runs **`homecontrol-hcm:phase4`**, built from Git commit **`e19a4a5`**, in the existing `hcm-test` container. The previous `phase3` and `phase3-backup` images were retained. Phase 4 migrations `003` and `004` were applied to the live `homecontrol` database after a zero-conflict preflight and a verified-readable custom-format backup (`/home/jetson/hcm-phase4-deployment-20261010-144428.dump`; sensitive). Container inspection reference: `/home/jetson/hcm-phase3-container-backup.json` (sensitive). Verify actual rollback container presence before relying on it.
+Architecture and design authority lives in [the white papers](whitepapers/README.md). This runbook documents the installed development host and should not be used to override current architecture.
 
-The migrations also succeeded against a restored Jetson DB clone on macOS, and the exact checkout passed **154 automated tests**, including **7/7 PostgreSQL integration tests** on a disposable PostgreSQL 16 server. After deployment: dashboard `http://192.168.20.27:8080/` returned 200, `/api/v1/health` returned `{"ok":true}`, authenticated GETs for `/api/v1/modules`, `/api/v1/logical-devices`, and `/api/v1/device-bindings` returned 200; unauthenticated GETs returned 401. Phase 4 Docker `hcm-test`, PostgreSQL `hcm-postgres`, host `hcm-heartbeat.service`, and `hcm-watchdog.timer` were healthy/active at smoke test time. PostgreSQL live connectivity and the new management tables were checked from inside the application container. No physical modules were commissioned.
+## Current verified topology
 
-**Do not follow the historic Phase 3 rebuild recipe below verbatim**: it tags images `phase3` and references retired network routing. The live network is VLAN 20, Jetson `eth0=192.168.20.27`; there is no legacy priority-1100 route hook or `hcm-routing.service` dependency. Keep using the systemd-managed two-network container and protected `/etc/hcm/hcm.env`. The root Compose configuration exposes PostgreSQL and is development-only. Heartbeat end-to-end Conflict Manager status, physical safety checks, durable restore, notification/suppression and post-upgrade watchdog failure injection remain untested in this deployment. Refer to [the full Phase 4 validation record](PHASE4_PROGRESS_2026-10-10.md).
+Jetson Xavier NX development host:
 
-## Live network cutover addendum — 2026-10-10 (supersedes historic paths below)
+- Ethernet: `192.168.20.27`
+- Wi-Fi: `192.168.20.25`
+- HCM API/UI: `http://192.168.20.27:8080`
+- HCM application: Docker container `hcm-test`
+- PostgreSQL: Docker container `hcm-postgres` on a private Docker network
+- HCM data root: `/srv/hcm-data/homecontrol`
+- PostgreSQL data: `/srv/hcm-data/postgres`
+- Unified Heartbeat V3: native host service `hcm-heartbeat.service`
+- Conflict Manager: `192.168.20.26:6004`
+- HCM watchdog: `hcm-watchdog.timer`
 
-**Current verified Jetson:** `eth0=192.168.20.27/24` via Netplan/networkd DHCP, preferred metric 100; `wlan0=192.168.20.25/24` via NetworkManager `Lab 42` DHCP, metric 300 saved in profile (runtime 600 last checked prior to reconnect). Conflict Manager: USB Ethernet `192.168.20.26` metric 100, Wi-Fi `192.168.20.24` metric 300. Both devices remain on VLAN 20. The earlier Jetson static Ethernet `192.168.1.63` and Wi-Fi `192.168.20.27` descriptions below are **historical**.
+Current control/supervision is VLAN 20. No VLAN 40 migration has been performed. VLAN 60 is not part of the current approved architecture.
 
-Jetson `hcm.service` now requires `docker.service` and `hcm-postgres.service`, **not** `hcm-routing.service`. `hcm-routing.service` was disabled, `hcm.service.d/routing.conf` was renamed `routing.conf.disabled`, and policy rule 1100 for the old Mac client `192.168.1.241` was removed. **Do not restore** the old `hcm-update-routing` ExecStartPost, single-client policy routing or Wi-Fi startup dependency. The Wi-Fi source-specific rule 1000 and table 200 remain present, and were not removed. Dashboard remains published at `192.168.20.27:8080`. Network/Docker/systemd and heartbeat checks succeeded, HTTP GET `/` returned 200. The operator reports a full Jetson reboot before final verification. Heartbeat V3 remains host independent, advertises Jetson `192.168.20.27` and uses Conflict `192.168.20.26:6004`. The prior watchdog controlled-crash test happened **before** this routing cleanup; do not claim a second crash-injection test occurred afterward.
+## Service model
 
-**Operational checks now:** `systemctl is-active hcm hcm-postgres hcm-heartbeat hcm-watchdog.timer`; `ip -4 route get 192.168.20.26` (expect eth0/source .27); `ip -4 rule show` (no 1100); `sudo docker ps --filter name=hcm-test`; `curl -i http://192.168.20.27:8080/`. Retired steps below mentioning hcm-routing, rule 1100 or restoring Wi-Fi routing apply **only to historic incident analysis**, not current recovery.
+Expected host services:
 
-Refer to [Phase 4 Codex contract](PHASE4_CODEX_IMPLEMENTATION_2026-10-10.md) before changing the running deployment. No VLAN 40/60 migration has occurred.
+- `docker.service`
+- `hcm-postgres.service`
+- `hcm.service`
+- `hcm-heartbeat.service`
+- `hcm-watchdog.timer`
 
+The retired `hcm-routing.service` dependency and old client-specific policy-routing hook are not part of the current deployment and must not be restored.
 
-## Post-reboot HCM watchdog milestone — 2026-10-10
+## Operational verification
 
-The initial deployment snapshot below predated the watchdog. HCM application liveness monitoring and automatic HCM-only restart are **now installed and successfully tested** on this Jetson. Three successive failed HTTP checks after a controlled `docker kill hcm-test` led to `systemctl restart hcm.service`, routing restoration and a healthy follow-up check; PostgreSQL and Heartbeat V3 remained active. The watchdog code, systemd service/timer, installation steps and untested limitations are documented in [HCM watchdog runbook](JETSON_HCM_WATCHDOG_2026-10-10.md).
-
-Older statements below that “continuous HCM health supervision is not implemented” describe the earlier reboot milestone and are superseded as of this dated update. PostgreSQL health supervision, USB recovery, durable backup/restore, HTTPS and alerts remain open.
-
-
-**Verified:** 2026-10-10 on the Jetson Xavier NX development host. This documents an **existing working test deployment**, not a production-grade or turnkey installer. Commands below are for inspection/recovery unless explicitly marked as commissioning examples. Do not copy live credentials into Git.
-
-## Proven status and scope
-
-- Jetson Xavier NX Developer Kit, Ubuntu 18.04.6 LTS / L4T 32.6.1, Linux 4.9.253-tegra, host Python 3.6.9.
-- HCM application runs **inside Docker with Python 3.13**, not the Jetson host interpreter. Image name: `homecontrol-hcm:phase3`; container: `hcm-test`; UI/API bound to `192.168.20.27:8080` on VLAN 20.
-- PostgreSQL 16 runs as `hcm-postgres` on a separate, isolated Docker network. Its database persists at `/srv/hcm-data/postgres`, on an ext4 USB filesystem.
-- Independent Unified Heartbeat V3 runs as the **host** `hcm-heartbeat.service` using Python 3.6 and TCP 6004; it is not part of the HCM Docker container. Conflict is `192.168.20.26`; Jetson WLAN is `192.168.20.27`. The future heartbeat-only VLAN 60 migration has **not** occurred.
-- Full Jetson reboot on 2026-10-10 verified four active services, mounted USB, running HCM and Postgres containers, restored return routing and successful HCM startup; user subsequently confirmed dashboard loaded. This does **not** establish crash recovery, hardware GPIO safety, TLS, or backups.
-- Network/storage addresses here describe this specific development host; they are **not** portable defaults.
-
-## Live network layout
-
-| Interface/network | Address or subnet | Role |
-| --- | --- | --- |
-| Jetson `eth0` | `192.168.1.63` | Ethernet / VLAN 1 |
-| Jetson `wlan0` | `192.168.20.27` | Control and test dashboard / VLAN 20 |
-| HCM `hcm-control` | `172.19.0.0/16`, HCM `172.19.0.2` at verification | Ordinary Docker bridge; published HCM API |
-| Private `hcm-internal` | `172.18.0.0/16`, HCM `172.18.0.3` at verification | Docker `--internal` network for HCM ↔ database |
-| Postgres | `hcm-internal` only | No published PostgreSQL host port |
-| Mac used for validation | `192.168.1.241` | Currently the *only* destination matched by HCM return-routing rule |
-| Wi-Fi route table 200 | via `192.168.20.1 dev wlan0` | Return traffic for the verified client |
-
-Docker networks were automatically given subnets, not created with user-configured IPAM subnets. **Do not use `docker network connect --ip ...` on these existing networks**: Docker rejected it with “user specified IP address is supported only when connecting to networks with user configured subnets.” The current `172.19.0.2` address is *dynamic*, not reserved. The routing script looks up the live HCM control address.
-
-`192.168.20.27:8080` must remain accessible only to trusted, authorized development clients. The current HTTP endpoint has no TLS; passwords and bearer tokens are sent in plaintext. Do not forward it to the internet or treat commissioning credentials as production credentials.
-
-## Files and services on the Jetson
-
-| Path / name | Purpose |
-| --- | --- |
-| `~/HomeControl` | Jetson Git checkout |
-| `/tmp/hcm-docker-build` | Temporary image build context made from `git archive HEAD` |
-| `/etc/hcm/hcm.env` | Root-readable deployment environment, contains `HCM_DATABASE_URL`; **secret, do not commit** |
-| `/etc/hcm/postgres-password` | PostgreSQL password file, root-only; **secret, do not commit** |
-| `/srv/hcm-data` | Mounted ext4 USB volume, label `HCM_DATA`; expected filesystem UUID `8c4c9aaf-67e1-4a0c-b05e-3ab2824593ce` |
-| `/srv/hcm-data/postgres` | PostgreSQL database bind mount, UID 999, mode 0700 |
-| `hcm-postgres.service` | systemd oneshot controlling `hcm-postgres`; includes USB mount dependency and UUID guard |
-| `hcm-routing.service` | systemd oneshot that waits for route table 200 with `wlan0` |
-| `hcm.service` | systemd oneshot starts/stops `hcm-test` after PostgreSQL readiness |
-| `/etc/systemd/system/hcm.service.d/routing.conf` | `ExecStartPost=/usr/local/sbin/hcm-update-routing` |
-| `/usr/local/sbin/hcm-update-routing` | Detects live HCM Docker IP and manages priority-1100 policy route |
-| `hcm-heartbeat.service` | Independent host-based V3 daemon; do not restart as part of HCM lifecycle |
-
-The USB filesystem is mounted by UUID through `/etc/fstab` with `nofail`. PostgreSQL's systemd unit explicitly requires the mount, binds service lifetime to `srv-hcm\x2ddata.mount`, and checks the expected UUID before starting. This was verified on normal reboot, **not** by unplug/power-loss fault injection. Flash USB is a temporary PostgreSQL medium; durability, wear, and power-loss behavior remain concerns.
-
-## Rebuild / replace HCM image (maintenance window)
-
-The HCM image is made from the checked-out commit, *not* uncommitted working-tree changes. Confirm Git revision and review changes first:
+Read-only checks:
 
 ```sh
-cd ~/HomeControl
-git status --short
-git pull --ff-only origin main
-git log -1 --oneline
-
-rm -rf /tmp/hcm-docker-build
-mkdir -p /tmp/hcm-docker-build
-git archive HEAD | tar -x -C /tmp/hcm-docker-build
-cat > /tmp/hcm-docker-build/Dockerfile <<'DOCKERFILE'
-FROM python:3.13-slim-bookworm
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/opt/HomeControl
-WORKDIR /opt/HomeControl
-COPY requirements.txt .
-RUN python -m pip install --no-cache-dir -r requirements.txt
-COPY . .
-USER 10001:10001
-EXPOSE 8080
-CMD ["python", "-m", "uvicorn", "01_HCM.main:app", "--host", "0.0.0.0", "--port", "8080"]
-DOCKERFILE
-sudo docker build -t homecontrol-hcm:phase3 /tmp/hcm-docker-build
+systemctl is-active hcm hcm-postgres hcm-heartbeat hcm-watchdog.timer
+sudo docker ps --filter name=hcm-test --filter name=hcm-postgres
+ip -4 route get 192.168.20.26
+curl -i http://192.168.20.27:8080/
 ```
 
-The running container does **not** automatically use a rebuilt image. When replacing it, preserve a known-working image and rollback container until the new instance is verified. Stop `hcm.service` before changing `hcm-test`. Use `docker create` with `--restart no`, `--network hcm-control`, `--env-file /etc/hcm/hcm.env`, and `-p 192.168.20.27:8080:8080`; then **connect `hcm-internal` before `docker start`** to avoid database DNS/startup failure. Do not expose database port 5432 or attach Postgres to the external control network. Apply `sudo systemctl start hcm.service` after preparing the replacement; the start hook refreshes routing after Docker assigns the container IP. Verify network memberships and logs.
+Expected route to Conflict is Ethernet sourced from `192.168.20.27`.
 
-The running app code was corrected in Git: `01_HCM/auth.py` uses integer interval multiplication for session, challenge, and pairing-key TTL parameters (asyncpg rejected integers cast through `::text`), and `01_HCM/www/app.css` has `[hidden] { display: none !important; }` for proper post-login visibility. Do not patch container source manually: a rebuild/recreation would lose it.
+## Application/data boundaries
 
-**Legacy alternatives:** `docker-compose.yml` in the repo currently has a development password and exposes PostgreSQL on 5432. `07_servises/systemd/homecontrol-hcm.service` describes native-venv deployment. **Neither represents this Jetson deployment and neither should be applied to the live host.**
+HCM application runs in Docker.
 
-## Systemd dependencies (current implementation)
+PostgreSQL is separate from the HCM application container.
 
-- `hcm-postgres.service` is enabled, `Type=oneshot`, `RemainAfterExit=yes`, requires a mounted verified USB filesystem and starts/stops `hcm-postgres` via Docker.
-- `hcm-routing.service` is enabled, `Type=oneshot`, `RemainAfterExit=yes`; waits up to ~60 seconds for table 200 to contain a `wlan0` route; ordered before `hcm.service`.
-- `hcm.service` is enabled, `Type=oneshot`, `RemainAfterExit=yes`; requires Docker, Postgres and routing; checks `pg_isready -U homecontrol -d homecontrol` up to 30 times with 2-second sleeps; runs `docker start hcm-test` / `docker stop -t 20 hcm-test`.
-- `ExecStartPost` on `hcm.service` calls `hcm-update-routing` after start, when Docker has assigned addresses.
-- `hcm-heartbeat.service` is independently enabled; don't add `Requires=` or `PartOf=` from HCM to heartbeat.
+Unified Heartbeat V3 is a native host service and remains independent of HCM and PostgreSQL.
 
-**Limitations:** the oneshot units report `active (exited)` after Docker launch even if their containers crash later. Automatic crash recovery / health monitoring is **not implemented**. `ExecStartPost` verifies an IP/route, not FastAPI health. Full loss-of-USB supervision, DB recovery, backups and alerting are still pending.
+Do not make HCM container health a prerequisite for the host heartbeat daemon.
 
-## Return-route policy and known limits
+## Database migrations
 
-A Mac at `192.168.1.241` connects from VLAN 1 to the published Jetson Wi-Fi address on VLAN 20. Inbound SYN entered `wlan0`, Docker DNAT forwarded it to `172.19.0.2`, and container SYN-ACKs were incorrectly routed out `eth0` after reverse NAT. This caused TCP/HTTP timeouts even though the container and bridge returned HTTP 200. `tcpdump` on each interface confirmed this. Policy table 200 routes the connection back over `wlan0`.
+Normal HCM startup does not automatically run schema migrations.
 
-`/usr/local/sbin/hcm-update-routing` currently:
-1. Gets `hcm-test`'s current IP on `hcm-control` with `docker inspect`.
-2. Requires a route through `wlan0` in table 200.
-3. Deletes existing rules at preference 1100.
-4. Adds `ip -4 rule add pref 1100 from <live-hcm-ip>/32 to 192.168.1.241/32 lookup 200`.
-5. Flushes the route cache.
-
-This policy is restricted to that **single Mac IP**. Other clients, or the Mac after DHCP renumbering, are not covered. Expand only after agreeing on authorized client ranges and access controls. Rule preference 1100 is dedicated to HCM. The script must be present on the Jetson; it is **not automatically deployed from Git**.
-
-## Read-only operational checks
+Use the repository database tool explicitly:
 
 ```sh
-for s in hcm-heartbeat hcm-postgres hcm-routing hcm; do
-    printf '%-18s ' "$s"; systemctl is-active "$s"
-done
-findmnt /srv/hcm-data
-sudo docker ps --filter name=hcm
-sudo docker inspect hcm-test --format '{{range $name, $net := .NetworkSettings.Networks}}{{$name}} = {{$net.IPAddress}}{{println}}{{end}}'
-ip -4 rule show | grep 1100
-ip -4 route show table 200
-sudo docker logs --tail 20 hcm-test
-sudo docker exec hcm-test python -c 'import httpx; print(httpx.get("http://127.0.0.1:8080/api/v1/health",timeout=5).status_code)'
+10_scripts/homecontrol-db status
+10_scripts/homecontrol-db migrate
 ```
 
-The application health endpoint may return 200 without proving the whole safety system is operational. Independently verify `systemctl is-active hcm-heartbeat` and the V3 status endpoint. The login dashboard was validated from a Mac after the 2026-10-10 reboot.
+Before applying migrations to the live Jetson database:
 
-## Recovery and rollback boundaries
+1. verify backup;
+2. test against a clone when practical;
+3. review migration status;
+4. apply deliberately;
+5. verify HCM after migration.
 
-- `sudo systemctl restart hcm.service` performs a controlled HCM-only restart and reruns the routing hook; **it must not restart heartbeat**.
-- If HCM loses access but logs show `Application startup complete`, inspect both HCM Docker networks, live control IP, policy rule 1100, table 200 and outbound interface before editing firewall rules.
-- If PostgreSQL cannot start, check `findmnt /srv/hcm-data` and the expected UUID first; **never** create a replacement database on the unmounted Jetson root.
-- A previous container named `hcm-previous` and image tag `homecontrol-hcm:phase3-backup` were retained during commissioning; confirm they still exist before relying on them for rollback.
-- Do not blindly reapply `08_database/schema.sql` migrations to an existing database; schema was installed during commissioning. Follow migration procedures when adding future migrations.
-- No automatic backup verification or unattended crash recovery is in place yet.
+## Deployment framework
 
-## Remaining hardening before production
+Use the current unified deployment tooling documented in:
 
-- Replace temporary commissioning credentials, revoke prior sessions, enforce strong secrets, HTTPS/TLS and proper client access restrictions. Production WebAuthn adapter remains incomplete.
-- Introduce **continuous** HCM and PostgreSQL health supervision with bounded restart attempts and alerts; ensure heartbeat stays independent.
-- Revisit PostgreSQL media (USB flash is a weak durability choice), mount disappearance/power loss, restore tests and backup schedule.
-- Configure reliable access for other authorized devices without fragile single-client routing; future VLAN 40 and 60 migrations remain deferred.
-- Connect/control actual hardware and safety pathways only under separately reviewed commissioning procedures; GPIO, hardwired fire path and relay outputs have **not** been validated by this deployment.
-- Keep host systemd units, routing script, secrets template and Docker build/replace procedure reproducible under version control, without publishing live secrets.
+[UNIFIED_CONFIGURATION_DEPLOYMENT_2026-10-11.md](UNIFIED_CONFIGURATION_DEPLOYMENT_2026-10-11.md)
+
+Do not reuse older phase-specific image names or historical Phase 3/4 rebuild recipes from Git history.
+
+## Secrets
+
+Deployment secrets remain outside Git.
+
+Examples include:
+
+- database credentials;
+- update request secrets;
+- heartbeat HMAC secret;
+- TLS private keys/certificates;
+- touchscreen PIN lookup secret.
+
+Do not paste secret values into issues, documentation, deployment reports, or commits.
+
+## Watchdog
+
+The watchdog checks HCM application liveness and can restart HCM without intentionally restarting PostgreSQL or Heartbeat V3.
+
+See:
+
+[JETSON_HCM_WATCHDOG_2026-10-10.md](JETSON_HCM_WATCHDOG_2026-10-10.md)
+
+The watchdog is an availability mechanism, not a life-safety controller.
+
+## Physical safety boundary
+
+A healthy HCM dashboard, database, or watchdog does not validate:
+
+- physical fire GPIO;
+- RCM/LCM physical outputs;
+- HVAC field wiring;
+- emergency-light operation;
+- CAN physical layer.
+
+Those require separate HIL/commissioning evidence.
+
+## Recovery principle
+
+When recovering the host:
+
+1. preserve persistent data;
+2. keep Heartbeat V3 independent;
+3. avoid ad-hoc network/routing changes;
+4. restore HCM through the current deployment adapter/runbook;
+5. verify PostgreSQL before HCM;
+6. verify HCM health;
+7. verify Conflict heartbeat separately.
+
+If the installed host differs from this runbook, inspect the live host before making changes rather than applying historical assumptions.
