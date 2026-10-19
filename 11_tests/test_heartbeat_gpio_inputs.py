@@ -12,8 +12,8 @@ def test_conflict_gpio_monitor_is_unknown_when_disabled():
         'fire_alarm_P': {'gpiochip': '/dev/gpiochip1', 'line': 259, 'active_level': 1},
     })
     assert monitor.read() == {
-        'fire_alarm_s': {'state': 'unknown', 'health': 'disabled'},
-        'fire_alarm_P': {'state': 'unknown', 'health': 'disabled'},
+        'fire_alarm_s': {'state': 'unknown', 'health': 'disabled', 'fault': True},
+        'fire_alarm_P': {'state': 'unknown', 'health': 'disabled', 'fault': True},
     }
 
 

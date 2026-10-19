@@ -145,3 +145,36 @@ Real I/O mode is distinct from commissioned output permission. Do not relabel
 unavailable hardware as simulated or mark modules commissioned without evidence.
 The existing LAB1 adapter is simulation-only; production module deployment needs
 the confirmed target bus, attached hardware, and commissioned profile.
+
+### Physical fire input access (Jetson Linux 4.9)
+
+During an explicitly approved input rollout, run
+`sudo python3 10_scripts/hcm_gpio_access.py --apply` on the Jetson. The tool checks
+chip label `tegra-gpio` and line names `I2S0_DIN` (159, FIRE/header 38) and
+`I2S0_DOUT` (158, AC/header 40), without reading values or changing direction.
+It provisions a dedicated `hcm-gpio` group and a chip-specific persistent udev
+rule, mode 0640. It creates `/etc/hcm/safety-inputs.json` only if absent:
+
+```json
+{"gpio_abi": "v1", "connected_inputs": []}
+```
+
+Only add a signal name to `connected_inputs` after its physical wiring has been
+confirmed. GPIO LOW is not evidence of connected wiring. Unconfirmed contacts
+report Unknown with `fault: true`; they cannot establish Normal. This explicit
+wiring record is preserved on redeploy. Missing wiring records also leave inputs
+Unknown. This is not electrical open-wire detection after commissioning.
+
+The supported Docker clone helper binds that file read-only, adds the dedicated
+supplementary group and maps only `/dev/gpiochip0` with cgroup read access. It
+refuses broad privileged mode. GPIO chip access is not a per-line kernel ACL:
+the application transport restricts requests to input flags and refuses lines
+already owned or configured as outputs. No output or pull-setting ioctl is used.
+The ABI v1 transport is required by the installed kernel; image libgpiod v2
+requires a newer kernel. Polarity and 250 ms debounce remain unchanged.
+
+The independent Conflict inputs require their own confirmed wiring list and
+verified profile. Its installer now includes `gpio_inputs.py`; disabling its
+monitor keeps both contacts Unknown. Never infer installed wiring from software
+pin mappings or substitute Conflict values for HCM inputs. Access configuration
+alone is a partial rollout, not physical fire-system commissioning.

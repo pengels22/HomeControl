@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from dataclasses import dataclass
 from importlib import import_module
@@ -72,19 +73,28 @@ class LinuxSafetyInputBackend:
 
     physical_input_authoritative = True
 
-    def __init__(self, signals: dict[str, dict[str, Any]]):
+    def __init__(self, signals: dict[str, dict[str, Any]], abi="v2", connected_inputs=None):
         self.inputs = {}
+        if connected_inputs is not None and not isinstance(connected_inputs, list):
+            raise ValueError('connected_inputs must be an explicit list')
+        connected = set(signals) if connected_inputs is None else set(connected_inputs)
+        if not connected <= set(signals) or abi not in ('v1', 'v2'):
+            raise ValueError('invalid physical safety input configuration')
+        transport = (import_module('07_servises.common.linux_gpio_v1').LinuxGPIOV1InputTransport
+                     if abi == 'v1' else physical_drivers.LinuxGPIOInputTransport)
         try:
             for name, entry in signals.items():
-                self.inputs[name] = physical_drivers.LinuxGPIOInputTransport(
+                if name not in connected:
+                    continue
+                self.inputs[name] = transport(
                     entry['gpiochip'], int(entry['line']), 'homecontrol-' + name)
         except Exception:
             self.close()
             raise
 
-    def read(self, relay: SafetyRelay) -> bool:
+    def read(self, relay: SafetyRelay) -> bool | None:
         if relay.name not in self.inputs:
-            raise ValueError('%s is not a Linux safety input' % relay.name)
+            return None  # Unwired/unconfirmed input must never report Normal.
         return self.inputs[relay.name].read()
 
     async def write(self, relay: SafetyRelay, active: bool) -> None:
@@ -108,9 +118,15 @@ class UnavailableLinuxSafetyInputBackend:
 
 class HCMSafetyRelayController:
     @classmethod
-    def from_linux(cls, globals_=None, hardware_profile=None):
+    def from_linux(cls, globals_=None, hardware_profile=None, wiring_file=None):
         signals = cls.load_signal_config(hardware_profile)
-        return cls(backend=LinuxSafetyInputBackend(signals), globals_=globals_, hardware_profile=hardware_profile)
+        options = {}
+        if wiring_file is not None:
+            path = Path(wiring_file)
+            config = json.loads(path.read_text()) if path.exists() else {}
+            options = {'abi': config.get('gpio_abi', 'v2'),
+                       'connected_inputs': config.get('connected_inputs', [])}
+        return cls(backend=LinuxSafetyInputBackend(signals, **options), globals_=globals_, hardware_profile=hardware_profile)
 
     @staticmethod
     def load_signal_config(hardware_profile=None):

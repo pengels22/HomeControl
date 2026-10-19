@@ -1796,3 +1796,21 @@ def test_release_marker_writes_real_newline():
     # Execute only printf locally; no sudo or writes.
     output = subprocess.check_output(['sh', '-c', command.split('|')[0]])
     assert output == ('a' * 40 + '\n').encode()
+
+
+def test_jetson_gpio_mapping_is_minimal_and_persistent(tmp_path, monkeypatch):
+    import types
+    module = load_script_module('hcm_gpio_clone_test', '10_scripts/hcm_docker_deploy.py')
+    wiring = tmp_path / 'safety-inputs.json'
+    wiring.write_text(json.dumps({'gpio_abi': 'v1', 'connected_inputs': []}))
+    monkeypatch.setitem(sys.modules, 'hcm_gpio_access', types.SimpleNamespace(verify_chip=lambda: None))
+    monkeypatch.setattr(module.grp, 'getgrnam', lambda name: types.SimpleNamespace(gr_gid=995))
+    host = {'Privileged': False, 'Binds': ['/srv/hcm-data/homecontrol:/var/lib/homecontrol:rw'], 'GroupAdd': ['994']}
+    module.configure_safety_gpio(host, str(wiring))
+    module.configure_safety_gpio(host, str(wiring))
+    assert host['Devices'] == [{'PathOnHost': '/dev/gpiochip0', 'PathInContainer': '/dev/gpiochip0', 'CgroupPermissions': 'r'}]
+    assert host['GroupAdd'] == ['994', '995']
+    assert host['Binds'] == ['/srv/hcm-data/homecontrol:/var/lib/homecontrol:rw', str(wiring)+':/etc/hcm/safety-inputs.json:ro']
+    host['Privileged'] = True
+    with pytest.raises(module.DockerDeployError, match='privileged'):
+        module.configure_safety_gpio(host, str(wiring))

@@ -91,8 +91,8 @@ class SafetyController:
             'system_state': self.state(),
             'fire_active': self.fire_active,
             'physical_input_authoritative': self.physical_fire_input_authoritative(),
-            'fire_alarm_s': {'state': fire, 'fresh': fresh, 'age_seconds': age},
-            'fire_alarm_P': {'state': ac, 'fresh': fresh, 'age_seconds': age},
+            'fire_alarm_s': {'state': fire, 'fault': fire == 'unknown', 'fresh': fresh, 'age_seconds': age},
+            'fire_alarm_P': {'state': ac, 'fault': ac == 'unknown', 'fresh': fresh, 'age_seconds': age},
             'source': 'Physical input' if self.physical_fire_input_authoritative() else 'Simulation',
         }
 

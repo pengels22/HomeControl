@@ -37,7 +37,7 @@ def build_safety_relays():
         return HCMSafetyRelayController()
     if settings.safety_input_backend == 'linux':
         try:
-            return HCMSafetyRelayController.from_linux()
+            return HCMSafetyRelayController.from_linux(wiring_file=settings.safety_input_wiring_file)
         except Exception as exc:
             log.error('Physical safety inputs unavailable; reporting Unknown: %s', exc)
             return HCMSafetyRelayController(backend=UnavailableLinuxSafetyInputBackend())

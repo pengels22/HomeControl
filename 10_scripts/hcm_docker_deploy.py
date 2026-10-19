@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import argparse
+import grp
+from pathlib import Path
 import http.client
 import json
 import re
@@ -135,6 +137,7 @@ def create_clone(source, image, name):
     additional_networks = [(network_name, endpoints[network_name]) for network_name in sorted(endpoints) if network_name != primary_network]
     config["Image"] = image
     host_config["Binds"] = ensure_homecontrol_storage_bind(host_config.get("Binds") or [])
+    configure_safety_gpio(host_config)
     body = {
         "Hostname": config.get("Hostname"),
         "Domainname": config.get("Domainname", ""),
@@ -165,6 +168,37 @@ def create_clone(source, image, name):
             connect_network(name, network_name, endpoint)
         except DockerDeployError as exc:
             raise DockerDeployError("failure connecting replacement container {} to network {}: {}".format(name, network_name, exc))
+
+
+def configure_safety_gpio(host_config, wiring_path="/etc/hcm/safety-inputs.json"):
+    """Apply explicitly provisioned input access on every supported redeploy."""
+    path = Path(wiring_path)
+    if not path.exists():
+        return
+    try:
+        wiring = json.loads(path.read_text())
+        connected = wiring.get('connected_inputs')
+        if wiring.get('gpio_abi') != 'v1' or not isinstance(connected, list) or not set(connected) <= {'fire_alarm_s', 'fire_alarm_P'}:
+            raise ValueError('invalid Jetson wiring configuration')
+        if host_config.get('Privileged'):
+            raise ValueError('broad privileged mode is not permitted')
+        from hcm_gpio_access import verify_chip
+        verify_chip()
+        gid = str(grp.getgrnam('hcm-gpio').gr_gid)
+        device = {'PathOnHost': '/dev/gpiochip0', 'PathInContainer': '/dev/gpiochip0', 'CgroupPermissions': 'r'}
+        devices = [d for d in (host_config.get('Devices') or []) if d.get('PathInContainer') != '/dev/gpiochip0']
+        devices.append(device)
+        host_config['Devices'] = devices
+        groups = list(host_config.get('GroupAdd') or [])
+        if gid not in groups:
+            groups.append(gid)
+        host_config['GroupAdd'] = groups
+        destination = '/etc/hcm/safety-inputs.json'
+        binds = [b for b in host_config.get('Binds') or [] if b.split(':')[1] != destination]
+        binds.append(str(path) + ':' + destination + ':ro')
+        host_config['Binds'] = binds
+    except Exception as exc:
+        raise DockerDeployError('physical input access configuration failed: {}'.format(exc))
 
 
 def ensure_homecontrol_storage_bind(binds):

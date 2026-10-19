@@ -68,14 +68,20 @@ class GPIOInputMonitor:
         self.readers = {}
         debounce_ms = int(self.config.get('debounce_ms', 250))
         self.debouncers = {name: DebouncedLevel(debounce_ms) for name in ('fire_alarm_s', 'fire_alarm_P')}
+        connected = self.config.get('connected_inputs', [])
+        if not isinstance(connected, list) or not set(connected) <= set(self.debouncers):
+            raise GPIOInputError('invalid connected_inputs')
+        self.connected_inputs = connected
         if self.enabled:
             self._open()
 
     def _open(self):
+        if not self.connected_inputs:
+            return
         try:
             import gpiod
             from gpiod.line import Direction
-            for name in ('fire_alarm_s', 'fire_alarm_P'):
+            for name in self.connected_inputs:
                 entry = self.config[name]
                 line = int(entry['line'])
                 self.readers[name] = (gpiod.request_lines(
@@ -88,8 +94,9 @@ class GPIOInputMonitor:
 
     def read(self, now=None):
         if not self.enabled:
-            return {name: {'state': 'unknown', 'health': 'disabled'} for name in ('fire_alarm_s', 'fire_alarm_P')}
-        result = {}
+            return {name: {'state': 'unknown', 'health': 'disabled', 'fault': True} for name in ('fire_alarm_s', 'fire_alarm_P')}
+        result = {name: {'state': 'unknown', 'health': 'unconfirmed_wiring', 'fault': True}
+                  for name in self.debouncers if name not in self.readers}
         sampled_at = time.time()
         for name, (request, line, active_level) in self.readers.items():
             try:

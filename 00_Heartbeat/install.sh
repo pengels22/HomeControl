@@ -14,7 +14,7 @@ if [ ! -f ../homecontrol_identity.py ]; then
 fi
 python3 - <<'PY'
 import ast
-for path in ('hcm_heartbeat.py', '../homecontrol_identity.py'):
+for path in ('hcm_heartbeat.py', 'gpio_inputs.py', '../homecontrol_identity.py'):
     with open(path) as f:
         ast.parse(f.read(), filename=path)
 PY
@@ -48,6 +48,7 @@ if [ "${HC_DRY_RUN:-0}" = "1" ]; then
 fi
 mkdir -p /usr/local/lib/hcm-heartbeat /etc/hcm-heartbeat
 install -m 755 hcm_heartbeat.py /usr/local/lib/hcm-heartbeat/hcm_heartbeat.py
+install -m 644 gpio_inputs.py /usr/local/lib/hcm-heartbeat/gpio_inputs.py
 install -m 644 ../homecontrol_identity.py /usr/local/lib/hcm-heartbeat/homecontrol_identity.py
 if [ "$TARGET" = "conflict" ]; then
     install -m 644 ../06_config/07_CONFLICT/hardware_pins.yaml /etc/hcm-heartbeat/hardware_pins.yaml
