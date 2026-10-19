@@ -21,6 +21,7 @@ class FakePriorityConn:
     def __init__(self):
         self.intents = {}
         self.maintenance_locked = False
+        self.ambiguous = False
 
     async def fetchrow(self, query, *args):
         if 'FROM logical_devices d' in query and 'WHERE d.logical_name=$1' in query:
@@ -45,7 +46,13 @@ class FakePriorityConn:
 
     async def fetch(self, query, *args):
         if 'FROM logical_devices d' in query and 'WHERE d.logical_name=$1' in query:
-            return [await self.fetchrow(query, *args)]
+            row = await self.fetchrow(query, *args)
+            return [row, dict(row)] if self.ambiguous else [row]
+        if 'FROM logical_devices d' in query and 'WHERE d.id=$1' in query:
+            row = await self.fetchrow("SELECT * FROM logical_devices d WHERE d.id=$1", *args)
+            row['logical_device_id'] = args[0]
+            row['module_type'] = 'LCM'
+            return [row, dict(row)] if self.ambiguous else [row]
         if 'FROM output_intents' in query:
             rows = []
             for source, command in self.intents.get(args[0], {}).items():
@@ -156,3 +163,14 @@ async def test_lockout_clear_does_not_replay_stale_request(monkeypatch):
 
     assert result['idle'] is True
     assert sent == [{'op': 'set_relay', 'value': False, 'channel': 'A1'}]
+
+
+@pytest.mark.asyncio
+async def test_all_binding_resolution_paths_reject_ambiguity(monkeypatch):
+    conn = FakePriorityConn()
+    conn.ambiguous = True
+    monkeypatch.setattr(devices.db, 'acquire', lambda: FakeAcquire(conn))
+    with pytest.raises(RuntimeError, match='ambiguous enabled bindings'):
+        await devices.command_logical('Kitchen Light', {'op': 'set_relay', 'value': True})
+    with pytest.raises(RuntimeError, match='ambiguous enabled bindings'):
+        await devices.apply_active_intent(42)

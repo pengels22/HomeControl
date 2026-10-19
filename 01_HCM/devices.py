@@ -58,6 +58,27 @@ def _arbiter_for(row):
     return safety_arbiter_mod.SafetyArbiter(emergency_lighting_channels=emergency, hvac_shutdown_channels=hvac_shutdown)
 
 
+async def _resolve_single_binding(conn, *, logical_name: str | None = None, logical_device_id: int | None = None):
+    if logical_name is not None:
+        where, value = 'd.logical_name=$1', logical_name
+    else:
+        where, value = 'd.id=$1', int(logical_device_id)
+    rows = await conn.fetch(f'''
+        SELECT d.id AS logical_device_id, d.logical_name, m.hostname, m.module_type,
+               d.maintenance_locked, b.channel, b.metadata
+        FROM logical_devices d
+        JOIN device_bindings b ON b.logical_device_id=d.id
+        JOIN modules m ON m.id=b.module_id
+        WHERE {where} AND d.enabled=true AND b.enabled=true
+        ORDER BY b.id
+    ''', value)
+    if not rows:
+        raise KeyError(logical_name if logical_name is not None else logical_device_id)
+    if len(rows) > 1:
+        raise RuntimeError('ambiguous enabled bindings')
+    return rows[0]
+
+
 async def _dispatch_with_arbitration(row, command: dict[str, Any], source: OutputSource, extra_conditions: set[str] | None = None) -> dict[str, Any]:
     payload = _payload(row, command)
     channel = str(payload.get('channel') or row['channel'] or row['logical_name'])
@@ -112,19 +133,7 @@ async def command_logical(
 ) -> dict[str, Any]:
     src = coerce_source(source)
     async with db.acquire() as conn:
-        rows = await conn.fetch('''
-            SELECT d.id AS logical_device_id, m.hostname, d.maintenance_locked, b.channel, b.binding_type, b.metadata
-            FROM logical_devices d
-            JOIN device_bindings b ON b.logical_device_id=d.id
-            JOIN modules m ON m.id=b.module_id
-            WHERE d.logical_name=$1 AND d.enabled=true AND b.enabled=true
-            ORDER BY b.id
-        ''', logical_name)
-    if not rows:
-        raise KeyError(f'no binding for {logical_name}')
-    if len(rows) > 1:
-        raise RuntimeError(f'ambiguous enabled bindings for {logical_name}')
-    row = rows[0]
+        row = await _resolve_single_binding(conn, logical_name=logical_name)
     logical_device_id = int(row['logical_device_id'])
     if row['maintenance_locked']:
         return await _dispatch_with_arbitration(row, command, src, safety_conditions)
@@ -145,17 +154,7 @@ async def command_logical(
 
 async def apply_active_intent(logical_device_id: int) -> dict[str, Any]:
     async with db.acquire() as conn:
-        row = await conn.fetchrow('''
-            SELECT d.id AS logical_device_id, d.logical_name, m.hostname, d.maintenance_locked, b.channel, b.metadata
-            FROM logical_devices d
-            JOIN device_bindings b ON b.logical_device_id=d.id
-            JOIN modules m ON m.id=b.module_id
-            WHERE d.id=$1 AND d.enabled=true AND b.enabled=true
-            ORDER BY b.id
-            LIMIT 1
-        ''', logical_device_id)
-    if not row:
-        raise KeyError(f'no binding for logical device id {logical_device_id}')
+        row = await _resolve_single_binding(conn, logical_device_id=logical_device_id)
     intent = await active_intent(logical_device_id)
     if not intent:
         if row['maintenance_locked']:
@@ -180,14 +179,7 @@ async def set_maintenance_lockout(logical_name: str, active: bool) -> dict[str, 
     try:
         from . import management
         async with db.acquire() as conn:
-            binding = await conn.fetchrow('''
-                SELECT m.hostname, m.module_type
-                FROM device_bindings b
-                JOIN modules m ON m.id=b.module_id
-                WHERE b.logical_device_id=$1 AND b.enabled=true
-                ORDER BY b.id
-                LIMIT 1
-            ''', int(row['logical_device_id']))
+            binding = await _resolve_single_binding(conn, logical_device_id=int(row['logical_device_id']))
         if binding and binding['module_type'] == 'RCM':
             snapshot = await management.get_rcm_channels(binding['hostname'])
             result['config_sync'] = await management.mirror_module_configuration('RCM', binding['hostname'], management.rcm_config_from_channels(snapshot['channels']))

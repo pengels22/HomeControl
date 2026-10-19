@@ -87,6 +87,8 @@ class SafetyController:
         ac = 'unknown' if self.ac_power_fault or not fresh else ('present' if self.ac_power_present else 'absent')
         return {
             'status': 'Active' if fire == 'active' else 'Normal' if fire == 'normal' else 'Unknown',
+            'maintenance_lockout_active': self.maintenance_lockout_active,
+            'system_state': self.state(),
             'fire_alarm_s': {'state': fire, 'fresh': fresh, 'age_seconds': age},
             'fire_alarm_P': {'state': ac, 'fresh': fresh, 'age_seconds': age},
             'source': 'hcm_safety_controller',
@@ -201,8 +203,10 @@ class SafetyController:
         await self.heartbeat.status('fire_alarm', 'active' if active else 'inactive')
         await self.heartbeat.fault('fire_alarm_active', 'fire alarm active' if active else None)
         if active:
-            await self.hvac.force_off()
-            await notifications.send(Notification(title='Fire alarm', body='Fire alarm active. HVAC shut down and available lights commanded on.', priority='critical', category='life_safety'))
+            hvac_result = await self.hvac.force_off()
+            if isinstance(hvac_result, dict) and not hvac_result.get('ok', True):
+                log.error('life-safety HVAC shutdown had output failures: %s', hvac_result.get('failures'))
+            await notifications.send(Notification(title='Fire alarm', body='Fire alarm active. HVAC shutdown initiated. Emergency lighting actions initiated where permitted.', priority='critical', category='life_safety'))
             if self.maintenance_lockout_active:
                 rows = []
                 await self.heartbeat.fault('output_command_inhibited', 'fire emergency lighting inhibited by maintenance lockout')

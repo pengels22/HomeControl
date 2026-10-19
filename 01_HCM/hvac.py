@@ -199,13 +199,22 @@ class HVACController:
     async def force_off(self):
         async with self._lock:
             now = time.monotonic()
-            # Life-safety shutdown must not trust cached state.  Reassert all
-            # three logical OFF commands through the normal output callback.
-            await self._set_output('COOL', False); self.state.last_cool_off = now
-            await self._set_output('HEAT', False); self.state.last_heat_off = now
-            await self._set_output('FAN', False)
-            self.state.postrun_until = 0
-            self.state.call_started_at = None
+            failures = []
+            # Life-safety shutdown must not trust cached state. Reassert each
+            # independent OFF command even when an earlier output fails.
+            for name in ('COOL', 'HEAT', 'FAN'):
+                try:
+                    await self._set_output(name, False)
+                    if name == 'COOL':
+                        self.state.last_cool_off = now
+                    elif name == 'HEAT':
+                        self.state.last_heat_off = now
+                except Exception as exc:
+                    failures.append({'output': name, 'error': str(exc)})
+            if not failures:
+                self.state.postrun_until = 0
+                self.state.call_started_at = None
+            return {'ok': not failures, 'attempted': ['COOL', 'HEAT', 'FAN'], 'failures': failures}
 
     async def evaluate(self):
         async with self._lock:

@@ -100,6 +100,22 @@ async def test_force_off_reasserts_all_outputs_when_cached_state_is_false():
 
 
 @pytest.mark.asyncio
+async def test_force_off_attempts_all_outputs_after_an_early_failure():
+    events = []
+
+    async def out(name, value):
+        events.append((name, value))
+        if name == 'COOL':
+            raise RuntimeError('cool relay unavailable')
+
+    h = HVACController(out, controller([]).damper)
+    result = await h.force_off()
+    assert events == [('COOL', False), ('HEAT', False), ('FAN', False)]
+    assert result['ok'] is False
+    assert result['failures'][0]['output'] == 'COOL'
+
+
+@pytest.mark.asyncio
 async def test_fan_mode_runs_until_changed_even_without_occupied_rooms():
     events = []
     h = controller(events)

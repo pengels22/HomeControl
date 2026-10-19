@@ -16,6 +16,7 @@ from .models import (
     LogicalDeviceCreateIn,
     LogicalDeviceUpdateIn,
     MaintenanceLockoutIn,
+    SystemMaintenanceLockoutIn,
     ModuleRoleChangeIn,
     PairingKeyCreateIn,
     PairingKeyVerifyIn,
@@ -650,6 +651,21 @@ async def maintenance_lockout(body: MaintenanceLockoutIn, user=Depends(require_u
     except KeyError as exc:
         raise HTTPException(404, str(exc))
     return {'ok': True, 'maintenance_locked': body.active, **result}
+
+@router.get('/safety/system-maintenance-lockout')
+async def get_system_maintenance_lockout(user=Depends(require_user)):
+    if safety is None:
+        raise HTTPException(503, 'safety controller is not configured')
+    return {'ok': True, 'scope': 'system_life_safety', 'maintenance_lockout_active': safety.maintenance_lockout_active, 'fire_active': safety.fire_active, 'status': safety.status_payload()}
+
+@router.post('/safety/system-maintenance-lockout')
+async def set_system_maintenance_lockout(body: SystemMaintenanceLockoutIn, user=Depends(require_user)):
+    if user['role'] != 'ADMIN':
+        raise HTTPException(403)
+    if safety is None:
+        raise HTTPException(503, 'safety controller is not configured')
+    await safety.set_maintenance_lockout(body.active)
+    return {'ok': True, 'scope': 'system_life_safety', 'maintenance_lockout_active': safety.maintenance_lockout_active, 'fire_active': safety.fire_active, 'status': safety.status_payload()}
 
 @router.get('/safety/hcm-relays')
 async def safety_hcm_relays(user=Depends(require_user)):

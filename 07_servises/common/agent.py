@@ -682,6 +682,7 @@ $('login-form').addEventListener('submit',login);$('refresh').addEventListener('
                     self.last_valid_ack_ts = time.time()
                     continue
                 if typ == 'log_ack':
+                    payload = msg.get('payload') or {}
                     event_ids = payload.get('event_ids') or []
                     if isinstance(event_ids, list):
                         self.event_queue.mark_delivered([str(item) for item in event_ids])

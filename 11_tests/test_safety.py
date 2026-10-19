@@ -5,6 +5,8 @@ import pytest
 
 safety_mod = import_module('01_HCM.safety')
 safety_relays_mod = import_module('01_HCM.safety_relays')
+api_mod = import_module('01_HCM.api')
+models = import_module('01_HCM.models')
 SafetyController = safety_mod.SafetyController
 
 
@@ -83,6 +85,31 @@ async def test_fire_forces_hvac_off_and_commands_only_available_lights(monkeypat
     ]
     assert "metadata->>'emergency_lighting'" in conn.fetches[0]
     assert conn.executed[0][1:3] == ('fire', True)
+    assert sent[0].body == 'Fire alarm active. HVAC shutdown initiated. Emergency lighting actions initiated where permitted.'
+
+
+@pytest.mark.asyncio
+async def test_system_maintenance_lockout_is_separate_and_does_not_clear_fire(monkeypatch):
+    controller = SafetyController(FakeHVAC())
+    controller.fire_active = True
+    await controller.set_maintenance_lockout(True)
+    assert controller.maintenance_lockout_active is True
+    assert controller.fire_active is True
+    assert controller.status_payload()['system_state'] == 'fire_active_with_maintenance_lockout'
+
+
+@pytest.mark.asyncio
+async def test_system_maintenance_api_is_admin_only_and_separate(monkeypatch):
+    controller = SafetyController(FakeHVAC())
+    controller.fire_active = True
+    monkeypatch.setattr(api_mod, 'safety', controller)
+    result = await api_mod.set_system_maintenance_lockout(models.SystemMaintenanceLockoutIn(active=True), {'role': 'ADMIN'})
+    assert result['scope'] == 'system_life_safety'
+    assert result['maintenance_lockout_active'] is True
+    assert result['fire_active'] is True
+    with pytest.raises(api_mod.HTTPException) as exc:
+        await api_mod.set_system_maintenance_lockout(models.SystemMaintenanceLockoutIn(active=False), {'role': 'READONLY'})
+    assert exc.value.status_code == 403
 
 
 @pytest.mark.asyncio
