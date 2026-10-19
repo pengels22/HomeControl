@@ -74,6 +74,25 @@ Bench tooling requires explicit opt-in and an exact target and channel.
 
 The initial commissioning process must not use wildcard or all-channel activation.
 
+The repository runner is `12_hardware_tests/hil_runner.py`. It is inert unless
+all of these values are supplied explicitly:
+
+```sh
+export HCM_HARDWARE_TESTS=1
+export HCM_HARDWARE_TARGET=RCM       # RCM or LCM
+export HCM_HARDWARE_SCOPE=channel   # channel or module
+export HCM_HARDWARE_CHANNEL=A1      # required for channel scope
+export HCM_HARDWARE_I2C_BUS=3       # explicit Linux bus; never guessed
+python 12_hardware_tests/hil_runner.py
+```
+
+For a full module run, omit `HCM_HARDWARE_CHANNEL` and select
+`HCM_HARDWARE_SCOPE=module`. RCM's optional group pattern requires the separate
+explicit `HCM_HARDWARE_PATTERN=all` setting. The runner creates an in-memory
+`BENCH_TESTING` profile view, uses production driver classes, records latch/PWM
+readback, and always attempts final all-off cleanup. It never changes the
+repository profile or marks a module commissioned.
+
 ## First RCM bench test
 
 The recommended first physical test is one isolated RCM relay output.
@@ -103,7 +122,9 @@ Recommended sequence:
 11. independently confirm the external test load is OFF;
 12. force OFF again during cleanup.
 
-Do not automatically iterate all 32 relays during the first test.
+Do not automatically iterate all 32 relays during the first test. After the
+single-channel result is reviewed, an explicit module-scope run may iterate all
+32 relays in canonical A1-D8 order.
 
 ## RCM acceptance record
 

@@ -133,6 +133,21 @@ async def test_sim_physical_firmware_update_fails_closed_without_bootloader_tran
     }
 
 
+@pytest.mark.asyncio
+async def test_real_sim_reports_explicitly_unavailable_can_without_probing_host():
+    agent = sim.SIMAgent({
+        'io': {'mode': 'real'},
+        'can_interfaces': [{'name': 'can0', 'enabled': True}],
+        'can_transports': {'can0': None},
+    })
+
+    await agent.start_can_receivers()
+    state = await agent.collect_state()
+
+    assert state['can_receiver']['interfaces'] == []
+    assert state['can_receiver']['faults']['can0'] == 'configured transport is unavailable'
+
+
 def test_sim_can_setup_plan_loads_gs_usb_for_hexa_board():
     cfg = simulated_config()
 

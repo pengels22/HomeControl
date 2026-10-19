@@ -313,6 +313,11 @@ class SIMAgent(common_agent.ModuleAgent):
                 interface = str(item.get('name', ''))
                 if not interface or not bool(item.get('enabled', self.config.get('can_enabled', False))):
                     continue
+                # An explicit None entry declares the transport unavailable;
+                # do not probe host SocketCAN in that case.
+                if interface in self.can_transports and self.can_transports[interface] is None:
+                    self.can_receive_faults[interface] = 'configured transport is unavailable'
+                    continue
                 transport = self.can_transports.get(interface)
                 if transport is None and self.io_mode == 'real':
                     transport = common_can.LinuxSocketCANTransport(interface)

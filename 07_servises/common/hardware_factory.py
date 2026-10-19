@@ -88,7 +88,7 @@ def build_hardware_bundle(
     """Build the requested bundle without changing its requested mode."""
     mode = str(config.get("hardware_mode", config.get("io_mode", "simulated"))).lower()
     if mode == "auto":
-        mode = "simulated"
+        raise ValueError("hardware mode=auto is unsupported; choose real or simulated explicitly")
     if mode not in {"simulated", "mock", "real", "disabled"}:
         raise ValueError("hardware mode must be simulated, mock, real, or disabled")
     profile = _profile_data(profile or config.get("hardware_profile"))
