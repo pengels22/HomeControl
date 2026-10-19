@@ -53,9 +53,26 @@ class SIMAgent(common_agent.ModuleAgent):
 
     def _initial_output_state(self, section, child_key):
         items = self._hexa_section(section).get(child_key, {})
+        if self.io_mode == 'real':
+            return {name: None for name in items}
         return {name: bool(item.get('simulated', False)) for name, item in items.items()}
 
     def _analog_value_status(self, item):
+        if self.io_mode == 'real':
+            return {
+                'label': item.get('label'),
+                'source': item.get('source'),
+                'unit': item.get('unit', 'V'),
+                'value': None,
+                'status': 'UNAVAILABLE',
+                'availability': 'not_implemented',
+                'visible': bool(item.get('visible', True)),
+                'nominal_v': item.get('nominal_v'),
+                'off_below_v': item.get('off_below_v'),
+                'warning_low_v': item.get('warning_low_v'),
+                'warning_high_v': item.get('warning_high_v'),
+                'ok': False,
+            }
         value = float(item.get('simulated_v', item.get('nominal_v', 0)))
         off_below = item.get('off_below_v')
         low = item.get('warning_low_v')
@@ -123,7 +140,8 @@ class SIMAgent(common_agent.ModuleAgent):
                 name: {
                     'label': item.get('label'),
                     'direction': item.get('direction', 'input'),
-                    'value': self.hexa_dio_state.get(name, bool(item.get('simulated', False))),
+                    'value': self.hexa_dio_state.get(name) if self.io_mode == 'real' else self.hexa_dio_state.get(name, bool(item.get('simulated', False))),
+                    'availability': 'not_implemented' if self.io_mode == 'real' else 'simulated',
                 }
                 for name, item in dio.items()
             },
@@ -131,7 +149,8 @@ class SIMAgent(common_agent.ModuleAgent):
             'switching_12v': {
                 name: {
                     'label': item.get('label'),
-                    'value': self.hexa_switching_state.get(name, bool(item.get('simulated', False))),
+                    'value': self.hexa_switching_state.get(name) if self.io_mode == 'real' else self.hexa_switching_state.get(name, bool(item.get('simulated', False))),
+                    'availability': 'not_implemented' if self.io_mode == 'real' else 'simulated',
                     'restart_count': int(item.get('restart_count', 0)),
                 }
                 for name, item in switching.items()
@@ -187,6 +206,8 @@ class SIMAgent(common_agent.ModuleAgent):
     async def _set_hexa_12v_output(self, channel, value, source='module_api'):
         if channel not in self.hexa_switching_state:
             return {'ok': False, 'error': 'unknown_hexa_12v_channel'}
+        if self.io_mode == 'real':
+            return {'ok': False, 'error': 'physical_12v_adapter_not_implemented', 'channel': channel, 'physical_outputs_commanded': False}
         payload = {'op': 'set_hexa_12v', 'channel': channel, 'value': bool(value), 'source': source}
         decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), channel, payload, source))
         self.hexa_switching_state[channel] = bool(decision.final_command.get('value', False))
@@ -437,10 +458,14 @@ class SIMAgent(common_agent.ModuleAgent):
             direction = self.hexa_dio_directions.get(channel, 'input')
             if direction != 'output':
                 return {'ok': False, 'error': 'channel_is_input', 'channel': channel, 'direction': direction}
+            if self.io_mode == 'real':
+                return {'ok': False, 'error': 'physical_dio_adapter_not_implemented', 'channel': channel, 'physical_outputs_commanded': False}
             decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), channel, payload, payload.get('source', 'module_api')))
             self.hexa_dio_state[channel] = bool(decision.final_command.get('value', False))
             return {'ok': True, 'channel': channel, 'value': self.hexa_dio_state[channel], 'arbitration': decision.as_dict()}
         if payload.get('op') == 'inject_hexa_di':
+            if self.io_mode == 'real':
+                return {'ok': False, 'error': 'physical_dio_adapter_not_implemented', 'channel': str(payload.get('channel')), 'physical_outputs_commanded': False}
             channel = str(payload['channel'])
             if channel not in self.hexa_dio_state:
                 return {'ok': False, 'error': 'unknown_hexa_dio_channel'}

@@ -20,7 +20,7 @@ networks:
   heartbeat_port: 6004
   note: Current development deployment uses the VLAN 20 Ethernet path.
 io:
-  mode: auto
+  mode: real
 tls:
   enabled: false
 capabilities: [rmc-can, telemetry, faults, hexa-aio, hexa-dio, hexa-usb, hexa-can, hexa-12v-switching]
@@ -42,6 +42,9 @@ rmc_firmware_updates:
 hexa_board:
   model: ViaGasaFamido 6-channel CAN hub / Hexa board
   role: SIM field IO and CAN distribution
+  # The simulated_v/simulated fixture values below are consumed only when an
+  # explicit simulated or mock mode is selected. Real mode reports unavailable
+  # until the corresponding physical adapter is implemented and configured.
   interfaces:
     aio:
       enabled: true

@@ -175,6 +175,7 @@ async def test_lcm_lockout_immediately_deenergizes_existing_outputs():
 @pytest.mark.asyncio
 async def test_sim_hexa_output_cannot_bypass_lockout():
     cfg = sim_mod.common_cfg.load_yaml(sim_mod.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+    cfg['io'] = {'mode': 'simulated'}
     agent = sim_mod.SIMAgent(cfg)
     await agent.apply_command({'op': 'safety_state', 'conditions': {'maintenance_lockout': True}})
 
@@ -187,6 +188,7 @@ async def test_sim_hexa_output_cannot_bypass_lockout():
 @pytest.mark.asyncio
 async def test_sim_hexa_inputs_are_not_part_of_lockout():
     cfg = sim_mod.common_cfg.load_yaml(sim_mod.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+    cfg['io'] = {'mode': 'simulated'}
     agent = sim_mod.SIMAgent(cfg)
     await agent.apply_command({'op': 'safety_state', 'conditions': {'maintenance_lockout': True}})
 
@@ -202,6 +204,7 @@ async def test_sim_hexa_inputs_are_not_part_of_lockout():
 @pytest.mark.asyncio
 async def test_sim_hexa_restart_does_not_reenergize_after_lockout():
     cfg = sim_mod.common_cfg.load_yaml(sim_mod.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+    cfg['io'] = {'mode': 'simulated'}
     agent = sim_mod.SIMAgent(cfg)
 
     restart = asyncio.ensure_future(agent.apply_command({'op': 'restart_hexa_12v', 'channel': 'sw1', 'delay_s': 0.05}))

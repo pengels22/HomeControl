@@ -13,9 +13,46 @@ async function api(path, options = {}) {
   if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(`/api/v1${path}`, {...options, headers});
   const text = await response.text();
-  const data = text ? JSON.parse(text) : {};
-  if (!response.ok) throw new Error(data.detail || JSON.stringify(data));
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = text;
+  }
+  if (!response.ok) throw new Error(formatApiError(data, text));
   return data;
+}
+
+function formatApiError(value, fallback = "Request failed") {
+  const safe = (text) => {
+    const message = String(text || "").trim();
+    if (!message) return "Request failed";
+    if (/traceback|stack trace|syntax error|sqlstate|postgres|database error/i.test(message)) return "Request failed";
+    return message;
+  };
+  if (typeof value === "string") return safe(value) || safe(fallback);
+  if (Array.isArray(value)) {
+    const messages = value.map((item) => formatApiError(item, "")).filter(Boolean);
+    return messages.length ? messages.join("; ") : safe(fallback);
+  }
+  if (value && typeof value === "object") {
+    if (value.msg) {
+      const location = Array.isArray(value.loc) ? value.loc.filter(Boolean).join(".") : "";
+      return `${location ? `${location}: ` : ""}${safe(value.msg)}`;
+    }
+    if (value.detail !== undefined) return formatApiError(value.detail, fallback);
+    if (value.message !== undefined) return formatApiError(value.message, fallback);
+    if (value.error !== undefined) return formatApiError(value.error, fallback);
+    const entries = Object.entries(value)
+      .filter(([key]) => !["trace", "traceback", "stack"].includes(String(key).toLowerCase()))
+      .map(([key, item]) => {
+        const message = formatApiError(item, "");
+        return message ? `${key}: ${message}` : "";
+      })
+      .filter(Boolean);
+    return entries.length ? entries.join("; ") : safe(fallback);
+  }
+  return safe(fallback);
 }
 
 function esc(value) {
@@ -135,16 +172,18 @@ function deviceLink(module) {
 async function renderDashboard() {
   setTitle("Overview", "Dashboard");
   $("content").innerHTML = `<div class="loading">Loading HCM health...</div>`;
-  const [healthResult, hvacResult, modulesResult, logicalResult] = await Promise.allSettled([
+  const [healthResult, hvacResult, modulesResult, logicalResult, safetyResult] = await Promise.allSettled([
     api("/health"),
     api("/hvac"),
     loadRegistry(),
     api("/dashboard/status"),
+    api("/safety/status"),
   ]);
   const health = settledValue(healthResult, {});
   const hvac = settledValue(hvacResult, null);
   const modules = settledValue(modulesResult, []);
   const dashboardStatus = settledValue(logicalResult, null);
+  const safetyStatus = settledValue(safetyResult, null);
   const onlineCount = modules.filter(online).length;
   const offlineModules = modules.filter((module) => !online(module));
   const lockoutItems = Array.isArray(dashboardStatus?.maintenance_lockouts?.items) ? dashboardStatus.maintenance_lockouts.items : null;
@@ -153,7 +192,9 @@ async function renderDashboard() {
   const activeFaultCount = faultItems ? Number(dashboardStatus.active_faults.count ?? faultItems.length) : unavailableValue();
   const conflictSupervisor = dashboardStatus?.conflict_supervisor || health.heartbeat_supervisor || health.conflict_heartbeat || null;
   const conflictStatus = conflictSupervisor?.status || null;
-  const fireStatus = health.fire_life_safety?.status || health.life_safety?.status || null;
+  const fireStatus = safetyStatus?.status || null;
+  const fireActive = String(fireStatus || "").toLowerCase() === "active";
+  const fireSource = safetyStatus?.physical_input_authoritative ? "Physical input" : safetyStatus ? "Simulation" : "Unavailable";
   const conflictReported = statusKnown(conflictStatus);
   const fireReported = statusKnown(fireStatus);
   const moduleTotals = moduleTypeTotals(modules);
@@ -186,8 +227,8 @@ async function renderDashboard() {
       </article>
       <article class="summary dashboard-card">
         <span>Fire / Life Safety</span>
-        <strong>${esc(fireStatus || "Unavailable")}</strong>
-        <p>${fireReported ? "Reported by HCM health data" : "No safety status API value reported"}</p>
+        <strong>${esc(fireActive ? "FIRE ACTIVE" : fireReported ? fireStatus : "Unavailable")}</strong>
+        <p>${fireReported ? `${esc(fireSource)} · ${safetyStatus.fire_alarm_s?.state || "Unknown"}` : "No authenticated safety status reported"}</p>
       </article>
       <button class="summary dashboard-card" type="button" data-open-lockouts>
         <span>Maintenance Lockouts</span>
@@ -475,8 +516,8 @@ function openAddUserDialog() {
       <button type="button" class="secondary icon-button" data-close-dialog aria-label="Close">x</button>
     </div>
     <label>Username <input data-user-username autocomplete="off"></label>
-    <label>Password <input type="password" data-user-password autocomplete="new-password"></label>
-    <label>Confirm password <input type="password" data-user-password-confirm autocomplete="new-password"></label>
+    <label>Password <input type="password" data-user-password minlength="10" autocomplete="new-password"><small class="muted">Minimum 10 characters</small></label>
+    <label>Confirm password <input type="password" data-user-password-confirm minlength="10" autocomplete="new-password"></label>
     <label>Role <select data-user-role>${roleOptions("READONLY")}</select></label>
     <div class="modal-error" role="status" aria-live="polite" data-user-modal-status></div>
     <div class="modal-actions">
@@ -620,6 +661,7 @@ function userModalStatus(message) {
 function matchingPasswords() {
   const password = activeDialog?.querySelector("[data-user-password]")?.value || "";
   const confirm = activeDialog?.querySelector("[data-user-password-confirm]")?.value || "";
+  if (password.length < 10) throw new Error("Password must be at least 10 characters");
   if (password !== confirm) throw new Error("Passwords do not match");
   return password;
 }

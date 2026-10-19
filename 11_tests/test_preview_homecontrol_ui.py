@@ -106,6 +106,16 @@ def test_dashboard_frontend_uses_health_overview_and_effective_roles(client):
     assert ".detail-item" in css
 
 
+def test_frontend_formats_structured_errors_and_reads_explicit_safety_status(client):
+    js = client.get('/static/app.js').text
+    assert 'function formatApiError' in js
+    assert 'value.msg' in js
+    assert 'api("/safety/status")' in js
+    assert 'FIRE ACTIVE' in js
+    assert 'Minimum 10 characters' in js
+    assert 'minlength="10"' in js
+
+
 def test_dashboard_detail_popups_render_individual_field_rows(client):
     js = client.get("/static/app.js").text
     lockout_item = js[js.index("function lockoutItem"):js.index("async function openFaultsDialog")]

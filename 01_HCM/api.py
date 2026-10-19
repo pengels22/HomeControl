@@ -87,6 +87,12 @@ async def health():
         payload['safety_inputs'] = {'fire_alarm_s': {'state': 'unknown'}, 'fire_alarm_P': {'state': 'unknown'}}
     return payload
 
+@router.get('/safety/status')
+async def safety_status(user=Depends(require_user)):
+    if safety is None:
+        raise HTTPException(503, 'safety controller is not configured')
+    return {'ok': True, **safety.status_payload()}
+
 @router.post('/auth/dev-session')
 async def dev_session():
     # Local-development bootstrap only. Disable/remove before production deployment.

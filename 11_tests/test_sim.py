@@ -12,6 +12,12 @@ common_can = import_module('07_servises.common.can')
 common_agent = import_module('07_servises.common.agent')
 
 
+def simulated_config():
+    config = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+    config['io'] = {'mode': 'simulated'}
+    return config
+
+
 def test_sim_builds_three_can_interfaces_from_config():
     agent = sim.SIMAgent({
         'can_interfaces': [
@@ -128,7 +134,7 @@ async def test_sim_physical_firmware_update_fails_closed_without_bootloader_tran
 
 
 def test_sim_can_setup_plan_loads_gs_usb_for_hexa_board():
-    cfg = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+    cfg = simulated_config()
 
     plan = common_can.configure_sync(cfg, apply=False)
 
@@ -141,7 +147,7 @@ def test_sim_can_setup_plan_loads_gs_usb_for_hexa_board():
 
 
 def test_sim_exposes_bom_rmc_sensor_stack_from_config():
-    cfg = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+    cfg = simulated_config()
     agent = sim.SIMAgent(cfg)
 
     sensors = agent.rmc_sensor_stack
@@ -155,8 +161,23 @@ def test_sim_exposes_bom_rmc_sensor_stack_from_config():
 
 
 @pytest.mark.asyncio
+async def test_real_sim_mode_does_not_publish_simulated_measurements():
+    cfg = simulated_config()
+    cfg['io'] = {'mode': 'real'}
+    agent = sim.SIMAgent(cfg)
+    state = await agent.collect_state()
+    hexa = state['hexa_board']
+    assert hexa['aio']['bus_monitors']['bus_3v3']['value'] is None
+    assert hexa['aio']['bus_monitors']['bus_3v3']['status'] == 'UNAVAILABLE'
+    assert hexa['dio']['dio1']['value'] is None
+    result = await agent.apply_command({'op': 'set_hexa_12v', 'channel': 'sw1', 'value': True})
+    assert result['ok'] is False
+    assert result['error'] == 'physical_12v_adapter_not_implemented'
+
+
+@pytest.mark.asyncio
 async def test_sim_exposes_hexa_board_capabilities_and_adc_bus_monitors():
-    cfg = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+    cfg = simulated_config()
     agent = sim.SIMAgent(cfg)
 
     state = await agent.collect_state()
@@ -183,7 +204,7 @@ async def test_sim_exposes_hexa_board_capabilities_and_adc_bus_monitors():
 
 @pytest.mark.asyncio
 async def test_sim_can_toggle_hexa_dio_and_12v_switch_outputs():
-    cfg = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+    cfg = simulated_config()
     agent = sim.SIMAgent(cfg)
 
     dio_result = await agent.apply_command({'op': 'set_hexa_dio', 'channel': 'dio3', 'value': True})
@@ -203,7 +224,7 @@ async def test_sim_can_toggle_hexa_dio_and_12v_switch_outputs():
 
 @pytest.mark.asyncio
 async def test_sim_can_restart_12v_loop_power_switch():
-    cfg = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+    cfg = simulated_config()
     agent = sim.SIMAgent(cfg)
 
     result = await agent.apply_command({'op': 'restart_hexa_12v', 'channel': 'sw2', 'delay_s': 0})

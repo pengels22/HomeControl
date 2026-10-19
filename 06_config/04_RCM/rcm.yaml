@@ -23,7 +23,7 @@ safety:
   emergency_lighting_channels: []
   hvac_shutdown_channels: [A1, A2, A3]
 io:
-  mode: auto
+  mode: real
 tls:
   enabled: false
 capabilities: [relay-32, xl9535-relays, type-a-faceplate]

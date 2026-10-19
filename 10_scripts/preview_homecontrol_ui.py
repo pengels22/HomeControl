@@ -989,6 +989,22 @@ async def health(authorization: str | None = Header(default=None)):
     }
 
 
+@app.get("/api/v1/safety/status")
+async def safety_status(authorization: str | None = Header(default=None)):
+    _require_preview_auth(authorization)
+    return {
+        "ok": True,
+        "status": "Normal",
+        "system_state": "normal",
+        "fire_active": False,
+        "maintenance_lockout_active": False,
+        "physical_input_authoritative": False,
+        "source": "Simulation",
+        "fire_alarm_s": {"state": "normal", "fresh": True, "age_seconds": 0},
+        "fire_alarm_P": {"state": "present", "fresh": True, "age_seconds": 0},
+    }
+
+
 @app.get("/api/v1/hvac")
 async def hvac(authorization: str | None = Header(default=None)):
     _require_preview_auth(authorization)

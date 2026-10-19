@@ -23,7 +23,7 @@ safety:
   emergency_lighting_channels: []
   hvac_shutdown_channels: []
 io:
-  mode: auto
+  mode: real
 tls:
   enabled: false
 capabilities: [relay-8, analog-out-10, hv-dimmer-4, lighting]

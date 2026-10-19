@@ -41,7 +41,7 @@ services:
   ntp: local
 safety:
   fire_input:
-    mode: simulated
+    mode: physical
     debounce_ms: 250
     alarm_level: high
     documented_contact_arrangement: "NO to 3.3V, Common to GPIO, NC to Ground"

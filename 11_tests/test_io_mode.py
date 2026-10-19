@@ -25,3 +25,13 @@ def test_io_mode_env_override(monkeypatch):
     monkeypatch.setenv('HC_IO_MODE', 'simulated')
 
     assert io.io_mode({'io': {'mode': 'real'}}) == 'simulated'
+
+
+def test_explicit_real_mode_is_real_outside_development(monkeypatch):
+    monkeypatch.delenv('HCM_DEV_MODE', raising=False)
+    monkeypatch.delenv('HC_DEV_MODE', raising=False)
+    monkeypatch.delenv('HC_IO_MODE', raising=False)
+    monkeypatch.delenv('HCM_IO_MODE', raising=False)
+
+    assert io.io_mode({'io': {'mode': 'real'}}) == 'real'
+    assert io.real_io_enabled({'io': {'mode': 'real'}}) is True

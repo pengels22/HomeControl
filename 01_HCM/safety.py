@@ -89,9 +89,11 @@ class SafetyController:
             'status': 'Active' if fire == 'active' else 'Normal' if fire == 'normal' else 'Unknown',
             'maintenance_lockout_active': self.maintenance_lockout_active,
             'system_state': self.state(),
+            'fire_active': self.fire_active,
+            'physical_input_authoritative': self.physical_fire_input_authoritative(),
             'fire_alarm_s': {'state': fire, 'fresh': fresh, 'age_seconds': age},
             'fire_alarm_P': {'state': ac, 'fresh': fresh, 'age_seconds': age},
-            'source': 'hcm_safety_controller',
+            'source': 'Physical input' if self.physical_fire_input_authoritative() else 'Simulation',
         }
 
     async def sample_fire_input(self, level: bool | None, now: float):

@@ -42,6 +42,7 @@ def test_rmc_build_time_config_uses_global_values():
 @pytest.mark.asyncio
 async def test_sim_stages_and_completes_rmc_firmware_update(tmp_path):
     cfg = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+    cfg['io'] = {'mode': 'simulated'}
     cfg['rmc_firmware_updates']['staging_root'] = str(tmp_path)
     agent = sim.SIMAgent(cfg)
     image = bytes((i % 251 for i in range(64)))
@@ -65,6 +66,7 @@ async def test_sim_stages_and_completes_rmc_firmware_update(tmp_path):
 @pytest.mark.asyncio
 async def test_sim_rejects_incompatible_rmc_firmware(tmp_path):
     cfg = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '06_config/02_SIM/sim.yaml')
+    cfg['io'] = {'mode': 'simulated'}
     cfg['rmc_firmware_updates']['staging_root'] = str(tmp_path)
     agent = sim.SIMAgent(cfg)
     package = rmc_fw.make_package(

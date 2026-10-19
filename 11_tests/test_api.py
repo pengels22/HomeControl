@@ -70,6 +70,27 @@ async def test_fire_api_allows_only_simulation_backend_injection(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_safety_status_endpoint_returns_controller_source_and_state(monkeypatch):
+    class Safety:
+        def status_payload(self):
+            return {
+                'status': 'Normal',
+                'system_state': 'normal',
+                'fire_active': False,
+                'maintenance_lockout_active': False,
+                'physical_input_authoritative': True,
+                'fire_alarm_s': {'state': 'normal', 'fresh': True, 'age_seconds': 0},
+                'fire_alarm_P': {'state': 'present', 'fresh': True, 'age_seconds': 0},
+            }
+
+    monkeypatch.setattr(api, 'safety', Safety())
+    result = await api.safety_status({'role': 'READONLY'})
+    assert result['ok'] is True
+    assert result['physical_input_authoritative'] is True
+    assert result['fire_alarm_s']['state'] == 'normal'
+
+
+@pytest.mark.asyncio
 async def test_auth_session_returns_current_user():
     result = await api.auth_session({'user': 'patrick', 'role': 'ADMIN'})
 
