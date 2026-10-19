@@ -119,11 +119,12 @@ def test_build_path_embeds_sha_and_checks_image(tmp_path):
     assert '--expected-sha {artifact.release}' in adapters
 
 
-@pytest.mark.parametrize('bad', [None, 'sha', 'route', 'health', 'static'])
+@pytest.mark.parametrize('bad', [None, 'sha', 'route', 'health', 'static', 'login'])
 def test_runtime_verifier_rejects_old_or_incomplete_release(monkeypatch, bad):
     verify = import_module('10_scripts.hcm_verify')
     sha = 'c' * 40
     responses = {
+        '/api/v1/auth/login': (500 if bad == 'login' else 401, b'{"detail":"invalid username/password"}'),
         '/api/v1/version': (200, json.dumps({'git_sha': 'old' if bad == 'sha' else sha}).encode()),
         '/api/v1/health': (200, json.dumps({'ok': bad != 'health'}).encode()),
         '/api/v1/safety/status': (404 if bad == 'route' else 401, b''),
@@ -134,7 +135,7 @@ def test_runtime_verifier_rejects_old_or_incomplete_release(monkeypatch, bad):
         def read(self): return self.body
         def __enter__(self): return self
         def __exit__(self, *args): pass
-    monkeypatch.setattr(verify, 'urlopen', lambda url, timeout: Response(*responses[url.removeprefix('http://test')]))
+    monkeypatch.setattr(verify, 'urlopen', lambda url, timeout: Response(*responses[(url if isinstance(url, str) else url.full_url).removeprefix('http://test')]))
     if bad:
         with pytest.raises(RuntimeError):
             verify.verify_runtime('http://test', sha)

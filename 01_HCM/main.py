@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .settings import settings
 from . import db
+from .schema_contract import check_schema
 from .registry import registry
 from .hvac import HVACController
 from .safety import SafetyController
@@ -58,6 +59,9 @@ api.notification_service = notifications
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.connect()
+    async with db.acquire() as conn:
+        async with conn.transaction(readonly=True):
+            await check_schema(conn)
     storage.ensure_storage_layout()
     await hvac.load_from_db()
     await registry.start()

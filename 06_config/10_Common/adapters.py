@@ -43,7 +43,7 @@ class BaseAdapter:
         remote_archive = self.remote_archive_path(artifact)
         release_dir = self.release_dir(artifact)
         return [
-            AdapterStep("check_installed_release", f"test -f {self.release_marker()} && cat {self.release_marker()} || true"),
+            AdapterStep("check_installed_release", f"sudo -n test -f {self.release_marker()} && sudo -n cat {self.release_marker()} || true"),
             AdapterStep("remote_identity", "hostname && uname -a", timeout=20),
             AdapterStep("stage_directory", f"mkdir -p {release_dir}"),
             AdapterStep("transfer_artifact", f"scp:{remote_archive}"),
@@ -73,7 +73,7 @@ class BaseAdapter:
     def preflight_steps(self) -> list[AdapterStep]:
         return [
             AdapterStep("remote_identity", "hostname && uname -a", timeout=20),
-            AdapterStep("read_release_marker", f"test -f {self.release_marker()} && cat {self.release_marker()} || true"),
+            AdapterStep("read_release_marker", f"sudo -n test -f {self.release_marker()} && sudo -n cat {self.release_marker()} || true"),
         ]
 
     def preflight(self, transport: SSHTransport) -> AdapterResult:
@@ -193,7 +193,7 @@ class ConflictAdapter(BaseAdapter):
             AdapterStep("install_heartbeat_skip_start", f"cd {release_dir}/00_Heartbeat && sudo HC_SKIP_START=1 ./install.sh conflict", changes_system=True, timeout=120),
             AdapterStep("restart_heartbeat", "sudo systemctl restart hcm-heartbeat.service", changes_system=True, timeout=60),
             AdapterStep("verify_heartbeat", self._heartbeat_verify_command(script=f"{release_dir}/10_scripts/heartbeat_verify_readonly.sh"), timeout=60),
-            AdapterStep("record_release", f"sudo install -d -m 0755 /var/lib/hcm-heartbeat && printf '%s\\n' {artifact.release} | sudo tee {self.release_marker()} >/dev/null", changes_system=True),
+            AdapterStep("record_release", f"sudo install -d -m 0755 /var/lib/hcm-heartbeat && printf '%s\n' {artifact.release} | sudo tee {self.release_marker()} >/dev/null", changes_system=True),
         ]
 
     def release_marker(self) -> str:
@@ -339,10 +339,28 @@ class JetsonDockerAdapter(BaseAdapter):
             AdapterStep("preflight_docker_layout", self._docker_preflight_command()),
             AdapterStep("build_hcm_image", f"sudo docker build --build-arg HCM_GIT_SHA={artifact.release} -t {image} -f {release_dir}/06_config/01_HCM/Dockerfile.live {release_dir}", changes_system=True, timeout=600),
             AdapterStep("verify_hcm_image_git", f"sudo docker run --rm --user 10001:10001 {image} git --version", changes_system=True, timeout=60),
+            AdapterStep("verify_hcm_schema", self._schema_check_command(release_dir), timeout=60),
             AdapterStep("replace_hcm_container", f"sudo python3 {release_dir}/10_scripts/hcm_docker_deploy.py deploy --image {image} --expected-sha {artifact.release} --rollback-name {rollback_name} --deployment-id {deployment_id or artifact.release}", changes_system=True, timeout=180),
             AdapterStep("verify_hcm_api", self._hcm_health_command(), timeout=60),
-            AdapterStep("record_release", f"printf '%s\\n' {artifact.release} | sudo tee {self.release_marker()} >/dev/null", changes_system=True),
+            AdapterStep("record_release", f"printf '%s\n' {artifact.release} | sudo tee {self.release_marker()} >/dev/null", changes_system=True),
         ]
+
+    def _schema_check_command(self, release_dir: str) -> str:
+        # Execute the candidate contract inside the existing app container, using
+        # its DB credentials without printing or transferring them. No GPIO import.
+        return (
+            f"(cat {release_dir}/01_HCM/schema_contract.py; cat <<'HCM_SCHEMA'\n"
+            "import asyncio\nfrom importlib import import_module\n"
+            "async def verify():\n"
+            " db=import_module('01_HCM.db')\n"
+            " try:\n"
+            "  async with db.acquire() as conn:\n"
+            "   async with conn.transaction(readonly=True):\n"
+            "    print(await check_schema(conn))\n"
+            " finally:\n  await db.close()\n"
+            "asyncio.run(verify())\nHCM_SCHEMA\n"
+            ") | sudo -n docker exec -i hcm-test python -"
+        )
 
     def _rollback_container_name(self, deployment_id: str) -> str:
         safe = "".join(ch if ch.isalnum() or ch in "-_." else "-" for ch in deployment_id).strip("-")
@@ -464,7 +482,7 @@ class JetsonDockerAdapter(BaseAdapter):
         return self._run_rollback_steps(transport, self.rollback_steps_for_deployment(deployment_id, artifact.release))
 
     def framework_rollback_needed(self, step: AdapterStep, exc: Exception) -> bool:
-        if step.name == "replace_hcm_container":
+        if step.name in {"replace_hcm_container", "verify_hcm_schema"}:
             return False
         return True
 
@@ -498,7 +516,7 @@ class Lab1Adapter(BaseAdapter):
             AdapterStep("verify_lab_services", self._lab_services_command(), timeout=60),
             AdapterStep("verify_emergency_ui", self._lab1_emergency_verify_command(), timeout=60),
             AdapterStep("verify_lab_heartbeat_client", self._lab_heartbeat_client_command(), timeout=60),
-            AdapterStep("record_release", f"printf '%s\\n' {artifact.release} | sudo tee {self.release_marker()} >/dev/null", changes_system=True),
+            AdapterStep("record_release", f"printf '%s\n' {artifact.release} | sudo tee {self.release_marker()} >/dev/null", changes_system=True),
         ]
 
     def release_marker(self) -> str:

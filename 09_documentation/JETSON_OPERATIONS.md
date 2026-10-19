@@ -115,3 +115,33 @@ This reads version, health, the unauthenticated safety-status response (must be
 401), and static JavaScript. It does not read GPIO or trigger fire actions.
 The deployment helper runs these checks before declaring success and restores
 the original container on failure. It preserves the independent host services.
+
+### Authentication schema prerequisite
+
+The October 19 deployment exposed a missing `auth_login_rate_limits` table in the
+older installed database. Image identity/health alone did not validate login.
+The deployment adapter now checks the candidate authentication schema inside the
+existing app container before replacement; HCM startup also checks it read-only.
+Runtime acceptance additionally requires JSON 401 for a random nonexistent login.
+This does not validate a user's password, but catches the missing-table regression.
+
+Migration status inspection is read-only. For a reviewed older installation,
+back up PostgreSQL, restore/test a clone, then explicitly select the required
+migrations rather than rerunning all historical migrations blindly:
+
+```sh
+python 10_scripts/homecontrol-db status
+python 10_scripts/homecontrol-db migrate --version 6 --version 7
+```
+
+006 adds touchscreen authentication schema; 007 adds normal-login rate limiting,
+an active-session index, and the current output-intent source constraint. Verify
+existing source values before applying 007. Migrations remain a deliberate
+operator action, never an automatic side effect of starting the HCM application.
+A previous application container can be restored while retaining these additive
+schema changes. Backups must remain host-local and access-restricted.
+
+Real I/O mode is distinct from commissioned output permission. Do not relabel
+unavailable hardware as simulated or mark modules commissioned without evidence.
+The existing LAB1 adapter is simulation-only; production module deployment needs
+the confirmed target bus, attached hardware, and commissioned profile.

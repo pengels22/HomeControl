@@ -1775,3 +1775,24 @@ def test_cli_exit_code_helper_flags_failed_reports():
     assert module._exit_for_report({"summary": {"status": "ROLLED BACK"}}) == 1
     assert module._exit_for_report({"summary": {"status": "PASS"}}) == 0
     assert module._exit_for_report({"summary": {"status": "NO CHANGE"}}) == 0
+
+
+def test_jetson_schema_gate_precedes_container_replacement():
+    adapter = adapters.adapter_for(inventory.inventory()['jetson'])
+    release = artifact.ReleaseArtifact('a' * 40, Path('/tmp/release.tar.gz'), 'digest', Path('/tmp/meta.json'))
+    steps = adapter.steps(release, deployment_id='schema-test')
+    names = [step.name for step in steps]
+    assert names.index('verify_hcm_schema') < names.index('replace_hcm_container')
+    gate = next(step for step in steps if step.name == 'verify_hcm_schema')
+    assert 'transaction(readonly=True)' in gate.command
+    assert not adapter.framework_rollback_needed(gate, RuntimeError('missing schema'))
+    assert 'migrate' not in gate.command
+
+
+def test_release_marker_writes_real_newline():
+    adapter = adapters.adapter_for(inventory.inventory()['jetson'])
+    release = artifact.ReleaseArtifact('a' * 40, Path('/tmp/release.tar.gz'), 'digest', Path('/tmp/meta.json'))
+    command = next(s.command for s in adapter.steps(release) if s.name == 'record_release')
+    # Execute only printf locally; no sudo or writes.
+    output = subprocess.check_output(['sh', '-c', command.split('|')[0]])
+    assert output == ('a' * 40 + '\n').encode()

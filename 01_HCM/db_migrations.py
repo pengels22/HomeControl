@@ -20,18 +20,17 @@ MIGRATIONS = sorted(
 
 async def status() -> list[dict[str, Any]]:
     async with db.acquire() as conn:
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS homecontrol_schema_migrations(
-                version INTEGER PRIMARY KEY,
-                filename TEXT NOT NULL,
-                applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-            )
-        ''')
+        if not await conn.fetchval("SELECT to_regclass('public.homecontrol_schema_migrations')"):
+            return []
         rows = await conn.fetch('SELECT version, filename, applied_at FROM homecontrol_schema_migrations ORDER BY version')
     return [dict(row) for row in rows]
 
 
-async def migrate() -> list[int]:
+async def migrate(versions: list[int] | None = None) -> list[int]:
+    selected = set(versions) if versions is not None else None
+    known = {int(path.name[:3]) for path in MIGRATIONS}
+    if selected is not None and not selected <= known:
+        raise ValueError('unknown migration version')
     applied: list[int] = []
     async with db.acquire() as conn:
         await conn.execute('''
@@ -44,7 +43,7 @@ async def migrate() -> list[int]:
         existing = {int(row['version']) for row in await conn.fetch('SELECT version FROM homecontrol_schema_migrations')}
         for path in MIGRATIONS:
             version = int(path.name[:3])
-            if version in existing:
+            if version in existing or (selected is not None and version not in selected):
                 continue
             async with conn.transaction():
                 await conn.execute(path.read_text())

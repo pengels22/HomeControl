@@ -4,7 +4,7 @@ import argparse
 import json
 import re
 from urllib.error import HTTPError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 
 def verify_runtime(base_url, expected_sha):
@@ -25,6 +25,19 @@ def verify_runtime(base_url, expected_sha):
     get('/api/v1/safety/status', 401)
     if b'api("/safety/status")' not in get('/static/app.js'):
         raise RuntimeError('dashboard safety-status code missing')
+    # Probe a random nonexistent identity; never use a real user's credentials.
+    import secrets
+    request = Request(base_url.rstrip('/') + '/api/v1/auth/login',
+                      data=json.dumps({'username': 'probe_' + secrets.token_hex(12),
+                                       'password': secrets.token_hex(24)}).encode(),
+                      headers={'Content-Type': 'application/json'})
+    try:
+        response = urlopen(request, timeout=5)
+    except HTTPError as exc:
+        response = exc
+    with response:
+        if response.code != 401 or not isinstance(json.loads(response.read()), dict):
+            raise RuntimeError('login acceptance failed: expected JSON 401 for nonexistent user')
     return identity
 
 
