@@ -49,7 +49,7 @@ class UpdateService:
             trusted_public_key=public_key,
             request_secret=request_secret,
             staging_root=Path(os.getenv('HCM_UPDATE_STAGING_ROOT', '/var/lib/homecontrol/updates/staging')),
-            replay_store_path=Path(os.getenv('HCM_UPDATE_REPLAY_STORE', '/var/lib/homecontrol/update-replay.sqlite3')),
+            replay_store_path=Path(os.getenv('HCM_UPDATE_REPLAY_STORE', '/var/lib/homecontrol/update-state/replay.sqlite3')),
         )
 
     @staticmethod

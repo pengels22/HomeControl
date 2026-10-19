@@ -95,10 +95,11 @@ class UpdateOrchestrator:
                         expected = str(artifact.get('version') or artifact.get('software_version') or '')
                         version_ok = not expected or str(current['software_version'] or '') == expected
                         return {
-                            'ok': True,
+                            'ok': version_ok,
                             'module': hostname,
                             'update': result,
                             'verified': version_ok,
+                            'reason': None if version_ok else 'version_mismatch',
                             'verification': {'new_heartbeat': True, 'reported_version': current['software_version'], 'version_match': version_ok},
                         }
                     await asyncio.sleep(self.module_poll_interval_s)

@@ -321,8 +321,8 @@ def run_driver_scenarios(coord: Coordinator) -> None:
                 raise AssertionError("I2C failure was hidden")
         finally:
             transport.fail_writes = False
-        assert not bundle["commissioned_channels"] if "commissioned_channels" in bundle else True
-        return {"rcm_relays": 32, "lcm_relays": 8, "pca9685_dimmers": 10, "shelly_dimmers": 4, "i2c_operations": transport.operation_count, "physical_transports_opened": False, "commissioned_channels": []}
+        assert not bundle.get("physical_output_enabled", False)
+        return {"rcm_relays": 32, "lcm_relays": 8, "pca9685_dimmers": 10, "shelly_dimmers": 4, "i2c_operations": transport.operation_count, "physical_transports_opened": False, "physical_output_enabled": False}
 
     coord.run_step("Hardware configuration/commissioning", "isolated production-shaped driver suite", drivers_run, description="Exercise corrected register-aware drivers with mocks only", expected="all mapped channels, failures, polarity and invalid-channel gates behave safely")
 
@@ -511,8 +511,6 @@ def verify_output_inhibition() -> dict[str, Any]:
                 raise RuntimeError(f"physical output gate is ambiguous in {path}")
             if re.search(r"(?m)^\s+real_output_enabled:\s*true\s*$", text, re.IGNORECASE):
                 raise RuntimeError(f"commissioning gate is open in {path}")
-            if re.search(r"(?m)^\s+commissioned_channels:\s*\[[^\]]*[^\s\[\],][^\]]*\]\s*$", text):
-                raise RuntimeError(f"commissioned channels are present in {path}")
         else:
             data = yaml.safe_load(text) or {}
             if data.get("physical_output_enabled") is not False:
@@ -520,10 +518,10 @@ def verify_output_inhibition() -> dict[str, Any]:
             for name, section in (data.get("outputs") or {}).items():
                 if not isinstance(section, dict):
                     continue
-                if section.get("real_output_enabled") is True or section.get("commissioned_channels"):
+                if section.get("real_output_enabled") is True:
                     raise RuntimeError(f"commissioning gate is open for {path}:{name}")
         checked.append(str(path.relative_to(ROOT)))
-    return {"checked_manifests": checked, "physical_output_enabled": False, "commissioned_channels": [], "mock_transports_only": True}
+    return {"checked_manifests": checked, "physical_output_enabled": False, "mock_transports_only": True}
 
 
 def record_blocked_scenarios(coord: Coordinator) -> None:

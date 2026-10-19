@@ -1244,7 +1244,8 @@ async def get_touchscreen_state(identifier: str | int, role: str | None = None) 
             "physical_outputs_enabled": device.get("physical_outputs_enabled"),
             "commissioning": {
                 "enabled": bool(nested.get("commissioning_enabled", False)) if isinstance(nested, dict) else False,
-                "commissioned_channels": list(nested.get("commissioned_channels", [])) if isinstance(nested, dict) and isinstance(nested.get("commissioned_channels", []), list) else [],
+                "status": nested.get("commissioning_status") if isinstance(nested, dict) else None,
+                "physical_output_enabled": bool(nested.get("physical_output_enabled", False)) if isinstance(nested, dict) else False,
             },
         },
         "health": {

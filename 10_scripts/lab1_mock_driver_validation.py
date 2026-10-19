@@ -70,7 +70,7 @@ def main() -> None:
         "ok": True,
         "simulation": True,
         "physical_outputs_enabled": False,
-        "commissioned_channels": [],
+        "commissioning_status": "SIMULATED",
         "rcm_channels_tested": 32,
         "lcm_relay_channels_tested": 8,
         "pca9685_channels_tested": 10,

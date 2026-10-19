@@ -87,6 +87,31 @@ async def test_sim_mock_can_receiver_decodes_and_attributes_frames():
     assert state['rmc_nodes']['3']['can_interface'] == 'can0'
     assert state['rmc_nodes']['3']['online'] is True
     assert state['can_receiver']['interfaces'] == ['can0']
+    assert transport.started is False
+    assert agent.active_can_transports == {}
+
+
+@pytest.mark.asyncio
+async def test_sim_can_partial_start_failure_closes_started_transports():
+    first = common_can.MockCANTransport()
+
+    class FailingTransport(common_can.MockCANTransport):
+        async def start(self):
+            raise RuntimeError('bind failed')
+
+    agent = sim.SIMAgent({
+        'can_enabled': True,
+        'can_interfaces': [
+            {'name': 'can0', 'enabled': True},
+            {'name': 'can1', 'enabled': True},
+        ],
+        'can_transports': {'can0': first, 'can1': FailingTransport()},
+    })
+    with pytest.raises(RuntimeError, match='can1'):
+        await agent.start_can_receivers()
+    assert first.started is False
+    assert agent.active_can_transports == {}
+    assert agent.can_receive_tasks == {}
 
 
 @pytest.mark.asyncio

@@ -45,7 +45,7 @@ def real_io_enabled(config: dict[str, Any] | None = None) -> bool:
 
 
 def physical_channel_write_allowed(config: dict[str, Any] | None, channel: str) -> bool:
-    """Require both the configured real mode and explicit channel commissioning."""
+    """Require real mode plus the authoritative module commissioning gate."""
     cfg = config or {}
     profile = cfg.get("hardware_profile") or {}
     return real_io_enabled(cfg) and physical_write_allowed(profile, channel)

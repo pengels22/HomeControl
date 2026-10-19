@@ -25,6 +25,15 @@ class HardwareDriverBundle:
     shelly_1: Any | None = None
     shelly_2: Any | None = None
     diagnostics: dict[str, Any] = field(default_factory=dict)
+    transports: list[Any] = field(default_factory=list)
+
+    def close(self) -> None:
+        """Close owned transports; safe to call repeatedly."""
+        for transport in self.transports:
+            close = getattr(transport, "close", None)
+            if close is not None:
+                close()
+        self.transports.clear()
 
     def as_dict(self) -> dict[str, Any]:
         result = {
@@ -62,10 +71,13 @@ def _bus_id(config: dict[str, Any], profile: dict[str, Any]) -> int:
     i2c = config.get("i2c", {})
     if isinstance(i2c, dict) and "bus" in i2c:
         return int(i2c["bus"])
+    device = i2c.get("device") if isinstance(i2c, dict) else None
+    if device and str(device).startswith("/dev/i2c-"):
+        return int(str(device).rsplit("-", 1)[1])
     for item in profile.get("buses", {}).get("i2c", {}).values():
-        if isinstance(item, dict) and str(item.get("bus", "")).isdigit():
-            return int(item["bus"])
-    return 1
+        if isinstance(item, dict) and str(item.get("device", "")).startswith("/dev/i2c-"):
+            return int(str(item["device"]).rsplit("-", 1)[1])
+    raise ValueError("real I2C mode requires explicit Linux bus mapping")
 
 
 def build_hardware_bundle(
@@ -101,15 +113,15 @@ def build_hardware_bundle(
     # or a malformed manifest is a startup error.
     if module_type not in {"RCM", "LCM"}:
         return HardwareDriverBundle(mode="real", transport_type="none", diagnostics={"status": "not_configured"})
-    bus = drivers.LockedI2C(drivers.LinuxI2CTransport(_bus_id(config, profile)))
-    bundle = HardwareDriverBundle(mode="real", transport_type="linux_i2c")
+    i2c_transport = drivers.LinuxI2CTransport(_bus_id(config, profile))
+    bus = drivers.LockedI2C(i2c_transport)
+    bundle = HardwareDriverBundle(mode="real", transport_type="linux_i2c", transports=[i2c_transport])
     if module_type == "RCM":
         addresses = tuple(
             _address(profile, name, default)
             for name, default in (("relay_card_1", 0x20), ("relay_card_2", 0x21))
         )
         bundle.rcm_relays = drivers.XL9535RelayDriver(bus, addresses=addresses)
-        bundle.rcm_relays.initialize()
     else:
         bundle.lcm_relays = drivers.MCP23017RelayDriver(bus, _address(profile, "mcp2", 0x27))
         pwm = profile.get("buses", {}).get("i2c", {}).get("pca9685", {})
@@ -118,8 +130,6 @@ def build_hardware_bundle(
             _address(profile, "pca9685", 0x40),
             int((pwm or {}).get("frequency_hz", 1000)),
         )
-        bundle.lcm_relays.initialize()
-        bundle.lcm_pwm.initialize()
         hv = profile.get("outputs", {}).get("hv_dimmers", {}).get("mappings", {})
         for key, slot in (("shelly_1", "shelly_1"), ("shelly_2", "shelly_2")):
             endpoint = next((item.get("device") or item.get("url") for item in hv.values() if item.get("device_slot") == key), None)
@@ -127,5 +137,5 @@ def build_hardware_bundle(
                 setattr(bundle, slot, drivers.ShellyRpcTransport(str(endpoint)))
             else:
                 bundle.diagnostics[f"{slot}_status"] = "not_configured"
-    bundle.diagnostics.update({"status": "initialized", "physical_writes": "commissioning_required"})
+    bundle.diagnostics.update({"status": "constructed", "physical_writes": "commissioning_required", "initialization_owner": "module_agent"})
     return bundle

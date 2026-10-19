@@ -79,6 +79,7 @@ class RCMAgent(common_agent.ModuleAgent):
 
     def _deenergize_all_relays_for_safety(self):
         decisions = []
+        failures = []
         for ch in list(self.relays.values):
             decision = self.safety.decide(common_safety.OutputRequest(
                 self.identity.get('device_id'),
@@ -87,8 +88,16 @@ class RCMAgent(common_agent.ModuleAgent):
                 'safety_state',
             ))
             self.relays.set(ch, bool(decision.final_command.get('value', False)))
+            if self.io_mode == 'real' and self.driver_bundle and self.driver_bundle.get('rcm_relays'):
+                try:
+                    self.driver_bundle['rcm_relays'].set_channel(
+                        common_infra.RCM_RELAY_CHANNELS.index(ch), False
+                    )
+                except Exception as exc:
+                    logging.getLogger(__name__).exception('failed to deenergize %s', ch)
+                    failures.append({'channel': ch, 'error': str(exc)})
             decisions.append(decision.as_dict())
-        return decisions
+        return {'decisions': decisions, 'failures': failures, 'safe_state_attempted': self.io_mode == 'real'}
 
     async def collect_state(self):
         return {
@@ -142,8 +151,8 @@ class RCMAgent(common_agent.ModuleAgent):
         if payload.get('op') == 'safety_state':
             conditions = payload.get('conditions', {})
             self.safety.update_conditions(conditions)
-            decisions = self._deenergize_all_relays_for_safety() if self._safety_requires_output_shutdown(conditions) else []
-            return {'ok': True, 'safety': self.safety.snapshot(), 'arbitration': decisions}
+            result = self._deenergize_all_relays_for_safety() if self._safety_requires_output_shutdown(conditions) else {'decisions': [], 'failures': [], 'safe_state_attempted': False}
+            return {'ok': not result['failures'], 'safety': self.safety.snapshot(), 'arbitration': result['decisions'], 'safe_state_attempted': result['safe_state_attempted'], 'failures': result['failures']}
         if payload.get('op') == 'set_relay':
             ch = payload['channel'].upper()
             physical_requested = bool(payload.get('physical_write_requested'))
@@ -187,6 +196,7 @@ class RCMAgent(common_agent.ModuleAgent):
             }
         if payload.get('op') == 'all_off':
             decisions = []
+            failures = []
             for ch in list(self.relays.values):
                 decision = self.safety.decide(common_safety.OutputRequest(
                     self.identity.get('device_id'),
@@ -195,8 +205,14 @@ class RCMAgent(common_agent.ModuleAgent):
                     payload.get('source', 'module_api'),
                 ))
                 self.relays.set(ch, bool(decision.final_command.get('value', False)))
+                if self.io_mode == 'real' and self.driver_bundle and self.driver_bundle.get('rcm_relays'):
+                    try:
+                        self.driver_bundle['rcm_relays'].set_channel(common_infra.RCM_RELAY_CHANNELS.index(ch), False)
+                    except Exception as exc:
+                        logging.getLogger(__name__).exception('failed to all-off %s', ch)
+                        failures.append({'channel': ch, 'error': str(exc)})
                 decisions.append(decision.as_dict())
-            return {'ok': True, 'arbitration': decisions}
+            return {'ok': not failures, 'arbitration': decisions, 'safe_state_attempted': self.io_mode == 'real', 'failures': failures}
         return await super().apply_command(payload)
 
 async def main():

@@ -17,6 +17,7 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/homecontrol/updates/staging
+ReadWritePaths=/var/lib/homecontrol/update-state
 ReadOnlyPaths=/etc/homecontrol
 
 [Install]

@@ -84,15 +84,16 @@ def test_rcm_uses_global_relay_count_and_default_state():
     assert agent.relays.snapshot() == {'A1': True, 'A2': True}
 
 
-def test_physical_bench_does_not_commission_without_explicit_channel_allowlist():
+def test_physical_commissioning_is_module_level_and_profile_scoped():
     profile = {
         'physical_output_enabled': True,
+        'verification': {'status': 'COMMISSIONED'},
         'outputs': {'relays': {'real_output_enabled': True, 'channels': ['A1']}},
     }
-    assert commissioning.physical_write_allowed(profile, 'A1') is False
-    profile['outputs']['relays']['commissioned_channels'] = ['A1']
     assert commissioning.physical_write_allowed(profile, 'A1') is True
     assert commissioning.physical_write_allowed(profile, 'A2') is False
+    profile['verification']['status'] = 'BENCH_TESTING'
+    assert commissioning.physical_write_allowed(profile, 'A1') is False
 
 
 @pytest.mark.asyncio

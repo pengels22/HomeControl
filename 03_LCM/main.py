@@ -73,6 +73,7 @@ class LCMAgent(common_agent.ModuleAgent):
 
     def _deenergize_all_outputs_for_safety(self):
         decisions = []
+        failures = []
         for ch in list(self.relays.values):
             decision = self.safety.decide(common_safety.OutputRequest(
                 self.identity.get('device_id'),
@@ -81,6 +82,12 @@ class LCMAgent(common_agent.ModuleAgent):
                 'safety_state',
             ))
             self.relays.set(ch, bool(decision.final_command.get('value', False)))
+            if self.io_mode == 'real' and self.driver_bundle and self.driver_bundle.get('lcm_relays'):
+                try:
+                    self.driver_bundle['lcm_relays'].set_channel(self._relay_index(ch), False)
+                except Exception as exc:
+                    logging.getLogger(__name__).exception('failed to deenergize relay %s', ch)
+                    failures.append({'channel': ch, 'error': str(exc)})
             decisions.append(decision.as_dict())
         for bank in (self.hv_dimmers, self.lv_dimmers):
             for ch in list(bank.values):
@@ -91,8 +98,14 @@ class LCMAgent(common_agent.ModuleAgent):
                     'safety_state',
                 ))
                 bank.set_percent(ch, float(decision.final_command.get('percent', 0.0)))
+                if self.io_mode == 'real':
+                    try:
+                        self._physical_dimmer_off(ch)
+                    except Exception as exc:
+                        logging.getLogger(__name__).exception('failed to deenergize dimmer %s', ch)
+                        failures.append({'channel': ch, 'error': str(exc)})
                 decisions.append(decision.as_dict())
-        return decisions
+        return {'decisions': decisions, 'failures': failures, 'safe_state_attempted': self.io_mode == 'real'}
 
     async def collect_state(self):
         return {
@@ -139,10 +152,36 @@ class LCMAgent(common_agent.ModuleAgent):
             return 100.0 if raw else 0.0
         return float(raw)
 
+    def _normalize_channel(self, channel):
+        value = str(channel).strip().upper()
+        if value in self.relays.values or value in self.lv_dimmers.values or value in self.hv_dimmers.values:
+            return value
+        return self.relay_map.get(value) or self.lv_dimmer_map.get(value) or self.hv_dimmer_map.get(value) or value
+
+    def _relay_index(self, channel):
+        return common_infra.LCM_RELAY_CHANNELS.index(channel)
+
+    def _hv_mapping(self, channel):
+        mapping = (self.hardware_profile.get('outputs', {}).get('hv_dimmers', {}).get('mappings', {}) or {}).get(channel)
+        if not isinstance(mapping, dict):
+            raise KeyError(channel)
+        return str(mapping['device_slot']), str(mapping['component'])
+
+    def _physical_dimmer_off(self, channel):
+        if channel in self.lv_dimmers.values:
+            if not self.driver_bundle or not self.driver_bundle.get('lcm_pwm'):
+                raise RuntimeError('PCA9685 driver is not configured')
+            return self.driver_bundle['lcm_pwm'].set_percent(common_infra.LCM_ANALOG_DIMMER_CHANNELS.index(channel), 0)
+        slot, component = self._hv_mapping(channel)
+        driver = self.driver_bundle.get(slot) if self.driver_bundle else None
+        if not driver:
+            raise RuntimeError(f'{slot} Shelly driver is not configured')
+        return driver.set_brightness(component, 0)
+
     def _set_channel(self, channel, payload):
-        logical = str(channel).upper()
-        if logical in self.relay_map:
-            physical = self.relay_map[logical]
+        logical = self._normalize_channel(channel)
+        if logical in self.relays.values:
+            physical = logical
             physical_requested = bool(payload.get('physical_write_requested'))
             if physical_requested and self.io_mode != 'real':
                 return {'ok': False, 'error': 'physical output mode is not real', 'channel': logical, 'physical_outputs_commanded': False}
@@ -152,15 +191,11 @@ class LCMAgent(common_agent.ModuleAgent):
             if physical_requested:
                 if not self.driver_bundle:
                     return {'ok': False, 'error': 'physical driver is not configured', 'channel': logical, 'physical_outputs_commanded': False}
-                self.driver_bundle['lcm_relays'].set_channel(int(physical) - 1, bool(decision.final_command.get('value', False)))
+                self.driver_bundle['lcm_relays'].set_channel(self._relay_index(physical), bool(decision.final_command.get('value', False)))
             self.relays.set(physical, bool(decision.final_command.get('value', False)))
             return {'ok': True, 'kind': 'relay', 'channel': logical, 'physical': physical, 'value': self.relays.get(physical), 'physical_output_commanded': physical_requested, 'state_confidence_label': state_confidence.OUTPUT_LATCH_READBACK if physical_requested else state_confidence.SIMULATED, 'arbitration': decision.as_dict()}
-        if logical in self.relays.values:
-            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), logical, payload, payload.get('source', 'module_api')))
-            self.relays.set(logical, bool(decision.final_command.get('value', False)))
-            return {'ok': True, 'kind': 'relay', 'channel': logical, 'value': self.relays.get(logical), 'arbitration': decision.as_dict()}
-        if logical in self.hv_dimmer_map:
-            physical = self.hv_dimmer_map[logical]
+        if logical in self.hv_dimmers.values:
+            physical = logical
             physical_requested = bool(payload.get('physical_write_requested'))
             if physical_requested and self.io_mode != 'real':
                 return {'ok': False, 'error': 'physical output mode is not real', 'channel': logical, 'physical_outputs_commanded': False}
@@ -171,18 +206,12 @@ class LCMAgent(common_agent.ModuleAgent):
             if physical_requested:
                 if not self.driver_bundle:
                     return {'ok': False, 'error': 'physical driver is not configured', 'channel': logical, 'physical_outputs_commanded': False}
-                self.driver_bundle['shelly_1' if int(physical) < 21 else 'shelly_2'].set_brightness(
-                    f"light:{(int(physical) - 19) % 2}", float(decision.final_command.get('percent', 0))
-                )
+                slot, component = self._hv_mapping(physical)
+                self.driver_bundle[slot].set_brightness(component, float(decision.final_command.get('percent', 0)))
             self.hv_dimmers.set_percent(physical, float(decision.final_command.get('percent', 0.0)))
             return {'ok': True, 'kind': 'hv_dimmer', 'channel': logical, 'physical': physical, **self.hv_dimmers.snapshot()[physical], 'physical_output_commanded': physical_requested, 'state_confidence_label': state_confidence.OUTPUT_LATCH_READBACK if physical_requested else state_confidence.SIMULATED, 'arbitration': decision.as_dict()}
-        if logical in self.hv_dimmers.values:
-            bounded = {**payload, 'percent': self._clamp_percent(self._percent(payload))}
-            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), logical, bounded, payload.get('source', 'module_api')))
-            self.hv_dimmers.set_percent(logical, float(decision.final_command.get('percent', 0.0)))
-            return {'ok': True, 'kind': 'hv_dimmer', 'channel': logical, **self.hv_dimmers.snapshot()[logical], 'arbitration': decision.as_dict()}
-        if logical in self.lv_dimmer_map:
-            physical = self.lv_dimmer_map[logical]
+        if logical in self.lv_dimmers.values:
+            physical = logical
             physical_requested = bool(payload.get('physical_write_requested'))
             if physical_requested and self.io_mode != 'real':
                 return {'ok': False, 'error': 'physical output mode is not real', 'channel': logical, 'physical_outputs_commanded': False}
@@ -193,14 +222,9 @@ class LCMAgent(common_agent.ModuleAgent):
             if physical_requested:
                 if not self.driver_bundle:
                     return {'ok': False, 'error': 'physical driver is not configured', 'channel': logical, 'physical_outputs_commanded': False}
-                self.driver_bundle['lcm_pwm'].set_percent(int(physical) - 9, float(decision.final_command.get('percent', 0)))
+                self.driver_bundle['lcm_pwm'].set_percent(common_infra.LCM_ANALOG_DIMMER_CHANNELS.index(physical), float(decision.final_command.get('percent', 0)))
             self.lv_dimmers.set_percent(physical, float(decision.final_command.get('percent', 0.0)))
             return {'ok': True, 'kind': 'lv_dimmer', 'channel': logical, 'physical': physical, **self.lv_dimmers.snapshot()[physical], 'physical_output_commanded': physical_requested, 'state_confidence_label': state_confidence.OUTPUT_LATCH_READBACK if physical_requested else state_confidence.SIMULATED, 'arbitration': decision.as_dict()}
-        if logical in self.lv_dimmers.values:
-            bounded = {**payload, 'percent': self._clamp_percent(self._percent(payload))}
-            decision = self.safety.decide(common_safety.OutputRequest(self.identity.get('device_id'), logical, bounded, payload.get('source', 'module_api')))
-            self.lv_dimmers.set_percent(logical, float(decision.final_command.get('percent', 0.0)))
-            return {'ok': True, 'kind': 'lv_dimmer', 'channel': logical, **self.lv_dimmers.snapshot()[logical], 'arbitration': decision.as_dict()}
         raise KeyError(logical)
 
     async def apply_command(self, payload):
@@ -208,8 +232,8 @@ class LCMAgent(common_agent.ModuleAgent):
         if op == 'safety_state':
             conditions = payload.get('conditions', {})
             self.safety.update_conditions(conditions)
-            decisions = self._deenergize_all_outputs_for_safety() if self._safety_requires_output_shutdown(conditions) else []
-            return {'ok': True, 'safety': self.safety.snapshot(), 'arbitration': decisions}
+            result = self._deenergize_all_outputs_for_safety() if self._safety_requires_output_shutdown(conditions) else {'decisions': [], 'failures': [], 'safe_state_attempted': False}
+            return {'ok': not result['failures'], 'safety': self.safety.snapshot(), 'arbitration': result['decisions'], 'safe_state_attempted': result['safe_state_attempted'], 'failures': result['failures']}
         if op in ('set_channel', 'light') or ('channel' in payload and 'value' in payload):
             return self._set_channel(payload['channel'], payload)
         if op == 'set_relay':

@@ -28,6 +28,7 @@ class SIMAgent(common_agent.ModuleAgent):
         self.io_mode = common_io.io_mode(config)
         self.can_network = common_can.SocketCANNetwork.from_config(config)
         self.can_transports = dict(config.get('can_transports', {}))
+        self.active_can_transports: dict[str, object] = {}
         self.can_receive_tasks: dict[str, asyncio.Task] = {}
         self.can_receive_faults: dict[str, str] = {}
         self.rmc_node_timeout_s = float(config.get('rmc_node_timeout_seconds', 15))
@@ -285,28 +286,38 @@ class SIMAgent(common_agent.ModuleAgent):
 
     async def start_can_receivers(self):
         """Start only explicitly configured interfaces; never scan CAN devices."""
-        for item in self.config.get('can_interfaces', []):
-            interface = str(item.get('name', ''))
-            if not interface or not bool(item.get('enabled', self.config.get('can_enabled', False))):
-                continue
-            transport = self.can_transports.get(interface)
-            if transport is None and self.io_mode == 'real':
-                transport = common_can.LinuxSocketCANTransport(interface)
-            if transport is None:
-                continue
-            await transport.start()
-            self.can_receive_tasks[interface] = asyncio.create_task(self._receive_can(interface, transport))
+        started: list[str] = []
+        try:
+            for item in self.config.get('can_interfaces', []):
+                interface = str(item.get('name', ''))
+                if not interface or not bool(item.get('enabled', self.config.get('can_enabled', False))):
+                    continue
+                transport = self.can_transports.get(interface)
+                if transport is None and self.io_mode == 'real':
+                    transport = common_can.LinuxSocketCANTransport(interface)
+                if transport is None:
+                    self.can_receive_faults[interface] = 'configured transport is unavailable'
+                    continue
+                await transport.start()
+                self.active_can_transports[interface] = transport
+                self.can_receive_tasks[interface] = asyncio.create_task(self._receive_can(interface, transport))
+                started.append(interface)
+        except Exception as exc:
+            self.can_receive_faults[interface] = str(exc)
+            await self.stop_can_receivers()
+            raise RuntimeError(f'CAN receiver startup failed on {interface}') from exc
 
     async def stop_can_receivers(self):
         for task in self.can_receive_tasks.values():
             task.cancel()
         if self.can_receive_tasks:
             await asyncio.gather(*self.can_receive_tasks.values(), return_exceptions=True)
-        for transport in self.can_transports.values():
+        for transport in self.active_can_transports.values():
             close = getattr(transport, 'close', None)
             if close is not None:
                 await close()
         self.can_receive_tasks.clear()
+        self.active_can_transports.clear()
 
     async def perform_rmc_firmware_update(self, payload):
         if self.io_mode == 'real':

@@ -13,9 +13,10 @@ commission or deploy physical outputs.
 - `disabled`: no hardware driver is constructed.
 
 Driver construction is not authorization. A physical output request still
-requires real I/O mode, `physical_output_enabled: true`, the output section's
-`real_output_enabled: true`, and the exact channel in `commissioned_channels`.
-Repository manifests keep all of these physical-write gates disabled.
+requires real I/O mode, profile verification status `COMMISSIONED`,
+`physical_output_enabled: true`, a known channel in the authoritative output
+section, and that section's `real_output_enabled: true`. Repository manifests
+keep all physical-write gates disabled.
 
 ## State truthfulness
 

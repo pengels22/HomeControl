@@ -45,10 +45,11 @@ production profiles keep commissioning and physical writes closed.
 
 Driver construction is not authorization. A physical command must first pass
 HCM logical routing, safety arbitration, authenticated module control, and the
-per-channel commissioning gate. `physical_output_enabled`, output-section
-`real_output_enabled`, and the exact `commissioned_channels` entry are all
-required. Successful register or RPC communication is reported as commanded
-state, never as proof of physical actuation.
+module commissioning gate. `physical_output_enabled`, profile verification
+status `COMMISSIONED`, a known channel in the authoritative output section,
+and that section's `real_output_enabled` are required. Successful register or
+RPC communication is reported as commanded state, never as proof of physical
+actuation.
 
 ## Unverified items
 
