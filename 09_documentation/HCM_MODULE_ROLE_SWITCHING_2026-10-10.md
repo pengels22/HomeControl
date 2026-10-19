@@ -11,7 +11,7 @@ Role switching separates three concepts:
 - Permanent device identity: normalized hardware device ID such as LAB1
   `2ccf675d3414`.
 - Registered module type: the existing `modules.module_type` value used by the
-  Phase 4 registry and compatibility paths.
+  current module registry and compatibility paths.
 - Operational role: `UNASSIGNED`, `RCM`, `SIM` or `LCM`, reported by the module
   heartbeat and managed through `module_role_transitions`.
 
@@ -142,7 +142,7 @@ Deployment requires an approved HCM maintenance window:
 2. Back up the live PostgreSQL database.
 3. Apply migration `005` only after review.
 4. Build a new HCM image from an approved commit.
-5. Preserve `homecontrol-hcm:mtls`, Phase 4 rollback container/image,
+5. Preserve the currently verified HCM rollback image/container,
    `hcm-control`, `hcm-internal`, isolated PostgreSQL, Heartbeat V3 and
    watchdog services.
 6. Recreate only the HCM application container if approved.
