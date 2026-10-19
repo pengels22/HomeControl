@@ -18,7 +18,7 @@ Date: 2026-10-11
   forcing them through generic module installers.
 - RMC is firmware, not Linux. Its manifest uses a firmware adapter and does not
   expose Linux install/update scripts.
-- HCM commissioning already has identity and registry work from Phase 4. The new
+- HCM commissioning already has stable identity and registry support. The new
   package-selection hook is planning-only and does not execute remote code.
 
 ## Directory Structure

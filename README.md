@@ -1,196 +1,117 @@
 # HomeControl
 
-## Phase 4 deployed — 2026-10-10
+HomeControl is a local-first distributed home/building control platform centered on the **HCM (Home Control Manager)**.
 
-**Current Jetson development deployment:** Phase 4 module registry and logical-device management is deployed at `192.168.20.27:8080`, from commit `e19a4a5`, image `homecontrol-hcm:phase4`. PostgreSQL migrations `003` and `004` were applied after a read-only zero-conflict preflight and backup. On the Mac test environment, 154/154 tests passed, including all seven PostgreSQL integration tests; the same migrations succeeded on a restored Jetson database clone. After switchover, the dashboard and health endpoint returned HTTP 200, authenticated module/logical-device/binding GETs returned HTTP 200, unauthenticated GETs returned HTTP 401, and HCM/PostgreSQL/Heartbeat V3/watchdog services were active. No physical modules were commissioned and this is not production or life-safety validation. **See [verified deployment record](09_documentation/PHASE4_PROGRESS_2026-10-10.md)** for evidence, remaining work, backup/rollback references and limitations. The older pre-deployment statements elsewhere in this README and documentation are historical; do not infer Phase 4 is still undeployed.
+The current audited software baseline is:
 
-## Current live network and Phase 4 handoff (2026-10-10)
+- Commit: `6fc4179c3a2671fc66c81dc9f69d320ee2420f8f`
+- Hosted CI: HomeControl CI run `39183220588` — success
+- Full test suite at that baseline: **536 passed, 10 skipped**
 
-**Verified live deployment overrides legacy networking snapshots further down this README:** Jetson Ethernet 192.168.20.27 (metric 100), Wi-Fi 192.168.20.25 (metric 300 saved; runtime 600 pending reconnect); Conflict USB Ethernet 192.168.20.26 (metric 100), Wi-Fi 192.168.20.24 (metric 300 configured). All four addresses use VLAN 20 DHCP reservations; Ethernet is the intended primary path. Jetson and Conflict heartbeat V3 exchange status over Ethernet/TCP 6004. Jetson HCM at http://192.168.20.27:8080 returned HTTP 200; HCM, Postgres, heartbeat and watchdog timer were active after the network change and a Jetson reboot. The obsolete Wi-Fi return-route policy rule 1100, hcm-routing.service prerequisite and HCM ExecStartPost routing hook are removed/disabled; do **not** restore them. Wi-Fi source rule 1000/table 200 remains.
+## Authoritative documentation
 
-The VLAN 40/60 addresses listed below are **design targets only**, not live addresses. For Phase 4 read [the mandatory Codex implementation contract](09_documentation/PHASE4_CODEX_IMPLEMENTATION_2026-10-10.md) and the [updated live deployment runbook](09_documentation/JETSON_HCM_DEPLOYMENT_2026-10-10.md). Do not reapply legacy deployment examples.
+Start here:
 
+- [White-paper index](09_documentation/whitepapers/README.md)
+- [System architecture](09_documentation/whitepapers/HOMECONTROL_SYSTEM_WHITE_PAPER.md)
+- [Implementation status](09_documentation/whitepapers/IMPLEMENTATION_STATUS.md)
+- [Life-safety and arbitration](09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md)
+- [Network and heartbeat](09_documentation/whitepapers/NETWORK_AND_HEARTBEAT.md)
+- [Hardware modules and I/O](09_documentation/whitepapers/HARDWARE_MODULES_AND_IO.md)
+- [Security, authentication, and updates](09_documentation/whitepapers/SECURITY_AUTH_AND_UPDATES.md)
+- [Commissioning and validation](09_documentation/whitepapers/COMMISSIONING_AND_VALIDATION.md)
+- [Glossary](09_documentation/whitepapers/GLOSSARY.md)
 
-### Verified HCM application crash recovery (2026-10-10)
+Where older dated material conflicts with the white papers or current source, the white papers and audited source are authoritative.
 
-A Python 3.6 systemd-timer watchdog now checks the live HCM container through its Docker bridge every ~30 seconds. In a controlled `docker kill hcm-test` test, it detected three consecutive failed HTTP checks, restarted HCM, restored policy routing, and left PostgreSQL and Heartbeat V3 active. The 3-restarts/15-minute suppression and alerts remain **untested/not delivered**. See [watchdog runbook](09_documentation/JETSON_HCM_WATCHDOG_2026-10-10.md) and [versioned script](10_scripts/hcm-watchdog.py).
+## Current architecture
 
+Core roles:
 
-## Live Jetson deployment note (2026-10-10)
+- **HCM** — central API, PostgreSQL-backed control authority, logical-device mapping, HVAC, safety orchestration, authentication, updates, and management.
+- **RCM** — 32-channel relay control module.
+- **LCM** — lighting module with relay outputs, ten 0-10 V outputs, and four Shelly high-voltage dimmer channels.
+- **SIM** — sensor/CAN gateway.
+- **RMC** — CAN room-monitoring microcontroller node.
+- **PNL** — panel agent / wall-interface role.
+- **Conflict Manager** — independent Heartbeat V3 supervisor.
 
-The Jetson Xavier NX development HCM is now deployed with a Python 3.13 Docker application, PostgreSQL 16 on a private Docker network and mounted USB storage, and an independent host-based Heartbeat V3. Four systemd services restarted successfully after a full Jetson reboot and the dashboard loaded afterward. Read [the Jetson deployment runbook](09_documentation/JETSON_HCM_DEPLOYMENT_2026-10-10.md) and [dated status](09_documentation/JETSON_2026-10-10_STATUS.md) before using any legacy install examples. The root docker-compose and native-venv systemd sample are **not** the live Jetson configuration. This development installation is not production hardened: continuous crash supervision, HTTPS, secure credentials, tested backups and physical I/O safety validation remain open.
+## Network baseline
 
+Current development/control and heartbeat traffic uses **VLAN 20**.
 
-HomeControl is the source repository for the HCM (House Control Module) system and its distributed modules.
+Known current addresses:
+
+- HCM/Jetson Ethernet: `192.168.20.27`
+- HCM/Jetson Wi-Fi: `192.168.20.25`
+- Conflict Manager Ethernet: `192.168.20.26`
+- Conflict Manager Wi-Fi: `192.168.20.24`
+- LAB1: `192.168.20.36`
+
+Heartbeat uses TCP 6004.
+
+VLAN 40 remains a future production-control placeholder. VLAN 60 is not part of the current approved architecture.
+
+## CAN baseline
+
+RMC/SIM CAN is **125000 bit/s**.
+
+## Safety baseline
+
+FIRE dry-contact input:
+
+- NO -> 3.3 V
+- C -> GPIO
+- NC -> GND
+- normal = LOW
+- alarm = HIGH
+- transition debounce = 250 ms
+
+System maintenance lockout and per-logical-device maintenance lockout are separate concepts.
+
+Physical fire state remains authoritative when the Linux GPIO backend is enabled.
+
+## Commissioning model
+
+Commissioning is **module-level**.
+
+Normal physical output requires:
+
+1. real I/O mode;
+2. module status `COMMISSIONED`;
+3. `physical_output_enabled: true`;
+4. a channel present in the authoritative hardware profile;
+5. the relevant output section `real_output_enabled: true`;
+6. safety/maintenance authorization;
+7. a physical HCM binding.
+
+`BENCH_TESTING` is reserved for explicit HIL tooling and does not enable ordinary HCM/module API physical writes.
+
+Repository defaults remain nonphysical.
 
 ## Repository layout
 
-- `01_HCM` — Central HCM / Orange Pi 6 application and orchestration
-- `02_SIM` — Sensor Interface Module software
-- `03_LCM` — Lighting Control Module software
-- `04_RCM` — Relay Control Module software
-- `05_PNL` — PoE wall-panel software / kiosk agent
-- `06_config` — Module-type configuration templates and deployment configuration
-- `07_servises` — Shared/system services used by HCM and modules
-- `08_database` — PostgreSQL schema, migrations, seed data, and database tooling
-- `09_documentation` — Architecture, wiring, networking, HVAC, commissioning, and build documentation
-- `10_scripts` — Local simulator, provisioning helpers, and admin tooling
-- `11_tests` — Python test coverage for shared services, module behavior, and simulator flows
+- `00_Heartbeat` — Unified Heartbeat V3
+- `01_HCM` — Home Control Manager
+- `02_SIM` — Sensor Interface Module
+- `03_LCM` — Lighting Control Module
+- `04_RCM` — Relay Control Module
+- `05_PNL` — Panel Module
+- `06_config` — hardware/config/deployment manifests
+- `07_servises` — shared/system services (spelling retained by project)
+- `08_database` — PostgreSQL schema and migrations
+- `09_documentation` — current runbooks, pinout, and white papers
+- `10_scripts` — simulators, deployment, and admin tooling
+- `11_tests` — automated software tests
+- `12_hardware_tests` — explicitly gated HIL tests
 
-## Architecture baseline
+## Current readiness
 
-HCM is the central controller. It owns device management, PostgreSQL, the rules engine,
-authentication, fault management, updates, backups, web UI, Zigbee2MQTT integration,
-media control, wall-panel management, and life-safety orchestration.
+The software baseline is ready for:
 
-### HCM networks
+- documentation freeze;
+- controlled single-channel RCM bench testing.
 
-- VLAN 20: current HCM development/control network. Do not migrate existing
-  running devices yet.
-- VLAN 40: future dedicated production HCM control network. The subnet and
-  module pools are not approved yet.
-- Heartbeat/supervision currently uses the VLAN 20 Ethernet path and Unified
-  Heartbeat V3 on TCP 6004.
-- Conflict Manager heartbeat address: `192.168.20.26`.
-- VLAN 140: not applicable to this HCM installation.
+It is **not** a claim that the installed physical system is commissioned.
 
-Modules self-identify using the normalized MAC address of the designated
-physical network interface: lowercase, colons removed, 12 hexadecimal
-characters. Human-readable hostnames and logical device names remain separate.
-HCM assigns hostnames and approved control-network addressing, records the
-assignment, and pushes the base configuration for that module type.
-Control-network assignment is configured in `06_config/01_HCM/hcm.yaml`;
-VLAN 20 is the active development/control profile, VLAN 40 is disabled until an
-approved subnet is supplied, and the unimplemented VLAN 60 migration is not an
-active prerequisite.
-
-### Module communication
-
-- Persistent TCP
-- TLS authentication
-- Length-prefixed JSON
-- TCP health + module heartbeat + HCM heartbeat acknowledgement
-- Message classes: identify, heartbeat, state, fault, command, command acknowledgement
-
-### Core design rules
-
-- PostgreSQL is authoritative.
-- Automation targets logical devices, never physical addresses.
-- Output priority:
-  1. Maintenance Lock
-  2. Life Safety
-  3. Local Override
-  4. HCM Rules/User Commands
-- Heartbeat/supervisory traffic remains isolated by the current protected VLAN 20
-  path and TCP 6004 listener.
-- During updates, HCM temporarily opens egress only for the module being updated.
-- HCM control-network NTP is provided on the approved control network.
-- Local-first and no-code administration are design goals.
-
-## Current implementation status
-
-This repository now contains runnable first-pass software for HCM, Linux modules,
-shared services, deployment scripts, and a macOS simulator. The older iOS
-companion app prototype remains archived in the repository, but it is not part
-of the active production/development workflow. Some production integrations
-remain intentionally abstracted until hardware and deployment hosts are
-connected.
-
-### Local simulator
-
-Run the local simulator on macOS:
-
-```bash
-.venv/bin/python 10_scripts/simulate_homecontrol.py
-```
-
-Open `http://127.0.0.1:8088` on the Mac running the simulator. The simulator
-provides legacy local UI exercises without touching physical GPIO, I2C, CAN,
-PostgreSQL, or systemd. The production HCM web UI uses authenticated HCM
-backend APIs and the registered module registry rather than simulator-only
-device lists.
-
-### Legacy circular pairing prototype
-
-The repository still contains backend pairing-key and circular-code components
-needed by older prototypes and secure provisioning experiments. The production
-web UI no longer exposes pairing-key administration, pairing-code screens, or
-iOS companion-app flows as an active development workflow. Do not remove backend
-authentication, module identity verification, or provisioning primitives that
-remain required for secure device communications.
-
-## Module details
-
-### 01_HCM
-
-Central HCM software for the Orange Pi 6. Responsibilities include device
-commissioning and management, DHCP and hostname assignment for the approved HCM
-control network, NTP,
-the rules engine, authentication, fault management, update orchestration,
-PostgreSQL integration, web UI, Zigbee2MQTT integration, media control,
-wall-panel management, life-safety orchestration, and HVAC thermostat and zoning
-logic.
-
-- Current development/control network: VLAN 20
-- Future production/control network: VLAN 40, subnet not yet approved
-- Heartbeat/supervisory path: current VLAN 20 Ethernet, Conflict Manager at `192.168.20.26`
-
-### 02_SIM
-
-Sensor Interface Module software. Planned responsibilities include SIM
-firmware/software, CAN/RMC interface handling, fault reporting, heartbeat logic,
-update service integration, and configuration loading.
-
-### 03_LCM
-
-Lighting Control Module software. Pinned hardware additions include:
-
-- 8 hardwired 0-10 V dimming outputs, labeled `10-1` through `10-8`
-- 4 high-voltage Shelly dimmer channels, labeled `HV-1` through `HV-4`
-- 8 dedicated 24 AWG / 2C pairs through C3
-- An I2C multiplexer feeding 8 MCP4725-based 0-10 V modules
-- Relay/output behavior as part of the existing LCM design
-
-The simulator UI exposes editable relay and dimmer names. Low-voltage dimmers
-use 0-100 sliders and the backend fades to the selected value over 3 seconds.
-High-voltage dimmer channels are displayed as 0-100 values without slider-based
-control in the current UI.
-
-### 04_RCM
-
-Relay Control Module software. Relay banks are named A1-A8, B1-B8, C1-C8, and
-D1-D8. The design uses 5 V opto-isolated relay boards with 2, 4, or 8 channels
-as required, controlled from MCP23017 I/O with dry-contact field outputs. Each
-relay channel has a configurable fail action.
-
-### 05_PNL
-
-PoE wall-panel software. The pinned platform is an Orange Pi Zero with a 7-inch
-touchscreen, PoE, Linux kiosk, Chromium, and a panel agent. HCM provisions each
-panel with its hostname, software, token, dashboard URL, and DHCP reservation.
-
-## Configuration status
-
-Configuration schemas are placeholders until finalized for each module type:
-HCM, SIM, LCM, RCM, and PNL. Their configuration directories are under
-`06_config/`.
-
-## Shared services
-
-Planned service areas under `07_servises/` include:
-
-- Module update service (TCP 6503)
-- DHCP and commissioning support
-- NTP
-- HCM-module communication service
-- Authentication support
-- Logging and health monitoring
-
-The directory spelling follows the requested repository tree.
-
-## Database
-
-`08_database/` contains the planned PostgreSQL schema, migrations, seed data,
-and tooling. PostgreSQL is authoritative for modules, rooms, logical devices,
-bindings, faults, users, rules, scenes, wall panels, media, and configuration
-history. The exact schema is deferred until implementation.
+Known physical gaps remain documented in the implementation-status and commissioning white papers.

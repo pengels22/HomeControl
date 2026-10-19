@@ -1,34 +1,65 @@
-# Jetson systemd service inventory (verified 2026-10-10)
+# Jetson HCM systemd reference
 
-## Additional installed monitor (2026-10-10)
+This file documents the current expected Jetson development service relationships.
 
-The Jetson now also runs enabled `hcm-watchdog.timer`, invoking `hcm-watchdog.service` approximately every 30 seconds. The service runs `/usr/local/sbin/hcm-watchdog` (source: `10_scripts/hcm-watchdog.py`), checks HTTP directly at HCM's dynamic Docker control-network address, requires three failed checks before HCM-only restart and records at most three restart attempts per 15-minute sliding window. One controlled `docker kill hcm-test` was successfully recovered, including return-route refresh, without stopping PostgreSQL or Heartbeat V3. See [watchdog runbook](JETSON_HCM_WATCHDOG_2026-10-10.md). The 3-in-15-minute limit and alerts have not been tested/delivered.
+For overall architecture, see [whitepapers/README.md](whitepapers/README.md).
 
+## Expected units
 
-This is a configuration inventory, not an automated installer. See [the full deployment runbook](JETSON_HCM_DEPLOYMENT_2026-10-10.md).
+| Unit | Role |
+|---|---|
+| `docker.service` | Container runtime |
+| `hcm-postgres.service` | Starts/owns the PostgreSQL development container and persistent data dependency |
+| `hcm.service` | Starts/stops the HCM application container |
+| `hcm-heartbeat.service` | Independent Unified Heartbeat V3 host daemon |
+| `hcm-watchdog.service` | One-shot HCM liveness/recovery check |
+| `hcm-watchdog.timer` | Periodic watchdog schedule |
 
-| Unit | Responsibility | Boot status |
-| --- | --- | --- |
-| `hcm-heartbeat.service` | Independent host Python 3.6 Heartbeat V3 | enabled and active after reboot |
-| `hcm-postgres.service` | Starts existing PostgreSQL Docker container after guarded USB mount | enabled and active after reboot |
-| `hcm-routing.service` | Waits for Wi-Fi route table 200 | enabled and active after reboot |
-| `hcm.service` | Checks PostgreSQL readiness, starts existing HCM Docker container | enabled and active after reboot |
+`hcm-routing.service` is retired and is not a current dependency.
 
-HCM service installed at `/etc/systemd/system/hcm.service`: oneshot with RemainAfterExit, Requires/After Docker, hcm-postgres and hcm-routing; `ExecStartPre` checks `pg_isready`, `ExecStart` runs `docker start hcm-test`, `ExecStop` runs `docker stop -t 20 hcm-test`.
+## Expected dependency direction
 
-Drop-in `/etc/systemd/system/hcm.service.d/routing.conf` uses `ExecStartPost=/usr/local/sbin/hcm-update-routing` to discover current container address on `hcm-control` and apply policy rule pref 1100 to Wi-Fi table 200, currently only for the development Mac `192.168.1.241`.
+- HCM depends on Docker and PostgreSQL readiness.
+- Heartbeat V3 is independent of HCM/PostgreSQL application health.
+- The watchdog targets HCM availability and must not become the safety authority.
+- PostgreSQL and Heartbeat V3 should not be restarted merely because the HCM app is restarted.
 
-The running unit is **not** the native virtual-environment sample at `07_servises/systemd/homecontrol-hcm.service`. These oneshot units supervise startup only, not continuous Docker application health.
-
-Useful read-only checks:
+## Basic inspection
 
 ```sh
-systemctl is-active hcm-heartbeat hcm-postgres hcm-routing hcm
-systemctl cat --no-pager hcm.service hcm-routing.service
-findmnt /srv/hcm-data
-sudo docker ps --filter name=hcm
-ip -4 rule show
-ip -4 route show table 200
+systemctl is-active docker hcm-postgres hcm hcm-heartbeat hcm-watchdog.timer
+systemctl status hcm hcm-postgres hcm-heartbeat hcm-watchdog.timer --no-pager
+systemctl cat --no-pager hcm.service hcm-postgres.service hcm-heartbeat.service hcm-watchdog.service hcm-watchdog.timer
 ```
 
-Do not commit `/etc/hcm/hcm.env`, `/etc/hcm/postgres-password`, database contents or session tokens. Recheck DHCP addresses, routing marks, expected USB UUID and Docker network membership before reusing this deployment on another device.
+## HCM application
+
+The current development HCM is containerized as `hcm-test`.
+
+The systemd unit is responsible for starting/stopping the known container and waiting for required dependencies.
+
+Do not reintroduce the historical `hcm-routing.service`, route-rule 1100, or old `hcm-update-routing` post-start hook.
+
+## PostgreSQL
+
+PostgreSQL runs separately in `hcm-postgres` and uses persistent storage under `/srv/hcm-data/postgres`.
+
+HCM restart should not destroy or recreate PostgreSQL data.
+
+## Heartbeat
+
+`hcm-heartbeat.service` is host-native and independent.
+
+Its availability must not depend on the HCM Docker container or PostgreSQL.
+
+## Watchdog
+
+The watchdog timer periodically invokes the one-shot watchdog service.
+
+The watchdog can recover HCM application failure but is not a complete system safety supervisor.
+
+## Deployment note
+
+Repository unit files are source references. Editing Git does not automatically update installed files on the Jetson.
+
+Use the approved deployment framework or deliberate operator installation and verify the resulting live unit definitions.

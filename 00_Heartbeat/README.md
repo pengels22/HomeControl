@@ -1,103 +1,161 @@
-# HCM Unified Heartbeat v3
+# HCM Unified Heartbeat V3
 
-## Verified Ethernet-first deployment (2026-10-10)
+Unified Heartbeat V3 is the independent HomeControl supervision service.
 
-The Jetson remains on the current VLAN 20 development network: primary `eth0=192.168.20.27`, secondary `wlan0=192.168.20.25`. Conflict Manager uses primary USB Ethernet `enx6c6e07545f03=192.168.20.26` and secondary `wlan0=192.168.20.24`. Conflict's `identity_interface=wlan0` and device ID `3c53bbf7adb2` are **intentional** even though traffic uses USB Ethernet. Jetson `identity_interface=eth0`, advertises `192.168.20.27`, and sends to Conflict `192.168.20.26:6004`. Live Conflict /status verified Jetson online/healthy with recent heartbeat. Legacy instructions below to change Conflict identity to `eth0` or move to `192.168.60.2` describe **future migration only**; do not apply them to this live installation. HCM application work must not restart or alter this independent host daemon. See [Phase 4 implementation contract](../09_documentation/PHASE4_CODEX_IMPLEMENTATION_2026-10-10.md).
+Architecture authority: [Network, Communications, and Supervision white paper](../09_documentation/whitepapers/NETWORK_AND_HEARTBEAT.md).
 
+## Current deployment
 
-## Live Jetson deployment clarification (2026-10-10)
+Current development/supervision network: **VLAN 20**.
 
-The independent host-based `hcm-heartbeat.service` (Python 3.6, TCP 6004) was confirmed active after a complete Jetson reboot alongside the Dockerized HCM application. The 2026-10-10 installation still uses the existing VLAN 20/Conflict addressing; **VLAN 60 migration is not complete**. Do not replace or restart Heartbeat V3 as part of HCM container updates. See [Jetson runbook](../09_documentation/JETSON_HCM_DEPLOYMENT_2026-10-10.md) for current service boundaries. Older passages below describe historic migrations and may not match the installed state.
+Known active identities/addresses:
 
+- Jetson/HCM primary Ethernet: `192.168.20.27`
+- Jetson/HCM Wi-Fi: `192.168.20.25`
+- Conflict Manager primary Ethernet: `192.168.20.26`
+- Conflict Manager Wi-Fi: `192.168.20.24`
+- TCP port: `6004`
 
-One **Python 3.6+ standard-library-only** daemon on each device. Works on the Jetson's Ubuntu 18.04/Python 3.6 and current Armbian. One service, TCP 6004, including local fault/status/watchdog APIs.
+Conflict's stable device ID is derived from its designated identity interface. The interface supplying identity does not have to carry heartbeat traffic.
 
-## Architecture
+VLAN 60 is not part of the current approved architecture.
 
-- Device initiates `POST http://conflict:6004/heartbeat` every 5 seconds with hostname, IP, Ethernet MAC device ID, full health and status, sequence and boot ID.
-- Conflict replies immediately with its own *full* health/status packet and echoes `reply_to` and `reply_boot_id` (not an empty ACK).
-- Device treats any invalid/missed response as failure after 15 seconds; 45-second startup grace.
-- Conflict keeps a registry, flags devices offline after 15 seconds, and returns its **own** health independently of peer health. This prevents failures cascading unnecessarily.
-- Registry, authorized devices, heartbeat history and communication-loss faults persist in SQLite across Conflict restarts. Persisted **local fault/module states** survive restart; watchdog pulses intentionally do not.
-- `GET /health` returns 200 or 503 for the **local device health**; `GET /status` always returns 200 including registry/peer details. Monitoring peers should inspect peer/registry state, not only the HTTP status.
-- No authentication, by design. MAC/hostname are claims, not identity proof. Restrict TCP 6004 with VLAN/firewall; don't forward to the internet. An allowlist is a filtering aid, not security authentication.
+## Roles
 
-## Installation (replace old services)
+### Device role
 
-First stop old v1.x services on both hosts; keep the old configurations backed up if wanted:
+A device:
 
-On Jetson:
-```
-sudo systemctl disable --now hcm-heartbeat.service
-sudo rm -f /etc/systemd/system/hcm-heartbeat.service
-```
-On Conflict:
-```
-sudo systemctl disable --now hcm-conflict-ack.service
-sudo rm -f /etc/systemd/system/hcm-conflict-ack.service
-```
-The v3 installer installs a new service definition on each machine and leaves the old executables/config files untouched unless you clean them up separately. Importantly, it will preserve an **existing** `/etc/hcm-heartbeat/config.json`; remove or relocate the old v1.x config before installing v3 (see commands below).
+- builds a local health/status snapshot;
+- sends it to Conflict every configured interval;
+- includes hostname, stable device ID, boot ID, sequence, timestamp, health, and status;
+- validates Conflict's authenticated response;
+- tracks acknowledgement freshness.
 
-Suggested Jetson migration (after copying package to `/tmp/hcm-heartbeat-v3`):
-```
-sudo mkdir -p /root/hcm-heartbeat-legacy
-sudo cp -a /etc/hcm-heartbeat/config.json /root/hcm-heartbeat-legacy/ 2>/dev/null || true
-sudo mv /etc/hcm-heartbeat/config.json /etc/hcm-heartbeat/config.legacy.json 2>/dev/null || true
-cd /tmp/hcm-heartbeat-v3
-sudo ./install.sh jetson
-```
-Conflict migration:
-```
-cd /tmp/hcm-heartbeat-v3
-sudo ./install.sh conflict
-```
-On Conflict until Ethernet adapter is installed: `identity_interface` is `wlan0`, which provides a stable, lookupable MAC. Once `eth0` exists, change it to `eth0` and register its MAC in any monitored peers.
+### Conflict role
 
-## Test
+Conflict:
 
-On Jetson:
-```
-curl -s http://127.0.0.1:6004/status | python3 -m json.tool
-sudo hcm-heartbeat fault set test "Simulated HCM fault"
-curl -i http://127.0.0.1:6004/health
-sudo hcm-heartbeat fault clear test
-sudo hcm-heartbeat status lighting operational
-sudo hcm-heartbeat pulse sensors
-```
-On Conflict:
-```
+- accepts authorized device heartbeats;
+- validates authentication and message shape;
+- rejects replayed sequence numbers for the same boot;
+- records device restart and duplicate-ID events;
+- maintains current reachability and communication-loss faults;
+- persists its registry/history in SQLite;
+- returns its own independent health/status snapshot.
+
+## Authentication
+
+Heartbeat V3 supports:
+
+- `none` for isolated lab compatibility;
+- `hmac-sha256` for authenticated request/response operation.
+
+The current secured architecture uses HMAC-SHA256 with a local secret file.
+
+When HMAC mode is selected, missing secret material is a startup/configuration failure.
+
+MAC address, hostname, and IP address are operational identity fields; they are not cryptographic proof by themselves.
+
+## Replay and acknowledgement checks
+
+Conflict tracks:
+
+- boot ID;
+- last accepted sequence;
+- observed source;
+- last-seen time.
+
+For a matching boot ID, a sequence less than or equal to the last accepted sequence is rejected.
+
+The sending device validates:
+
+- protocol/version;
+- response authentication;
+- `reply_to`;
+- `reply_boot_id`;
+- expected Conflict hostname;
+- expected Conflict device ID;
+- health/status structure.
+
+## Local control socket
+
+Local applications can report status, faults, and watchdog pulses through:
+
+`/run/hcm-heartbeat/control.sock`
+
+Supported concepts include:
+
+- set/clear external fault;
+- set subsystem status;
+- watchdog pulse;
+- read snapshot.
+
+This lets HCM/module application state be supervised without making the application itself the heartbeat server.
+
+## Health endpoints
+
+Heartbeat V3 exposes:
+
+- `GET /health` — local device health;
+- `GET /status` — complete local/status/peer or registry information.
+
+Consumers should inspect peer/registry data for remote reachability rather than inferring it from the local HTTP status alone.
+
+## Installation/deployment
+
+Use the repository deployment framework rather than historical V1/V2 migration instructions.
+
+Current deployment references:
+
+- [Jetson HCM deployment](../09_documentation/JETSON_HCM_DEPLOYMENT_2026-10-10.md)
+- [Unified configuration/deployment framework](../09_documentation/UNIFIED_CONFIGURATION_DEPLOYMENT_2026-10-11.md)
+
+Do not replace or restart an otherwise healthy Heartbeat V3 service as a side effect of ordinary HCM container updates.
+
+## Basic inspection
+
+Examples:
+
+```sh
 curl -s http://127.0.0.1:6004/status | python3 -m json.tool
 sudo hcm-heartbeat show
+sudo hcm-heartbeat fault set test "test fault"
+sudo hcm-heartbeat fault clear test
 ```
-To test dropped response: stop Conflict's v3 service for >=20s, then check Jetson status and restart it. `systemctl` automatically restarts on crashes, not deliberately stopped services.
 
-## Historical VLAN 60 migration notes
+Use deliberate maintenance procedures before testing actual communication loss on live hosts.
 
-The following describes an unimplemented historical migration and is not part of
-the current deployment. Do not apply it during system-test preparation. If a
-future network migration is separately approved, on Conflict,
-change `bind_address` and `advertise_ip` to `192.168.60.2`, change
-`identity_interface` to `eth0` when installed, and give `eth0.60` address
-`192.168.60.2/24` with proper routing/VLAN tagging. On devices change
-`conflict_address` to `192.168.60.2`. Their `advertise_ip` should be their
-actual heartbeat source IP. Restart after configuration changes. Do NOT change
-Conflict bind address before VLAN 60 is operational.
+## Configuration highlights
 
-VLAN 20 remains the current development/control network. VLAN 40 is the future
-production control network, but its subnet is not approved yet.
+Important keys include:
 
-## Configuration
+- `role`
+- `port`
+- `bind_address`
+- `advertise_ip`
+- `identity_interface`
+- `state_file`
+- `registry_db`
+- `socket_path`
+- `services`
+- `watchdogs`
+- `interval_seconds`
+- `peer_timeout_seconds`
+- `startup_grace_seconds`
+- `conflict_address`
+- `conflict_hostname`
+- `allowed_device_ids`
+- `authorized_devices`
+- `heartbeat_auth_mode`
+- `heartbeat_auth_secret_file`
+- `max_timestamp_skew_seconds`
+- `conflict_device_id`
 
-- `services`: monitored systemd unit names (only services genuinely installed on the system).
-- `watchdogs`: object `{ "sensors": 10 }` means device must receive a `hcm-heartbeat pulse sensors` at least every 10 s. Configure and restart daemon before registering the actual sender.
-- `allowed_device_ids`: device ID allowlist on Conflict. Target format is the normalized designated-interface MAC address, lowercase with colons removed. Values seed durable authorized-device records. An empty list does **not** authorize arbitrary senders.
-- `authorized_devices`: optional structured Conflict registry seed records with `device_id`, `hostname`, `ip_address`, `source`, `active`, and `maintenance`.
-- `heartbeat_auth_mode`: `none` for current plaintext lab compatibility or `hmac-sha256` for shared-secret request and response authentication during staged validation.
-- `heartbeat_auth_secret_file`: local secret file for HMAC mode. Do not commit this file or its contents.
-- `conflict_device_id`: optional expected Conflict device ID for devices; fill it once physical interface ID is finalized.
-- `maintenance_lockout`: boolean status only; does not suppress critical faults or disable life-safety logic.
-- `identity_interface`: physical device interface read from `/sys/class/net/.../address`. It need not carry the heartbeat packets. Target device IDs are normalized to 12 lowercase hexadecimal characters without colons.
+Secret files must not be committed.
 
-### Security / safety
+## Safety boundary
 
-Plaintext lab mode is suitable only for a trusted, protected management VLAN and is **not** production authentication or a safety interlock. Optional `hmac-sha256` mode authenticates request and response bodies with a local shared secret file and fails closed if that secret is missing when configured; production mTLS remains a staged hardening item. Standalone fire/AC hardware handling must not rely on the network heartbeat. The systemd service runs root to read system service states and expose a controlled Unix socket (`/run/hcm-heartbeat/control.sock`, root/sudo-group write access). Command arguments are not executed as shell commands.
+Heartbeat is supervision, not life-safety output authority.
+
+Fire and AC-present dry contacts remain independently sensed. Network heartbeat must never be the only mechanism used to authorize or clear a fire condition.

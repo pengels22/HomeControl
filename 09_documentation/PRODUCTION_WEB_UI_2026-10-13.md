@@ -144,12 +144,7 @@ stale; it does not infer health from saved configuration alone.
   rooms and bindings. There is no separate RMC registry table, CSV sync,
   local-module persistence, or offline reconciliation implemented by this UI
   work.
-- The checked-in LCM firmware/config documentation still describes the older
-  local module layout of twelve relay labels and eight 0-10 V labels
-  (`06_config/03_LCM/Pinout.md`, `06_config/03_LCM/lcm.yaml`,
-  `03_LCM/main.py`). This UI correction preserves the established `A*`, `10-*`
-  and `HV-*` identifier families but does not implement firmware, pinout, CSV or
-  module-local persistence changes for the corrected 8 + 10 + 4 hardware layout.
+- The current LCM hardware profile defines 8 relay outputs (A1-A8), ten 0-10 V outputs (10-1 through 10-10), and four high-voltage dimmer channels (HV-1 through HV-4). The UI must use those current identifier families and must not revive the retired 12-relay / 8-dimmer layout.
 - Production LCM hardware fade execution, live in-progress fade telemetry,
   module-local persistence of dimmer settings, CSV generation such as
   `LCM_1.csv`, authenticated TCP mirroring, and offline reconciliation are not
