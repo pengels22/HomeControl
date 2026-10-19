@@ -6,11 +6,11 @@ This directory is the authoritative white-paper set for the HomeControl project 
 
 Draft branch: `docs/whitepaper-refresh-2026-10-18`
 
-Code baseline used for the initial draft:
+Code baseline used for the current draft:
 
 - Repository: `pengels22/HomeControl`
 - Commit: `6fc4179c3a2671fc66c81dc9f69d320ee2420f8f`
-- Previous audited baseline: `5152d2a02a9cb9008a382a7ced920969130da252`
+- Hosted CI: HomeControl CI run `39183220588` — success
 
 These papers distinguish among:
 
@@ -24,6 +24,11 @@ These papers distinguish among:
 
 - [System Architecture](HOMECONTROL_SYSTEM_WHITE_PAPER.md)
 - [Implementation Status](IMPLEMENTATION_STATUS.md)
+- [Life-Safety and Safety Arbitration](LIFE_SAFETY_AND_ARBITRATION.md)
+- [Network, Communications, and Supervision](NETWORK_AND_HEARTBEAT.md)
+- [Hardware Modules and I/O](HARDWARE_MODULES_AND_IO.md)
+- [Security, Authentication, and Updates](SECURITY_AUTH_AND_UPDATES.md)
+- [Commissioning and Validation Manual](COMMISSIONING_AND_VALIDATION.md)
 - [Glossary and Acronyms](GLOSSARY.md)
 
 ## Documentation policy
@@ -31,3 +36,9 @@ These papers distinguish among:
 The white papers describe what the current repository and approved architecture actually support. Historical documents under `09_documentation/` remain useful design records, but where they conflict with these white papers or the current audited source, they are historical rather than authoritative.
 
 No hardware is considered physically commissioned solely because software tests pass. Physical commissioning status is tracked separately from software completeness.
+
+## Current documentation-freeze baseline
+
+The software baseline is considered ready for documentation freeze and controlled RCM bench testing. This does not mean the installed physical system is commissioned.
+
+Known physical gaps remain documented in the implementation-status and commissioning papers.
