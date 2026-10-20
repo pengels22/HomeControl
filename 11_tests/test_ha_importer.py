@@ -81,3 +81,16 @@ def test_duration_mapping_accepts_home_assistant_string_values():
     plan = m.analyze_home_assistant({"automations": [{"id": "delay", "actions": [{"delay": {"hours": "0", "minutes": "1", "seconds": "2"}}]}]})
     action = plan["items"][0]["preview"]["actions"][0]
     assert action["seconds"] == 62.0
+
+def test_media_tts_and_notify_forms_normalize_to_generic_semantics():
+    plan = m.analyze_home_assistant({"automations": [{"id": "media", "actions": [
+        {"action": "media_player.play_media", "target": {"entity_id": "media_player.room"}, "data": {"media": {"media_content_id": "1", "media_content_type": "favorite"}, "enqueue": "play"}},
+        {"action": "tts.cloud_say", "data": {"entity_id": "media_player.room", "message": "Ready"}},
+        {"action": "notify.mobile_app_iphone_16", "data": {"title": "Status", "message": "Ready"}},
+    ]}]})
+    actions = plan["items"][0]["preview"]["actions"]
+    assert actions[0]["service"] == "play_media"
+    assert actions[0]["service_data"]["media_content_type"] == "favorite"
+    assert actions[1]["domain"] == "announcement" and actions[1]["service"] == "speak"
+    assert actions[2]["domain"] == "notify" and actions[2]["service"] == "send"
+    assert plan["items"][0]["eligibility"] == m.BLOCKED_MAPPING

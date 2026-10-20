@@ -14,6 +14,14 @@ def test_helper_validation_and_initial_values():
 def test_native_service_models_reject_unknown_fields():
     with pytest.raises(Exception): m.NumberArg(value=1,bad=True)
     assert m.ScriptArg(inputs={'message':'ok'}).inputs['message']=='ok'
+    assert m.NotificationArg(message='ok',severity='critical').severity=='critical'
+    assert m.AnnouncementArg(message='ok',volume_level=.5).volume_level==.5
+
+@pytest.mark.asyncio
+async def test_semantic_side_effect_services_are_explicitly_unconfigured():
+    manager=m.NativePrimitives(None)
+    assert (await manager._notify_send(m.NotificationArg(message='ok'),None))['status']=='destination_unconfigured'
+    assert (await manager._announcement_speak(m.AnnouncementArg(message='ok'),None))['status']=='backend_unavailable'
 
 @pytest.mark.asyncio
 async def test_scene_translation_reports_supported_and_unsupported_attributes(monkeypatch):

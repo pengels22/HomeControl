@@ -6,6 +6,12 @@ from .factory import provider_factory
 
 class Empty(BaseModel): model_config=ConfigDict(extra='forbid')
 class VolumeArgs(BaseModel): model_config=ConfigDict(extra='forbid'); volume_level: float=Field(ge=0,le=1)
+class PlayMediaArgs(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    media_content_id: str = Field(min_length=1, max_length=1024)
+    media_content_type: str|None = Field(default=None, max_length=64)
+    enqueue: str|None = Field(default=None, max_length=32)
+    metadata: dict = Field(default_factory=dict)
 
 class HEOSTransport:
     def __init__(self,host,port=1255,timeout=5): self.host=host; self.port=port; self.timeout=timeout; self.reader=None; self.writer=None
@@ -23,7 +29,7 @@ class HEOSTransport:
 class HEOSProvider(Provider):
     info=ProviderInfo('heos','HEOS',capabilities={'media_player':True,'lan':True,'commands':True,'groups':True},description='HEOS local network players',setup_type='lan',supports_multiple=True,config_schema={'type':'object','properties':{'host':{'type':'string'},'port':{'type':'integer','minimum':1,'maximum':65535},'friendly_name':{'type':'string'}},'required':['host'],'additionalProperties':False},config_flow={'type':'lan','fields':[{'name':'friendly_name','type':'text'},{'name':'host','type':'text','required':True},{'name':'port','type':'integer'}]})
     def __init__(self,transport=None): self.context=None; self.transport=transport; self.task=None; self.players={}; self.entities={}; self.groups=[]; self.commands=0; self.failures=0; self.last_event=None
-    async def setup(self,context): self.context=context; cfg=context.config; self.transport=self.transport or HEOSTransport(cfg['host'],int(cfg.get('port',1255))); await context.service('media_player','play',Empty,self.play,target_required=True,target_domains=('media_player',)); await context.service('media_player','pause',Empty,self.pause,target_required=True,target_domains=('media_player',)); await context.service('media_player','stop',Empty,self.stop_playback,target_required=True,target_domains=('media_player',)); await context.service('media_player','next',Empty,self.next,target_required=True,target_domains=('media_player',)); await context.service('media_player','previous',Empty,self.previous,target_required=True,target_domains=('media_player',)); await context.service('media_player','volume_set',VolumeArgs,self.volume_set,target_required=True,target_domains=('media_player',)); await context.service('media_player','volume_up',Empty,self.volume_up,target_required=True,target_domains=('media_player',)); await context.service('media_player','volume_down',Empty,self.volume_down,target_required=True,target_domains=('media_player',)); await context.service('media_player','mute',Empty,self.mute,target_required=True,target_domains=('media_player',)); await context.service('media_player','unmute',Empty,self.unmute,target_required=True,target_domains=('media_player',))
+    async def setup(self,context): self.context=context; cfg=context.config; self.transport=self.transport or HEOSTransport(cfg['host'],int(cfg.get('port',1255))); await context.service('media_player','play',Empty,self.play,target_required=True,target_domains=('media_player',)); await context.service('media_player','pause',Empty,self.pause,target_required=True,target_domains=('media_player',)); await context.service('media_player','stop',Empty,self.stop_playback,target_required=True,target_domains=('media_player',)); await context.service('media_player','next',Empty,self.next,target_required=True,target_domains=('media_player',)); await context.service('media_player','previous',Empty,self.previous,target_required=True,target_domains=('media_player',)); await context.service('media_player','volume_set',VolumeArgs,self.volume_set,target_required=True,target_domains=('media_player',)); await context.service('media_player','volume_up',Empty,self.volume_up,target_required=True,target_domains=('media_player',)); await context.service('media_player','volume_down',Empty,self.volume_down,target_required=True,target_domains=('media_player',)); await context.service('media_player','mute',Empty,self.mute,target_required=True,target_domains=('media_player',)); await context.service('media_player','unmute',Empty,self.unmute,target_required=True,target_domains=('media_player',)); await context.service('media_player','play_media',PlayMediaArgs,self.play_media,target_required=True,target_domains=('media_player',))
     async def discover(self):
         response=await self.transport.command('player/get_players'); raw=response.get('params',{}).get('players',[])
         try: items=json.loads(raw) if isinstance(raw,str) else raw
@@ -45,6 +51,13 @@ class HEOSProvider(Provider):
     async def stop_playback(self,a,t): return await self.command(self.pid(t),'player/stop')
     async def next(self,a,t): return await self.command(self.pid(t),'player/play_next')
     async def previous(self,a,t): return await self.command(self.pid(t),'player/play_previous')
+    async def play_media(self,a,t):
+        pid=self.pid(t)
+        if len(json.dumps(a.metadata, separators=(',', ':'))) > 4096:
+            raise ValueError('Media metadata exceeds limit')
+        if a.media_content_type == 'favorite':
+            return await self.command(pid,'browse/play_input',{'input':a.media_content_id})
+        return await self.command(pid,'player/play_url',{'url':a.media_content_id})
     async def volume_set(self,a,t): return await self.command(self.pid(t),'player/set_volume',{'level':round(a.volume_level*100)})
     async def volume_up(self,a,t): return await self.command(self.pid(t),'player/volume_up')
     async def volume_down(self,a,t): return await self.command(self.pid(t),'player/volume_down')

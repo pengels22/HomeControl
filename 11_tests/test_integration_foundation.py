@@ -465,7 +465,7 @@ async def test_multi_instance_identity_service_routing_and_durable_events(databa
 
 def test_denon_and_heos_media_transport_normalization():
     denon=import_module('01_HCM.integrations.denon'); receiver=denon.DenonProvider(); receiver.parse_line('PWON'); receiver.parse_line('MVFL-40.0'); receiver.parse_line('MUON'); receiver.parse_line('SICBL/SAT'); assert receiver.state['power'] and receiver.state['volume_level']==0.5 and receiver.state['muted'] and receiver.state['source']=='CBL/SAT'
-    heos=import_module('01_HCM.integrations.heos'); parsed=heos.HEOSTransport('host').parse('heos://event/player_state?pid=7&state=play\r\n'); assert parsed['command']=='event/player_state' and parsed['params']['pid']=='7'
+    heos=import_module('01_HCM.integrations.heos'); parsed=heos.HEOSTransport('host').parse('heos://event/player_state?pid=7&state=play\r\n'); assert parsed['command']=='event/player_state' and parsed['params']['pid']=='7'; assert heos.PlayMediaArgs(media_content_id='1',media_content_type='favorite').media_content_type=='favorite'
 
 
 def test_native_bluetooth_and_ibeacon_parsing_cache():

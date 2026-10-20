@@ -71,13 +71,21 @@ providers rather than HCM physical outputs.
 | `switch.turn_on`, `switch.turn_off` | SmartThings | SmartThings switch |
 | `light.set_level` | SmartThings | SmartThings level entity |
 | `media_player.turn_on/off`, `volume_set/up/down`, `mute`, `unmute`, `select_source` | Denon AVR | Denon media entity |
-| `media_player.play/pause/stop`, `next`, `previous`, `volume_set/up/down`, `mute`, `unmute` | HEOS | HEOS media entity |
+| `media_player.play/pause/stop`, `next`, `previous`, `volume_set/up/down`, `mute`, `unmute`, `play_media` | HEOS | HEOS media entity |
+| `notify.send`, `announcement.speak` | HCM Native semantic boundary | Configured destination/backend |
 | `internal_mock.ping` | Internal mock | none |
 
 Service declarations are discoverable as semantic names plus eligible instance
 bindings. Targeted calls resolve the owning instance from the immutable entity
 ID; non-targeted calls require an explicit instance when multiple handlers
 exist.
+
+The native notification and announcement services validate bounded semantic
+arguments and return `destination_unconfigured` or `backend_unavailable` until
+an approved destination/backend is configured. They never send a notification,
+generate speech, or contact an external service by themselves. HA mobile notify
+targets and TTS media targets therefore remain explicit mapping work in the
+compatibility analyzer.
 
 ## Event inventory
 

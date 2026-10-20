@@ -64,6 +64,26 @@ SERVICE_MAPPINGS: dict[str, dict[str, Any]] = {
     "automation.turn_on": {"status": TRANSLATED, "domain": "automation", "service": "turn_on"},
     "automation.turn_off": {"status": TRANSLATED, "domain": "automation", "service": "turn_off"},
     "automation.trigger": {"status": TRANSLATED, "domain": "automation", "service": "trigger"},
+    "media_player.turn_on": {"status": TRANSLATED, "domain": "media_player", "service": "turn_on"},
+    "media_player.turn_off": {"status": TRANSLATED, "domain": "media_player", "service": "turn_off"},
+    "media_player.volume_set": {"status": TRANSLATED, "domain": "media_player", "service": "volume_set"},
+    "media_player.volume_up": {"status": TRANSLATED, "domain": "media_player", "service": "volume_up"},
+    "media_player.volume_down": {"status": TRANSLATED, "domain": "media_player", "service": "volume_down"},
+    "media_player.volume_mute": {"status": TRANSLATED, "domain": "media_player", "service": "mute"},
+    "media_player.select_source": {"status": TRANSLATED, "domain": "media_player", "service": "select_source"},
+    "media_player.play": {"status": TRANSLATED, "domain": "media_player", "service": "play"},
+    "media_player.pause": {"status": TRANSLATED, "domain": "media_player", "service": "pause"},
+    "media_player.stop": {"status": TRANSLATED, "domain": "media_player", "service": "stop"},
+    "media_player.next": {"status": TRANSLATED, "domain": "media_player", "service": "next"},
+    "media_player.previous": {"status": TRANSLATED, "domain": "media_player", "service": "previous"},
+    "media_player.play_media": {"status": TRANSLATED, "domain": "media_player", "service": "play_media"},
+    "heos.group_volume_up": {"status": TRANSLATED, "domain": "media_player", "service": "volume_up"},
+    "heos.group_volume_down": {"status": TRANSLATED, "domain": "media_player", "service": "volume_down"},
+    # Destination identity remains a configuration/mapping concern.
+    "notify.mobile_app_iphone_16": {"status": NEEDS_MAPPING, "domain": "notify", "service": "send", "reason": "Notification destination requires HCM mapping"},
+    "notify.mobile_app_rachelles_iphone": {"status": NEEDS_MAPPING, "domain": "notify", "service": "send", "reason": "Notification destination requires HCM mapping"},
+    "tts.cloud_say": {"status": NEEDS_MAPPING, "domain": "announcement", "service": "speak", "reason": "Announcement destination/backend requires HCM mapping"},
+    "tts.speak": {"status": NEEDS_MAPPING, "domain": "announcement", "service": "speak", "reason": "Announcement destination/backend requires HCM mapping"},
 }
 
 _READ_ONLY_TRIGGER_TYPES = {"zone": UNSUPPORTED, "conversation": UNSUPPORTED, "device": NEEDS_MAPPING, "manual": COMPATIBLE}
@@ -239,11 +259,26 @@ class HACompatibilityAnalyzer:
             status = mapping.get("status", UNSUPPORTED)
             reason = mapping.get("reason")
             native = {"domain": mapping.get("domain", domain), "service": mapping.get("service", service)}
-        target, target_status, target_refs = self._target(action)
-        statuses = [status, target_status]
+            if native["domain"] in {"notify", "announcement"}:
+                native["provider_id"] = "hcm_native"
         data = deepcopy(action.get("data", action.get("service_data", {})) or {})
         if not isinstance(data, dict):
             statuses.append(UNSUPPORTED); data = {}
+        if service_name == "media_player.play_media" and isinstance(data.get("media"), dict):
+            media = data.pop("media")
+            for key in ("media_content_id", "media_content_type", "metadata"):
+                if key in media: data[key] = media[key]
+            if "enqueue" in action: data["enqueue"] = action["enqueue"]
+        if service_name.startswith("tts.") and "media_player_entity_id" in data:
+            if not action.get("target"):
+                action = dict(action); action["target"] = {"entity_id": data.pop("media_player_entity_id")}
+        if service_name.startswith("tts.") and "entity_id" in data:
+            # Keep the source target visible for explicit mapping; do not treat
+            # a raw HA media_player ID as an HCM identity.
+            if not action.get("target"):
+                action = dict(action); action["target"] = {"entity_id": data.pop("entity_id")}
+        target, target_status, target_refs = self._target(action)
+        statuses = [status, target_status]
         expression_refs: list[str] = []
         for key, value in list(data.items()):
             rendered, template_status, deps, _ = self._template(value)
@@ -253,7 +288,10 @@ class HACompatibilityAnalyzer:
         if refs:
             if len(refs) > 1:
                 statuses.append(NEEDS_MAPPING)
-            native_target["target_entity_ref"] = refs[0] if len(refs) == 1 else refs
+            if native.get("domain") == "announcement":
+                data["target_entity_ref"] = refs[0] if len(refs) == 1 else refs
+            else:
+                native_target["target_entity_ref"] = refs[0] if len(refs) == 1 else refs
         result = {"type": "service", "status": _combine(statuses), "source": _safe(raw), "service": service_name,
                   "native": {**native, **native_target, "service_data": _safe(data)}, "target_mappings": target_refs,
                   "expression_references": sorted(set(expression_refs))}

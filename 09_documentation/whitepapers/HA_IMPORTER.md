@@ -43,6 +43,17 @@ override remaining entity, climate, notification, zone, conversation, or
 security-service blockers; an item remains blocked until every nested requirement
 is eligible.
 
+Media actions use the generic `media_player` contract. `play_media` flattens HA's
+`media` object into bounded `media_content_id`, `media_content_type`, `metadata`,
+and `enqueue` arguments; HEOS favorite IDs remain provider data. Existing power,
+volume, source, and playback controls map to the corresponding generic service.
+`heos.group_volume_up/down` translate to generic volume operations. Mobile
+`notify.*` services translate to `notify.send`, and `tts.cloud_say`/`tts.speak`
+translate to `announcement.speak`, but both retain `NEEDS_MAPPING` until an HCM
+destination/backend is configured. Unknown notification destinations are not
+wildcard-mapped. TTS target fields are normalized to explicit media-player target
+references and are never treated as durable HA identities.
+
 Endpoints:
 
 - `POST /api/v1/import/home-assistant/analyze` (ADMIN): YAML fields or structured

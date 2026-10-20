@@ -22,6 +22,21 @@ class DateTimeArg(BaseModel):
 class CounterArg(BaseModel): model_config=ConfigDict(extra='forbid'); value: int|None=None
 class TimerArg(BaseModel): model_config=ConfigDict(extra='forbid'); duration: float|None=None
 class ScriptArg(BaseModel): model_config=ConfigDict(extra='forbid'); inputs: dict = Field(default_factory=dict)
+class NotificationArg(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    message: str = Field(min_length=1, max_length=4096)
+    title: str|None = Field(default=None, max_length=256)
+    destination: str|None = Field(default=None, max_length=128)
+    data: dict = Field(default_factory=dict)
+    severity: str = Field(default='normal', pattern='^(normal|important|critical)$')
+class AnnouncementArg(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    message: str = Field(min_length=1, max_length=4096)
+    target_entity_ref: int|list[int]|None = None
+    volume_level: float|None = Field(default=None, ge=0, le=1)
+    language: str|None = Field(default=None, max_length=32)
+    voice: str|None = Field(default=None, max_length=64)
+    cache: bool|None = None
 
 INFO=ProviderInfo('hcm_native','HCM Native Primitives',capabilities={'helpers':True,'scripts':True,'scenes':True,'states':True,'events':True,'services':True},internal=True)
 HELPER_TYPES={'input_boolean','input_button','input_number','input_text','input_select','input_datetime','counter','timer','schedule'}
@@ -58,6 +73,18 @@ class NativePrimitives:
             await c.service('timer',name,TimerArg if name=='start' else Empty,callback,target_required=True,target_domains=('timer',))
         await c.service('script','run',ScriptArg,self._script_run,target_required=True,target_domains=('script',))
         await c.service('scene','turn_on',Empty,self._scene_turn_on,target_required=True,target_domains=('scene',))
+        await c.service('notify','send',NotificationArg,self._notify_send)
+        await c.service('announcement','speak',AnnouncementArg,self._announcement_speak)
+
+    async def _notify_send(self,a,t):
+        # Delivery destinations are deliberately configured separately; this
+        # foundation service never pretends to send a push notification.
+        return {'status':'destination_unconfigured','destination':a.destination}
+
+    async def _announcement_speak(self,a,t):
+        # Speech generation/playback backends are optional and absent until a
+        # configured provider claims the semantic service.
+        return {'status':'backend_unavailable','target_entity_ref':a.target_entity_ref}
     async def _helper(self,entity_ref,kind=None):
         async with db.acquire() as conn:
             row=await conn.fetchrow('SELECT h.*,e.state,e.attributes FROM native_helpers h JOIN entities e ON e.id=h.entity_ref WHERE h.entity_ref=$1 AND ($2::text IS NULL OR h.helper_type=$2)',int(entity_ref),kind)
