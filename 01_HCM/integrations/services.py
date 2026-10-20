@@ -47,7 +47,10 @@ class Services:
         for row in rows:
             provider=providers[row['provider_id']]
             handler_present=(row['provider_id'],row.get('instance_id'),row['domain'],row['service_name']) in self.handlers or (row['provider_id'],row['domain'],row['service_name']) in self.handlers
-            row['available']=bool(handler_present and provider['enabled'] and provider['configured'] and provider['status']=='connected' and not row['mutates_physical_state'])
+            instance_ok=True
+            if row.get('instance_id'):
+                async with db.acquire() as conn: instance_ok=bool(await conn.fetchval("SELECT enabled AND configured AND status='connected' FROM integration_instances WHERE instance_id=$1",row['instance_id']))
+            row['available']=bool(handler_present and instance_ok and provider['status'] in ('connected','disabled') and not row['mutates_physical_state'])
         return rows
 
     async def invoke(self,provider_id,domain,name,arguments,*,target_entity_id=None,instance_id=None,timeout=5):
@@ -60,8 +63,10 @@ class Services:
         if handler.target_required and target_entity_id is None:
             raise ValueError('Target entity required')
         async with db.acquire() as conn:
-            active=await conn.fetchval('''SELECT enabled AND configured AND status='connected'
-                FROM integration_providers WHERE provider_id=$1''',provider_id)
+            if instance_id:
+                active=await conn.fetchval("SELECT enabled AND configured AND status='connected' FROM integration_instances WHERE instance_id=$1",instance_id)
+            else:
+                active=await conn.fetchval('''SELECT enabled AND configured AND status='connected' FROM integration_providers WHERE provider_id=$1''',provider_id)
             if not active:
                 raise LookupError('Provider unavailable')
             if target_entity_id is not None:

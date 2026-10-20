@@ -366,3 +366,10 @@ async def test_generic_oauth_client_normalizes_and_scheduler_cancels():
     client=oauth.OAuthHTTPClient(request); token=await client.exchange(oauth.OAuthMetadata('a','t',('one',)),'code','id','secret','cb')
     assert token.access_token=='a' and token.refresh_token=='r' and token.scopes==('one','two') and calls[0][1]['code']=='code'
     fired=[]; oauth.refresh_scheduler.schedule('instance',lambda: fired.append(True),60); oauth.refresh_scheduler.cancel('instance'); assert 'instance' not in oauth.refresh_scheduler.tasks
+
+
+def test_weather_and_openai_normalization_contracts():
+    weather=import_module('01_HCM.integrations.weather'); state=weather.WeatherState(condition='Sunny',temperature=72,provider='nws')
+    assert state.as_dict()=={'condition':'Sunny','temperature':72,'provider':'nws'}
+    openai=import_module('01_HCM.integrations.openai_provider'); args=openai.GenerateText(prompt='hello',max_tokens=10)
+    assert args.prompt=='hello' and args.max_tokens==10

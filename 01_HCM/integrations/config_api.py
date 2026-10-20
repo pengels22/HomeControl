@@ -10,6 +10,7 @@ from ..settings import settings
 from .. import db
 from . import oauth
 from . import secrets as secret_store
+from .factory import provider_factory
 
 router=APIRouter(prefix='/api/v1/integrations',dependencies=[Depends(require_user)])
 class ConfigRequest(BaseModel):
@@ -25,13 +26,14 @@ async def configurations(): return {'integrations':await inspect()}
 @router.get('/providers')
 async def providers():
     items=[]
-    for entry in runtime.entries.values():
-        info=entry.provider.info
+    for provider_id,provider_type in provider_factory.types.items():
+        info=provider_type.info
+        entry=runtime.entries.get(provider_id)
         if info.internal and not settings.integration_show_test_providers: continue
         items.append({'provider_id':info.provider_id,'display_name':info.display_name,'description':info.description,
             'icon':info.icon,'setup_type':info.setup_type,'supports_multiple':info.supports_multiple,
             'capabilities':info.capabilities,'config_schema':info.config_schema,'config_flow':info.config_flow,
-            'configured':entry.configured})
+            'configured':entry.configured if entry else False})
     return {'providers':items,'instances':await list_instances()}
 
 @router.get('/instances')

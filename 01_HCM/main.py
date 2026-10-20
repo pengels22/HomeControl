@@ -69,6 +69,10 @@ async def lifespan(app: FastAPI):
     await bridge.start()
     from .integrations.runtime import runtime as integrations
     from .integrations.mock import MockProvider
+    from .integrations import nws, owm, openai_provider
+    from .integrations.factory import provider_factory
+    for provider_type in provider_factory.types.values():
+        await integrations.registry.register(provider_type.info, enabled=False, configured=False)
     if 'internal_mock' not in integrations.entries:
         integrations.attach(MockProvider(), enabled=settings.integration_mock_enabled)
     await integrations.restore_instances()
