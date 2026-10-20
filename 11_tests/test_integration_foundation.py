@@ -42,6 +42,7 @@ async def database(monkeypatch):
         await conn.execute((ROOT/'08_database/012_instance_runtime.sql').read_text())
         await conn.execute((ROOT/'08_database/013_integration_runtime_status.sql').read_text())
         await conn.execute((ROOT/'08_database/014_provider_poll_state.sql').read_text())
+        await conn.execute((ROOT/'08_database/015_google_sync_state.sql').read_text())
         after=dict(await conn.fetchrow('SELECT * FROM logical_devices WHERE id=$1',native))
         assert {key:after[key] for key in before}==before
         @asynccontextmanager
@@ -393,3 +394,10 @@ async def test_nws_alert_deduplication_and_forecast(database):
         codes=[]
         while not sub.queue.empty(): codes.append(sub.queue.get_nowait().code)
     assert 'nws.alert_started' in codes and 'nws.alert_ended' in codes and codes.count('nws.alert_started')==1
+
+
+def test_google_calendar_and_gmail_normalization():
+    google=import_module('01_HCM.integrations.google'); calendar=google.GoogleCalendarProvider()
+    event=calendar.normalize_event({'id':'evt','summary':'Meeting','start':{'date':'2026-01-01'},'end':{'date':'2026-01-02'},'status':'confirmed'})
+    assert event['event_id']=='evt' and event['all_day'] and event['start']=='2026-01-01'
+    assert google.GoogleCalendarProvider.info.setup_type=='oauth' and google.GmailProvider.info.capabilities['mail']
