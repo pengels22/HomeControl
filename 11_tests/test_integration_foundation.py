@@ -445,3 +445,8 @@ async def test_smartthings_rsa_webhook_verification_and_event_dedup():
 def test_denon_and_heos_media_transport_normalization():
     denon=import_module('01_HCM.integrations.denon'); receiver=denon.DenonProvider(); receiver.parse_line('PWON'); receiver.parse_line('MVFL-40.0'); receiver.parse_line('MUON'); receiver.parse_line('SICBL/SAT'); assert receiver.state['power'] and receiver.state['volume_level']==0.5 and receiver.state['muted'] and receiver.state['source']=='CBL/SAT'
     heos=import_module('01_HCM.integrations.heos'); parsed=heos.HEOSTransport('host').parse('heos://event/player_state?pid=7&state=play\r\n'); assert parsed['command']=='event/player_state' and parsed['params']['pid']=='7'
+
+
+def test_native_bluetooth_and_ibeacon_parsing_cache():
+    bt=import_module('01_HCM.bluetooth'); ibeacon=import_module('01_HCM.integrations.ibeacon'); raw=b'\x02\x15'+bytes.fromhex('00112233445566778899aabbccddeeff')+(1).to_bytes(2,'big')+(2).to_bytes(2,'big')+(-59).to_bytes(1,'big',signed=True); adv=bt.Advertisement('hci1','AA:BB',rssi=-61,manufacturer_data={0x004c:raw}); parsed=ibeacon.IBeaconProvider.parse(adv); assert parsed['uuid']=='00112233-4455-6677-8899-aabbccddeeff' and parsed['major']==1 and parsed['minor']==2 and parsed['tx_power']==-59
+    scanner=bt.BluetoothScanner(cache_size=1); scanner.observe(adv); scanner.observe(bt.Advertisement('hci1','CC:DD')); assert len(scanner.recent())==1

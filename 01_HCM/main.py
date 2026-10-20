@@ -69,7 +69,9 @@ async def lifespan(app: FastAPI):
     await bridge.start()
     from .integrations.runtime import runtime as integrations
     from .integrations.mock import MockProvider
-    from .integrations import nws, owm, openai_provider, google, smartthings, denon, heos
+    from .integrations import nws, owm, openai_provider, google, smartthings, denon, heos, ibeacon
+    from . import bluetooth
+    await bluetooth.scanner.start()
     from .integrations.factory import provider_factory
     for provider_type in provider_factory.types.values():
         await integrations.registry.register(provider_type.info, enabled=False, configured=False)
@@ -85,6 +87,7 @@ async def lifespan(app: FastAPI):
     rules.running=False
     rule_task.cancel(); hvac_task.cancel(); alarm_task.cancel()
     await integrations.stop()
+    await bluetooth.scanner.stop()
     await bridge.stop()
     await storage.git_sync_manager.stop()
     await safety_relays.shutdown()
@@ -116,6 +119,8 @@ from .integrations.config_api import router as integration_config_router
 app.include_router(integration_config_router)
 from .integrations.smartthings import webhook_router as smartthings_webhook_router
 app.include_router(smartthings_webhook_router)
+from .bluetooth import bluetooth_router
+app.include_router(bluetooth_router)
 WEB_ROOT = Path(__file__).resolve().parent / 'www'
 app.mount('/static', StaticFiles(directory=WEB_ROOT), name='static')
 
