@@ -86,6 +86,8 @@ async def lifespan(app: FastAPI):
     from .zones import ZoneRuntime
     integrations.zone_runtime = ZoneRuntime(integrations.registry)
     await integrations.zone_runtime.start()
+    from .device_events import DeviceEventRuntime
+    integrations.device_event_runtime = DeviceEventRuntime(integrations.registry)
     from .automation import AutomationEngine
     integrations.automation_engine = AutomationEngine(integrations.registry, timezone_name=settings.timezone, latitude=settings.latitude, longitude=settings.longitude)
     integrations.automation_engine.zone_evaluator = integrations.zone_runtime.evaluator

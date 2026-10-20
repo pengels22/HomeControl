@@ -171,3 +171,22 @@ def test_zone_without_mapping_is_blocked_mapping():
     ], "actions": []}]}
     item = m.analyze_home_assistant(source)["items"][0]
     assert item["eligibility"] == m.BLOCKED_MAPPING
+
+
+def test_zha_button_forms_translate_to_normalized_device_events():
+    source = {"automations": [{"id": "buttons", "triggers": [
+        {"trigger": "device", "domain": "zha", "device_id": "remote", "type": "remote_button_short_press", "subtype": "button_1"},
+        {"trigger": "device", "domain": "zha", "device_id": "remote", "type": "remote_button_double_press", "subtype": "button_1"},
+        {"trigger": "device", "domain": "zha", "device_id": "remote", "type": "remote_button_long_press", "subtype": "button_1"},
+    ], "actions": []}]}
+    item = m.analyze_home_assistant(source, mappings={"device:remote": "device-ref"})["items"][0]
+    assert item["compatibility"] == m.TRANSLATED
+    assert [x["action"] for x in item["preview"]["triggers"]] == ["press", "double_press", "hold"]
+
+
+def test_zha_unknown_event_remains_unsupported():
+    source = {"automations": [{"id": "unknown", "triggers": [{
+        "trigger": "device", "domain": "zha", "device_id": "remote", "type": "remote_button_release", "subtype": "button_1"
+    }], "actions": []}]}
+    item = m.analyze_home_assistant(source)["items"][0]
+    assert item["compatibility"] == m.UNSUPPORTED

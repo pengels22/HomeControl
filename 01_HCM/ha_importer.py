@@ -206,6 +206,16 @@ class HACompatibilityAnalyzer:
             target, confidence = mapped, "EXACT" if mapped is not None else "UNRESOLVED"
         return source, target, COMPATIBLE if target is not None and confidence == "EXACT" else NEEDS_MAPPING
 
+    def _map_device_event(self, value: Any) -> tuple[str, Any, str]:
+        source = str(value)
+        mapped = self.mappings.get(f"device:{source}", self.mappings.get(source))
+        if isinstance(mapped, dict):
+            target = mapped.get("target_device_ref", mapped.get("device_ref", mapped.get("target_ref")))
+            confidence = str(mapped.get("confidence", mapped.get("status", "EXACT"))).upper()
+        else:
+            target, confidence = mapped, "EXACT" if mapped is not None else "UNRESOLVED"
+        return source, target, COMPATIBLE if target is not None and confidence == "EXACT" else NEEDS_MAPPING
+
     def _map_device_entity(self, raw: dict[str, Any]) -> tuple[Any, str, list[str]]:
         """Resolve an HA device construct to an immutable HCM entity ref."""
         source = raw.get("entity_id")
@@ -557,6 +567,8 @@ class HACompatibilityAnalyzer:
                 entity = target.get("entity_id") if isinstance(target, dict) else None
                 raw = {**raw, "entity_id": entity, "zone": options.get("zone"), "event": "enter"}
             return self._zone_trigger(raw)
+        if raw.get("domain") == "zha" and raw.get("type"):
+            return self._zha_device_event(raw)
         if (raw.get("platform") == "device" or raw.get("trigger") == "device" or
                 raw.get("device_id") is not None and raw.get("domain")):
             if raw.get("domain") == "device_tracker" and raw.get("type") in {"enters", "leaves"} and raw.get("zone"):
@@ -590,6 +602,20 @@ class HACompatibilityAnalyzer:
         native = {"type": "zone", "tracker_ref": tracker_ref, "zone_ref": zone_ref, "event": event} if tracker_ref is not None and zone_ref is not None else None
         return {"type": "zone", "status": status, "source": _safe(raw), "native": native,
                 "required_mappings": [x for x in (tracker, zone) if x]}
+
+    def _zha_device_event(self, raw: dict[str, Any]) -> dict[str, Any]:
+        semantics = {"remote_button_short_press": ("button", "press"),
+                     "remote_button_double_press": ("button", "double_press"),
+                     "remote_button_long_press": ("button", "hold")}
+        semantic = semantics.get(str(raw.get("type")))
+        _, device_ref, device_status = self._map_device_event(raw.get("device_id")) if raw.get("device_id") else ("", None, NEEDS_MAPPING)
+        if semantic is None:
+            return {"type": "device_event", "status": UNSUPPORTED, "source": _safe(raw), "reason": "Unsupported ZHA device event semantic"}
+        category, action = semantic
+        native = {"type": "device_event", "device_ref": device_ref, "category": category,
+                  "action": action, "subtype": raw.get("subtype")} if device_ref is not None else None
+        return {"type": "device_event", "status": _combine([TRANSLATED, device_status]),
+                "source": _safe(raw), "native": native, "required_mappings": [str(raw.get("device_id"))]}
 
     def _automation(self, source_id: str, obj: dict[str, Any], source_type: str, index: int) -> dict[str, Any]:
         triggers = obj.get("triggers", obj.get("trigger", [])); triggers = triggers if isinstance(triggers, list) else ([triggers] if triggers else [])

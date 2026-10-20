@@ -147,7 +147,7 @@ class AutomationStore:
         return sign*(nums[0]*3600+nums[1]*60+nums[2])
 
     async def _validate_trigger(self,t):
-        if not isinstance(t,dict) or set(t)-{'type','entity_ref','from','to','attribute','for','event_type','provider_id','instance_id','device_ref','payload','times','time','every_minutes','every_hours','minute','hour','sun','offset','above','below','tracker_ref','zone_ref','event'}: raise AutomationValidationError('Invalid trigger definition')
+        if not isinstance(t,dict) or set(t)-{'type','entity_ref','from','to','attribute','for','event_type','provider_id','instance_id','device_ref','payload','times','time','every_minutes','every_hours','minute','hour','sun','offset','above','below','tracker_ref','zone_ref','event','category','action','subtype'}: raise AutomationValidationError('Invalid trigger definition')
         typ=t.get('type')
         if typ=='state':
             if 'entity_ref' not in t: raise AutomationValidationError('State trigger needs entity_ref')
@@ -167,6 +167,10 @@ class AutomationStore:
         elif typ=='zone':
             if not t.get('tracker_ref') or not t.get('zone_ref') or t.get('event') not in ('enter','leave'):
                 raise AutomationValidationError('Zone trigger needs tracker_ref, zone_ref and enter/leave event')
+            t=dict(t); t['trigger_id']=trigger_id(t)
+        elif typ=='device_event':
+            if not t.get('device_ref') or not t.get('category') or not t.get('action'):
+                raise AutomationValidationError('Device event trigger needs device_ref, category and action')
             t=dict(t); t['trigger_id']=trigger_id(t)
         elif typ=='time':
             times=t.get('times', [t.get('time')] if t.get('time') else [])
@@ -507,6 +511,9 @@ class AutomationEngine:
         if typ=='zone':
             payload = e.get('payload') or {}
             return e.get('event_type') == f"hcm_native.zone.{t.get('event')}" and str(payload.get('tracker_ref')) == str(t.get('tracker_ref')) and str(payload.get('zone_ref')) == str(t.get('zone_ref'))
+        if typ=='device_event':
+            if e.get('event_type') != 'hcm_native.device_event': return False
+            return all(payload.get(key) == t.get(key) for key in ('device_ref', 'category', 'action') if t.get(key) is not None) and (t.get('subtype') is None or payload.get('subtype') == t.get('subtype'))
         return False
 
     def _start_timer(self,key,t,event,current):
@@ -614,6 +621,8 @@ class AutomationEngine:
             ctx.trigger={'platform':'event','event_type':event.get('event_type'),'event_id':event.get('event_id'),'event':payload}
             if event.get('event_type')=='entity.state_changed':
                 ctx.trigger.update({'platform':'state','entity_ref':event.get('entity_id'),'entity_id':event.get('entity_id'),'from_state':{'state':payload.get('previous_state')},'to_state':{'state':payload.get('state'),'attributes':payload.get('attributes',{}),'availability':payload.get('available',True)}})
+            elif event.get('event_type')=='hcm_native.device_event':
+                ctx.trigger.update({'platform':'device_event', **{key: payload.get(key) for key in ('device_ref','entity_ref','category','action','subtype','value','timestamp')}})
         if mode=='queued' and active: self.queues[aid].append(ctx); return ctx.run_id
         active[str(ctx.run_id)]=ctx; task=asyncio.create_task(self._execute(ctx,source,event)); self.tasks.add(task); task.add_done_callback(self.tasks.discard); return ctx.run_id
 

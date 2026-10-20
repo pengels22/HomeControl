@@ -107,6 +107,7 @@ Generic events include `entity.state_changed` and
 - `smartthings.device_state_changed`, `device_online`, and `device_offline`.
 - `ibeacon.entered` and `ibeacon.left`.
 - `internal_mock.started`.
+- `hcm_native.device_event` for normalized button/control events.
 
 Weather poll state and Google/Gmail sync state are durable. Migration 016 adds a
 bounded `integration_events` sequence log. Meaningful entity transitions,
@@ -118,6 +119,12 @@ ID through `GET /api/v1/integrations/events`. Provider deduplication remains
 provider-owned. Denon/HEOS external state converges through entity updates,
 while iBeacon entered/left transitions are runtime-derived after fresh
 observations.
+
+Normalized device events use bounded fields (`device_ref`, optional `entity_ref`,
+`category`, `action`, optional `subtype`/`value`, timestamp, provider provenance,
+and bounded metadata). They use the same durable event sequence and the
+Automation Engine's `device_event` trigger. HA/ZHA command details stay in
+migration diagnostics; Automation definitions never parse provider payloads.
 
 ## Provider-specific findings
 

@@ -102,6 +102,14 @@ and 5 tracker entity references. No real coordinates are included in previews,
 fixtures, or reports. Native zone definitions are stored by migration 022;
 tracker×zone membership remains transient and is rebuilt without startup events.
 
+Measured ZHA device triggers translate through the semantic registry: short press
+becomes `device_event` category `button`, action `press`; double press becomes
+`double_press`; long press becomes `hold`, with the source subtype retained as a
+bounded button identifier. The three source device IDs require explicit
+`device:<ha_device_id>` mappings. Unknown ZHA commands, including the separate
+`zha_event` `device_offline` diagnostic trigger, remain unsupported. No raw ZHA
+payload is retained in the native trigger contract.
+
 Endpoints:
 
 - `POST /api/v1/import/home-assistant/analyze` (ADMIN): YAML fields or structured
