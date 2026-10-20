@@ -17,6 +17,11 @@ async def test_typed_jinja_filters_and_mixed_template(engine):
     assert await engine.evaluate("{{ is_state('binary_sensor.bar','on') and (states('sensor.foo') | float > 70) }}",syntax='jinja') is True
 
 @pytest.mark.asyncio
+async def test_ha_filter_chains_and_none_test(engine):
+    assert await engine.evaluate("{{ [100, 90] | min }}",syntax='jinja') == 90
+    assert await engine.evaluate("{{ states('sensor.foo') is not none }}",syntax='jinja') is True
+
+@pytest.mark.asyncio
 async def test_safe_trigger_access_and_dependencies(engine):
     compiled=engine.compile("{{ trigger.to_state.state }}",syntax='jinja')
     assert await engine.evaluate_compiled(compiled,{'trigger':{'to_state':{'state':'on'}}})=='on'

@@ -39,3 +39,15 @@ result type, dependencies, and sanitized errors without side effects.
 | `{% if %}`, loops, macros, includes, arbitrary Jinja | Unsupported |
 | Python methods, private attributes, imports, I/O | Unsupported |
 | Dynamic entity targets and expression service calls | Unsupported |
+
+The October 2026 real configuration audit covered 125 automations, 7 scripts,
+and 4 scenes. It found 74 template-bearing values: 33 compile with the
+bounded engine after this pass and 41 remain unsupported. The measured safe
+expansions are top-level list/scalar filter chains (including filters followed
+by comparisons) and the `is none`/`is not none` tests. These are normalized to
+the existing AST and allowlist; they do not add Jinja execution. The remaining
+failures are intentionally deferred: 21 control-block templates (`set`,
+`for`, or multi-branch blocks), 8 parse forms outside the subset, 5 dynamic
+`random` uses, 4 empty/unsupported call forms, and 3 collection/attribute
+filter chains (`selectattr`, `map`, or equivalent). No control blocks, random
+selection, arbitrary methods, or provider/service calls are enabled.

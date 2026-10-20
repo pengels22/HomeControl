@@ -52,6 +52,11 @@ class ExpressionEngine:
             if len(matches)==1 and re.fullmatch(r'\s*{{\s*.*?\s*}}\s*',source,re.S): text=matches[0]; pure=True
             else: return self._cache(key,('template',[(part, expr) for part,expr in self._parts(source)]))
         text=self._filters_to_calls(text)
+        # HA's Jinja tests used by the compatibility surface have explicit,
+        # bounded equivalents in the expression AST.  Keep this normalization
+        # deliberately small; general Jinja syntax remains unsupported.
+        text=re.sub(r"\bis\s+not\s+none\b", "!= None", text)
+        text=re.sub(r"\bis\s+none\b", "== None", text)
         try: tree=ast.parse(text,mode='eval').body
         except SyntaxError as exc: raise ExpressionError('parse','Invalid expression syntax') from None
         node_count=[0]
@@ -69,13 +74,16 @@ class ExpressionEngine:
         if pos<len(source): out.append((source[pos:],None))
         return out
     def _filters_to_calls(self,text):
-        # Translate the bounded HA filter form into allowlisted function calls.
-        pattern=re.compile(r"(\b[A-Za-z_][A-Za-z0-9_]*\([^()]*\)|\b[A-Za-z_][A-Za-z0-9_]*|\([^()]+\))\s*\|\s*([A-Za-z_][A-Za-z0-9_]*)(?:\(([^()]*)\))?")
+        # Translate bounded HA filter chains, including list literals, without
+        # embedding a Jinja parser or evaluating arbitrary syntax.
+        if '|' not in text:
+            return text
+        pattern=re.compile(r"(\[[^\[\]]*\]|\b[A-Za-z_][A-Za-z0-9_]*\([^()]*\)|\b[A-Za-z_][A-Za-z0-9_]*|\([^()]+\))\s*\|\s*([A-Za-z_][A-Za-z0-9_]*)(?:\(([^()]*)\))?")
         previous=None
         while '|' in text and text!=previous:
             previous=text
             def repl(match):
-                operand, name, args=match.group(1),match.group(2),match.group(3)
+                operand,name,args=match.group(1),match.group(2),match.group(3)
                 return f"{name}({operand}{','+args if args else ''})"
             text=pattern.sub(repl,text)
         if '|' in text: raise ExpressionError('unsupported','Invalid filter syntax')

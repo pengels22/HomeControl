@@ -121,3 +121,12 @@ No live Home Assistant connection or filesystem path is accepted. Provenance is
 returned with every applied item (`home_assistant`, source type/id/fingerprint),
 and source content is never overwritten. Durable plan/history storage and update
 merging can be added in a later migration once the review workflow is exercised.
+### Real configuration expression audit
+
+The measured audit of the disposable real source set (125 automations, 7
+scripts, 4 scenes) is analysis-only. Of 74 template-bearing values, 33 are
+currently compatible with HCM's bounded expression engine and 41 remain
+blocked or intentionally unsupported. V1 adds only safe filter-chain
+normalization and `none` tests; control blocks, random selection, collection
+queries, and arbitrary Jinja remain deferred. Reports redact source values and
+are not committed.
