@@ -17,6 +17,7 @@ from .integrations.runtime import runtime as integrations
 from . import mapping_registry
 from .ha_capability_enrichment import enrich_plan
 from .ha_mapping_review import build_mapping_queue, preview_mapping
+from .hcm_target_catalog import candidates as catalog_candidates, catalog_from_rows, load_catalog, summary as catalog_summary
 
 router = APIRouter(prefix="/api/v1/import/home-assistant", dependencies=[Depends(require_user)])
 
@@ -47,27 +48,44 @@ async def _request_plan(body: dict, mappings: dict | None = None):
     return plan
 
 
-async def _mapping_candidates():
+async def _mapping_candidates(target_catalog=None):
+    if target_catalog is not None:
+        return catalog_candidates(load_catalog(target_catalog))
     try:
         rows = await integrations.registry.inspect("entities")
         devices = await integrations.registry.inspect("devices")
-        result = [{"target_kind": "entity", "target_ref": row.get("id"), "entity_id": row.get("entity_id"),
-                 "external_id": row.get("external_entity_id"), "name": row.get("display_name"),
-                 "provider_id": row.get("provider_id"), "device_id": row.get("device_id")} for row in rows] + [
-            {"target_kind": "device", "target_ref": row.get("id"), "external_id": row.get("external_device_id"),
-             "name": row.get("display_name"), "provider_id": row.get("provider_id")} for row in devices]
+        destinations, backends, zones = [], [], []
         try:
             from . import notification_config
-            result.extend({"target_kind": "notification_destination", "target_ref": row.get("destination_id"), "name": row.get("name")} for row in await notification_config.list_destinations())
-            result.extend({"target_kind": "speech_backend", "target_ref": row.get("backend_id"), "name": row.get("name")} for row in await notification_config.list_backends())
+            destinations = await notification_config.list_destinations()
+            backends = await notification_config.list_backends()
         except Exception: pass
         try:
             from .zones import ZoneStore
-            result.extend({"target_kind": "zone", "target_ref": row.get("zone_id"), "name": row.get("name")} for row in await ZoneStore().list())
+            zones = await ZoneStore().list()
         except Exception: pass
-        return result
+        catalog = catalog_from_rows(entities=rows, devices=devices, zones=zones,
+            notification_destinations=destinations, speech_backends=backends, source_mode="runtime")
+        return catalog_candidates(catalog)
     except Exception:
         return []
+
+
+@router.get("/target-catalog")
+async def target_catalog(user=Depends(require_user)):
+    """Read-only, purpose-built HCM target metadata; never calls providers."""
+    _admin(user)
+    try:
+        candidates = await _mapping_candidates()
+        catalog = catalog_from_rows(
+            entities=[row for row in candidates if row.get("target_kind") == "entity"],
+            devices=[row for row in candidates if row.get("target_kind") == "device"],
+            zones=[row for row in candidates if row.get("target_kind") == "zone"],
+            notification_destinations=[row for row in candidates if row.get("target_kind") == "notification_destination"],
+            speech_backends=[row for row in candidates if row.get("target_kind") == "speech_backend"], source_mode="runtime")
+        return catalog_summary(catalog)
+    except Exception:
+        return catalog_summary(catalog_from_rows(source_mode="unavailable", provenance={"reason": "runtime database unavailable"}))
 
 
 @router.post("/analyze")
@@ -91,7 +109,7 @@ async def mapping_queue(body: dict | None = None, source_kind: str | None = None
     try:
         plan = await _request_plan(body)
         records = await mapping_registry.list_mappings(source_system="home_assistant")
-        queue = build_mapping_queue(plan, durable_records=records, candidates=await _mapping_candidates(), limit=body.get("limit", 500))
+        queue = build_mapping_queue(plan, durable_records=records, candidates=await _mapping_candidates(body.get("target_catalog")), limit=body.get("limit", 500))
         if source_kind or domain or search or status:
             queue["items"] = [item for item in queue["items"] if
                 (not source_kind or item["source_kind"] == source_kind) and
