@@ -46,6 +46,7 @@ async def database(monkeypatch):
         await conn.execute((ROOT/'08_database/016_integration_core_hardening.sql').read_text())
         await conn.execute((ROOT/'08_database/017_automation_engine.sql').read_text())
         await conn.execute((ROOT/'08_database/018_automation_scheduler.sql').read_text())
+        await conn.execute((ROOT/'08_database/019_native_primitives.sql').read_text())
         after=dict(await conn.fetchrow('SELECT * FROM logical_devices WHERE id=$1',native))
         assert {key:after[key] for key in before}==before
         @asynccontextmanager

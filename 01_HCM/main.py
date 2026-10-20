@@ -79,8 +79,12 @@ async def lifespan(app: FastAPI):
         integrations.attach(MockProvider(), enabled=settings.integration_mock_enabled)
     await integrations.restore_instances()
     await integrations.start()
+    from .primitives import NativePrimitives
+    integrations.native_primitives = NativePrimitives(integrations.registry, timezone_name=settings.timezone)
+    await integrations.native_primitives.start()
     from .automation import AutomationEngine
     integrations.automation_engine = AutomationEngine(integrations.registry, timezone_name=settings.timezone, latitude=settings.latitude, longitude=settings.longitude)
+    integrations.native_primitives.engine = integrations.automation_engine
     await integrations.automation_engine.start()
     storage.git_sync_manager.start()
     rule_task = asyncio.create_task(rules.run())
@@ -91,6 +95,8 @@ async def lifespan(app: FastAPI):
     rule_task.cancel(); hvac_task.cancel(); alarm_task.cancel()
     if getattr(integrations, 'automation_engine', None):
         await integrations.automation_engine.stop()
+    if getattr(integrations, 'native_primitives', None):
+        await integrations.native_primitives.stop()
     await integrations.stop()
     await bluetooth.scanner.stop()
     await bridge.stop()
@@ -126,6 +132,8 @@ from .automation_api import router as automation_router
 app.include_router(automation_router)
 from .expression_api import router as expression_router
 app.include_router(expression_router)
+from .primitives_api import router as primitives_router
+app.include_router(primitives_router)
 from .integrations.smartthings import webhook_router as smartthings_webhook_router
 app.include_router(smartthings_webhook_router)
 from .bluetooth import bluetooth_router

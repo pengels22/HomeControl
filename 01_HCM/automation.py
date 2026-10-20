@@ -229,6 +229,7 @@ class RunContext:
     dry_run: bool=False
     variables: dict=None
     trigger: dict=None
+    kind: str='automation'
 
 class AutomationEngine:
     def __init__(self, registry, *, timezone_name='UTC', latitude=None, longitude=None, store=None):
@@ -401,14 +402,14 @@ class AutomationEngine:
         now=now or datetime.now(self.timezone)
         await self.reconstruct_schedules(since,now)
 
-    async def trigger(self,automation,*,source='manual',event=None,dry_run=False,schedule=None):
+    async def trigger(self,automation,*,source='manual',event=None,dry_run=False,schedule=None,kind='automation',variables=None):
         aid=str(automation['automation_id']); mode=automation['mode']; active=self.active[aid]
         if mode=='single' and active: return None
         if mode=='restart' and active:
             for ctx in active.values(): ctx.cancelled.set()
         if mode=='queued' and len(active)+len(self.queues[aid])>=int(automation['max_runs']): return None
         if mode=='parallel' and len(active)>=int(automation['max_runs']): return None
-        ctx=RunContext(automation,uuid4(),[],asyncio.Event(),dry_run,variables={},trigger={})
+        ctx=RunContext(automation,uuid4(),[],asyncio.Event(),dry_run,variables=dict(variables or {}),trigger={},kind=kind)
         if schedule: ctx.trigger={'trigger_id':schedule.get('trigger_id'),'trigger_type':schedule.get('trigger_type'),'intended_time':schedule.get('intended_fire_at'),'catch_up':schedule.get('catch_up',False),'offset':schedule.get('offset')}; ctx.trace.append({'step':'schedule_trigger',**_safe(schedule)})
         elif event:
             payload=_safe(event.get('payload') or {})
@@ -439,14 +440,17 @@ class AutomationEngine:
                 nxt=self.queues[str(a['automation_id'])].popleft(); self.active[str(a['automation_id'])][str(nxt.run_id)]=nxt; task=asyncio.create_task(self._execute(nxt,'schedule',None)); self.tasks.add(task); task.add_done_callback(self.tasks.discard)
 
     async def _persist_run(self,ctx,source,event,started,status):
-        async with db.acquire() as conn: await conn.execute('INSERT INTO automation_runs(run_id,automation_id,trigger_source,trigger_event_id,started_at,status,mode,trace) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb)',ctx.run_id,_as_uuid(ctx.automation['automation_id']),source,(event or {}).get('event_id'),started,status,ctx.automation['mode'],json.dumps(ctx.trace))
+        owner=_as_uuid(ctx.automation['automation_id'])
+        async with db.acquire() as conn:
+            await conn.execute('INSERT INTO automation_runs(run_id,automation_id,script_id,run_kind,trigger_source,trigger_event_id,started_at,status,mode,trace) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)',ctx.run_id,owner if ctx.kind=='automation' else None,owner if ctx.kind=='script' else None,ctx.kind,source,(event or {}).get('event_id'),started,status,ctx.automation['mode'],json.dumps(ctx.trace))
     async def _finish_run(self,ctx,status,result,category,started):
         trace=_safe(ctx.trace)[-MAX_TRACE_STEPS:]
         while trace and len(json.dumps(trace))>MAX_TRACE_BYTES: trace.pop(0)
         raw=json.dumps(trace)
         async with db.acquire() as conn:
             await conn.execute('UPDATE automation_runs SET ended_at=now(),status=$2,result=$3,error_category=$4,trace=$5::jsonb WHERE run_id=$1',ctx.run_id,status,result,category,raw)
-            await conn.execute('UPDATE automations SET last_triggered_at=CASE WHEN $2 IN (\'success\',\'failed\',\'skipped\') THEN now() ELSE last_triggered_at END,last_run_status=$2 WHERE automation_id=$1',_as_uuid(ctx.automation['automation_id']),status)
+            if ctx.kind=='automation':
+                await conn.execute('UPDATE automations SET last_triggered_at=CASE WHEN $2 IN (\'success\',\'failed\',\'skipped\') THEN now() ELSE last_triggered_at END,last_run_status=$2 WHERE automation_id=$1',_as_uuid(ctx.automation['automation_id']),status)
 
     async def _action(self,ctx,a):
         if ctx.cancelled.is_set(): raise asyncio.CancelledError
@@ -535,6 +539,10 @@ class AutomationEngine:
     async def list_runs(self,automation_id,limit=100):
         async with db.acquire() as conn: rows=await conn.fetch('SELECT * FROM automation_runs WHERE automation_id=$1 ORDER BY started_at DESC LIMIT $2',_as_uuid(automation_id),min(max(int(limit),1),1000))
         return [dict(r) for r in rows]
+    async def list_script_runs(self,script_id,limit=100):
+        async with db.acquire() as conn: rows=await conn.fetch('SELECT * FROM automation_runs WHERE script_id=$1 ORDER BY started_at DESC LIMIT $2',_as_uuid(script_id),min(max(int(limit),1),1000))
+        return [dict(r) for r in rows]
+
     async def get_run(self,run_id):
         async with db.acquire() as conn: row=await conn.fetchrow('SELECT * FROM automation_runs WHERE run_id=$1',_as_uuid(run_id))
         if not row: raise LookupError('Run not found')
