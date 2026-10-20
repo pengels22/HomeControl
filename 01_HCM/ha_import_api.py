@@ -16,6 +16,7 @@ from .ha_importer import (
 from .integrations.runtime import runtime as integrations
 from . import mapping_registry
 from .ha_capability_enrichment import enrich_plan
+from .ha_mapping_review import build_mapping_queue, preview_mapping
 
 router = APIRouter(prefix="/api/v1/import/home-assistant", dependencies=[Depends(require_user)])
 
@@ -33,25 +34,134 @@ async def _analysis_mappings(temporary):
     return {**durable, **(temporary or {})}
 
 
+async def _request_plan(body: dict, mappings: dict | None = None):
+    registry = parse_registry_exports(body.get("ha_entity_registry"), body.get("ha_device_registry"), body.get("ha_area_registry")) if any(key in body for key in ("ha_entity_registry", "ha_device_registry", "ha_area_registry")) else None
+    effective = await _analysis_mappings(mappings or body.get("mappings") or {})
+    if any(k in body for k in ("automations_yaml", "scripts_yaml", "scenes_yaml")):
+        plan = analyze_yaml(automations=body.get("automations_yaml"), scripts=body.get("scripts_yaml"), scenes=body.get("scenes_yaml"), mappings=effective, registry=registry)
+    else:
+        plan = analyze_home_assistant(body.get("sources", body.get("source", body)), mappings=effective, registry=registry)
+    if getattr(integrations, "registry", None) is not None:
+        try: plan = await enrich_plan(plan, integrations.registry.services)
+        except Exception: pass
+    return plan
+
+
+async def _mapping_candidates():
+    try:
+        rows = await integrations.registry.inspect("entities")
+        devices = await integrations.registry.inspect("devices")
+        result = [{"target_kind": "entity", "target_ref": row.get("id"), "entity_id": row.get("entity_id"),
+                 "external_id": row.get("external_entity_id"), "name": row.get("display_name"),
+                 "provider_id": row.get("provider_id"), "device_id": row.get("device_id")} for row in rows] + [
+            {"target_kind": "device", "target_ref": row.get("id"), "external_id": row.get("external_device_id"),
+             "name": row.get("display_name"), "provider_id": row.get("provider_id")} for row in devices]
+        try:
+            from . import notification_config
+            result.extend({"target_kind": "notification_destination", "target_ref": row.get("destination_id"), "name": row.get("name")} for row in await notification_config.list_destinations())
+            result.extend({"target_kind": "speech_backend", "target_ref": row.get("backend_id"), "name": row.get("name")} for row in await notification_config.list_backends())
+        except Exception: pass
+        try:
+            from .zones import ZoneStore
+            result.extend({"target_kind": "zone", "target_ref": row.get("zone_id"), "name": row.get("name")} for row in await ZoneStore().list())
+        except Exception: pass
+        return result
+    except Exception:
+        return []
+
+
 @router.post("/analyze")
 async def analyze(body: dict, user=Depends(require_user)):
     _admin(user)
     try:
-        mappings = await _analysis_mappings(body.get("mappings") or {})
-        registry = parse_registry_exports(body.get("ha_entity_registry"), body.get("ha_device_registry"), body.get("ha_area_registry")) if any(key in body for key in ("ha_entity_registry", "ha_device_registry", "ha_area_registry")) else None
-        if any(k in body for k in ("automations_yaml", "scripts_yaml", "scenes_yaml")):
-            plan = analyze_yaml(automations=body.get("automations_yaml"), scripts=body.get("scripts_yaml"), scenes=body.get("scenes_yaml"), mappings=mappings, registry=registry)
-        else:
-            sources = body.get("sources", body.get("source", body))
-            plan = analyze_home_assistant(sources, mappings=mappings, registry=registry)
-        if getattr(integrations, "registry", None) is not None:
-            try: plan = await enrich_plan(plan, integrations.registry.services)
-            except Exception: pass
-        return plan
+        return await _request_plan(body)
     except HAImportError as exc:
         raise HTTPException(400, str(exc)) from None
     except (TypeError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from None
+
+
+@router.get("/mapping-queue")
+async def mapping_queue(body: dict | None = None, source_kind: str | None = None,
+                        domain: str | None = None, search: str | None = None,
+                        status: str | None = None, user=Depends(require_user)):
+    """Return a bounded sanitized queue; source data is supplied by the caller."""
+    _admin(user)
+    body = body or {}
+    try:
+        plan = await _request_plan(body)
+        records = await mapping_registry.list_mappings(source_system="home_assistant")
+        queue = build_mapping_queue(plan, durable_records=records, candidates=await _mapping_candidates(), limit=body.get("limit", 500))
+        if source_kind or domain or search or status:
+            queue["items"] = [item for item in queue["items"] if
+                (not source_kind or item["source_kind"] == source_kind) and
+                (not domain or item.get("domain") == domain) and
+                (not status or item.get("mapping_health") == status) and
+                (not search or search.casefold() in (item["source_identifier"] + " " + item["display_name"]).casefold())]
+            queue["total"] = len(queue["items"])
+        return queue
+    except (HAImportError, TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@router.post("/mapping-queue")
+async def mapping_queue_post(body: dict, user=Depends(require_user)):
+    return await mapping_queue(body=body, user=user)
+
+
+@router.post("/mapping-preview")
+async def mapping_preview(body: dict, user=Depends(require_user)):
+    _admin(user)
+    source_identifier = body.get("source_identifier")
+    if not source_identifier or "target" not in body: raise HTTPException(400, "source_identifier and target are required")
+    try:
+        base_mappings = await _analysis_mappings(body.get("mappings") or {})
+        plan = await _request_plan(body, base_mappings)
+        if body.get("analysis_revision") and body["analysis_revision"] != build_mapping_queue(plan)["analysis_revision"]:
+            raise HTTPException(409, "Analysis revision is stale; re-run analysis before preview")
+        def rerun(temporary):
+            # This closure is intentionally synchronous for the pure preview helper.
+            registry = parse_registry_exports(body.get("ha_entity_registry"), body.get("ha_device_registry"), body.get("ha_area_registry")) if any(key in body for key in ("ha_entity_registry", "ha_device_registry", "ha_area_registry")) else None
+            sources = body.get("sources", body.get("source", body))
+            return analyze_home_assistant(sources, mappings={**base_mappings, source_identifier: temporary[source_identifier]}, registry=registry)
+        return preview_mapping(plan, str(source_identifier), body["target"], mappings=base_mappings, analyzer=rerun)
+    except (HAImportError, TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@router.post("/mapping-confirm")
+async def mapping_confirm(body: dict, user=Depends(require_user)):
+    _admin(user)
+    required = ("source_kind", "source_identifier", "target_kind", "target_ref")
+    if any(not body.get(key) for key in required): raise HTTPException(400, "source and target identity are required")
+    if body.get("source_kind") in {"security_credential", "notification_destination", "speech_backend"} and not body.get("individually_reviewed"):
+        raise HTTPException(409, "Sensitive mappings require individual review")
+    try:
+        existing = await mapping_registry.list_mappings(source_system="home_assistant", source_kind=body["source_kind"])
+        match = next((row for row in existing if row.get("source_identifier") == body["source_identifier"]), None)
+        if match:
+            if not body.get("replace"): raise HTTPException(409, "Mapping exists; set replace=true for an explicit replacement")
+            result = await mapping_registry.update_mapping(match["mapping_id"], {"target_kind": body["target_kind"], "target_ref": body["target_ref"], "confidence": "USER_CONFIRMED", "origin": "USER_CONFIRMED", "notes": body.get("notes")}, actor=user.get("user"))
+        else:
+            result = await mapping_registry.create_mapping({**body, "source_system": "home_assistant", "confidence": "USER_CONFIRMED", "origin": "USER_CONFIRMED"}, actor=user.get("user"))
+        if result.get("status") != "VALID":
+            raise HTTPException(409, "Mapping target is missing or unavailable")
+        for alias in body.get("aliases") or []: await mapping_registry.add_alias(result["mapping_id"], alias)
+        return result
+    except HTTPException: raise
+    except (ValueError, LookupError) as exc: raise HTTPException(400, str(exc)) from None
+
+
+@router.post("/mapping-confirm/bulk")
+async def mapping_confirm_bulk(body: dict, user=Depends(require_user)):
+    _admin(user)
+    items = body.get("mappings")
+    if not isinstance(items, list) or not 1 <= len(items) <= 100: raise HTTPException(400, "Bulk mapping size must be 1..100")
+    if any(item.get("source_kind") in {"security_credential", "notification_destination", "speech_backend"} or not item.get("individually_reviewed") for item in items):
+        raise HTTPException(409, "Bulk confirmation excludes sensitive or unreviewed mappings")
+    results = []
+    for item in items: results.append(await mapping_confirm({**item, "replace": False}, user))
+    return {"mappings": results, "count": len(results)}
 
 
 @router.post("/apply")

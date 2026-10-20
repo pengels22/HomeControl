@@ -1180,6 +1180,18 @@ async function renderSettings() {
   await renderIntegrations();
 }
 
+async function renderHaMappings() {
+  setTitle("Migration", "HA Mapping Review");
+  $("content").innerHTML = `<section class="panel"><div class="panel-head"><h3>Home Assistant mapping queue</h3><span class="muted">Review only · no import or service execution</span></div><div class="loading">Loading queue...</div></section>`;
+  try {
+    const data = await api("/import/home-assistant/mapping-queue", {method: "POST", body: JSON.stringify({})});
+    const rows = Array.isArray(data.items) ? data.items : [];
+    $("content").innerHTML = `<section class="panel"><div class="panel-head"><h3>Unresolved identities</h3><span class="muted">${esc(data.total || 0)} items</span></div>${rows.length ? `<div class="detail-list">${rows.map((item) => `<article class="detail-item"><strong>${esc(item.display_name)}</strong><div class="detail-fields">${detailField("Kind", item.source_kind)}${detailField("Health", item.mapping_health)}${detailField("Occurrences", item.occurrence_count)}${detailField("Impact", item.impact?.score)}</div></article>`).join("")}</div>` : `<div class="empty">No queue data is available. Submit an offline analyzer source set to review mappings.</div>`}</section>`;
+  } catch (error) {
+    $("content").innerHTML = `<section class="panel"><div class="notice warn">Mapping queue unavailable: ${esc(error.message)}</div></section>`;
+  }
+}
+
 async function renderIntegrations() {
   const panel=$("integration-settings");
   try {
@@ -1587,6 +1599,7 @@ async function renderRoute() {
     if (parts[0] === "devices") return await renderDevices();
     if (parts[0] === "service") return go("/dashboard");
     if (parts[0] === "settings") return await renderSettings();
+    if (parts[0] === "ha-mappings") return await renderHaMappings();
     if (parts[0] === "users") return await renderUsers();
     return await renderDashboard();
   } catch (error) {

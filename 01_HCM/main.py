@@ -164,6 +164,7 @@ async def web_index():
 @app.get('/devices/{path:path}')
 @app.get('/service')
 @app.get('/settings')
+@app.get('/ha-mappings')
 @app.get('/users')
 async def web_app_routes():
     return FileResponse(WEB_ROOT / 'index.html')

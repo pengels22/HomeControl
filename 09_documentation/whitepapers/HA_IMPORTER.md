@@ -210,3 +210,25 @@ Entity refresh and integration reload remain deferred: current providers own
 their polling and lifecycle and no generic safe refresh/reload semantic is
 available. Climate turn-on, software updates, shell commands, todo/list
 operations, dynamic scenes, and conversation remain intentionally deferred.
+
+### Mapping review workflow V1
+
+The importer exposes a bounded, source-centric mapping queue at
+`/api/v1/import/home-assistant/mapping-queue`. The caller supplies the same
+offline source objects used by analysis; HCM never reads HA files or connects
+to a live HA instance. Queue entries group each unresolved entity, device,
+zone, notification destination, speech backend, or security credential and
+include occurrence counts, affected item IDs/aliases, required services,
+mapping health, capability-filtered candidate suggestions, and deterministic
+impact score inputs. Raw YAML fragments and secret values are excluded.
+
+`mapping-preview` applies one candidate only in memory and reports before and
+after eligibility, remaining blockers, and newly ready items. It does not
+persist a mapping or execute a service. `mapping-confirm` and its bounded bulk
+variant use the existing migration mapping registry. Targets are immutable
+unless an administrator explicitly requests replacement; actor and timestamps
+remain in the durable audit row. Sensitive notification, speech, and security
+credential mappings require individual review and are excluded from bulk
+confirmation. Mapping health (valid, target missing, unconfirmed, ambiguous,
+or invalid) remains distinct from provider availability and capability
+compatibility. A later analysis revision invalidates stale previews.
