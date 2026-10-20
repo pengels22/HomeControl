@@ -1183,14 +1183,15 @@ async function renderSettings() {
 async function renderIntegrations() {
   const panel=$("integration-settings");
   try {
-    const data=await api("/integrations/configuration");
+    const data=await api("/integrations/providers");
+    const cards=(data.instances&&data.instances.length ? data.instances : data.providers||[]);
     const admin=currentUser?.role === "ADMIN";
-    panel.innerHTML=`<div class="integration-grid">${(data.integrations||[]).map((item)=>`
+    panel.innerHTML=`<div class="integration-grid">${cards.map((item)=>`
       <article class="card integration-card"><div class="panel-head"><h4>${esc(item.display_name)}</h4>${statusPill(item.status === "connected",esc(item.status))}</div>
       <p class="muted">${item.enabled ? "Enabled" : "Disabled"} · ${item.configured ? "Configured" : "Configuration required"} · ${item.credential_configured ? "Credential configured" : "No credential"}</p>
       <p class="muted">Last success: ${esc(item.last_success || "Never")}</p>
       ${item.last_error ? `<div class="notice warn">${esc(item.last_error)}</div>` : ""}
-      ${admin ? `<div class="modal-actions inline-actions"><button type="button" data-integration-toggle="${esc(item.provider_id)}">${item.enabled ? "Disable" : "Enable"}</button><button type="button" class="secondary" data-integration-reload="${esc(item.provider_id)}">Reload</button><button type="button" class="secondary" data-integration-config="${esc(item.provider_id)}">Configure</button></div>` : ""}
+      ${admin ? `<div class="modal-actions inline-actions"><button type="button" data-integration-toggle="${esc(item.instance_id||item.provider_id)}" data-instance-toggle="${item.instance_id ? "true" : "false"}">${item.enabled ? "Disable" : "Enable"}</button>${item.instance_id ? `<button type="button" class="secondary" data-integration-reload="${esc(item.instance_id)}">Reload</button>` : ""}<button type="button" class="secondary" data-integration-config="${esc(item.provider_id)}">Configure</button></div>` : ""}
       </article>`).join("")}</div>`;
   } catch (error) { panel.innerHTML=`<div class="notice warn">${esc(error.message)}</div>`; }
 }
@@ -1644,11 +1645,12 @@ document.addEventListener("click", async (event) => {
   if (integrationConfig) { await configureIntegration(integrationConfig.dataset.integrationConfig); return; }
   const integrationToggle = event.target.closest("[data-integration-toggle]");
   if (integrationToggle) {
-    const data=await api(`/integrations/${encodeURIComponent(integrationToggle.dataset.integrationToggle)}/${integrationToggle.textContent.trim()==="Enable"?"enable":"disable"}`,{method:"POST"});
+    const prefix=integrationToggle.dataset.instanceToggle === "true" ? "/integrations/instances/" : "/integrations/";
+    const data=await api(`${prefix}${encodeURIComponent(integrationToggle.dataset.integrationToggle)}/${integrationToggle.textContent.trim()==="Enable"?"enable":"disable"}`,{method:"POST"});
     await renderIntegrations(); return;
   }
   const integrationReload = event.target.closest("[data-integration-reload]");
-  if (integrationReload) { await api(`/integrations/${encodeURIComponent(integrationReload.dataset.integrationReload)}/reload`,{method:"POST"}); await renderIntegrations(); return; }
+  if (integrationReload) { await api(`/integrations/instances/${encodeURIComponent(integrationReload.dataset.integrationReload)}/reload`,{method:"POST"}); await renderIntegrations(); return; }
   const changeRole = event.target.closest("[data-change-role]");
   if (changeRole) {
     openChangeRoleDialog(changeRole.dataset.changeRole);

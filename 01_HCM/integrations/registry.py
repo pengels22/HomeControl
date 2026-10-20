@@ -88,30 +88,31 @@ class Registry:
         async with db.acquire() as conn:
             return [wire(row) for row in await conn.fetch(sql,*([provider_id] if provider_id is not None else []))]
 
-    def context(self,provider_id):
-        return Context(self,identifier(provider_id))
+    def context(self,provider_id,instance_id=None):
+        return Context(self,identifier(provider_id),instance_id)
 
 
 class Context:
-    def __init__(self,registry,provider_id):
+    def __init__(self,registry,provider_id,instance_id=None):
         self.registry = registry
         self.provider_id = provider_id
+        self.instance_id = instance_id
 
     async def device(self,external_id,display_name,*,room_id=_UNSET,available=False):
         if not isinstance(external_id,str) or not external_id or len(external_id)>256:
             raise ValueError('External device ID required (max 256 characters)')
         # Stable configuration-facing name never depends on the presentation name.
-        name=f'integration.{self.provider_id}.{sha256(external_id.encode()).hexdigest()}'
+        suffix=f'{self.instance_id or "provider"}:{external_id}'
+        name=f'integration.{self.provider_id}.{sha256(suffix.encode()).hexdigest()}'
         async with db.acquire() as conn:
             row=await conn.fetchrow('''INSERT INTO logical_devices
-                (logical_name,device_class,provider_id,external_device_id,display_name,room_id,availability)
-                VALUES($1,'integration_device',$2,$3,$4,$5,$6)
-                ON CONFLICT(provider_id,external_device_id) DO UPDATE SET
-                display_name=EXCLUDED.display_name,
-                room_id=CASE WHEN $7 THEN EXCLUDED.room_id ELSE logical_devices.room_id END,
-                availability=EXCLUDED.availability
-                RETURNING id''',name,self.provider_id,external_id,display_name,
-                None if room_id is _UNSET else room_id,'available' if available else 'unavailable',room_id is not _UNSET)
+                (logical_name,device_class,provider_id,instance_id,external_device_id,display_name,room_id,availability)
+                VALUES($1,'integration_device',$2,$3,$4,$5,$6,$7)
+                ON CONFLICT DO NOTHING RETURNING id''',name,self.provider_id,self.instance_id,external_id,display_name,
+                None if room_id is _UNSET else room_id,'available' if available else 'unavailable')
+            if not row:
+                row=await conn.fetchrow('''UPDATE logical_devices SET display_name=$4,room_id=CASE WHEN $7 THEN $6 ELSE room_id END,
+                    availability=$5 WHERE provider_id=$2 AND instance_id IS NOT DISTINCT FROM $3 AND external_device_id=$1 RETURNING id''',external_id,self.provider_id,self.instance_id,display_name,'available' if available else 'unavailable',None if room_id is _UNSET else room_id,room_id is not _UNSET)
         return row['id']
 
     async def entity(self,external_id,entity_id,device_id,display_name,*,unit=None,device_class=None):
@@ -122,14 +123,15 @@ class Context:
         async with db.acquire() as conn:
             async with conn.transaction():
                 # Ownership is also enforced by the composite database foreign key.
-                if not await conn.fetchval('SELECT id FROM logical_devices WHERE id=$1 AND provider_id=$2',device_id,self.provider_id):
+                if not await conn.fetchval('SELECT id FROM logical_devices WHERE id=$1 AND provider_id=$2 AND instance_id IS NOT DISTINCT FROM $3',device_id,self.provider_id,self.instance_id):
                     raise OwnershipError('Device belongs to another provider')
                 row=await conn.fetchrow('''INSERT INTO entities
-                    (provider_id,external_entity_id,entity_id,domain,device_id,display_name,unit,device_class)
-                    VALUES($1,$2,$3,$4,$5,$6,$7,$8)
-                    ON CONFLICT(provider_id,external_entity_id) DO UPDATE SET
-                    display_name=EXCLUDED.display_name,unit=EXCLUDED.unit,device_class=EXCLUDED.device_class
-                    RETURNING id,entity_id,device_id''',self.provider_id,external_id,entity_id,entity_id.split('.')[0],device_id,display_name,unit,device_class)
+                    (provider_id,instance_id,external_entity_id,entity_id,domain,device_id,display_name,unit,device_class)
+                    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                    ON CONFLICT DO NOTHING RETURNING id,entity_id,device_id''',self.provider_id,self.instance_id,external_id,entity_id,entity_id.split('.')[0],device_id,display_name,unit,device_class)
+                if not row:
+                    row=await conn.fetchrow('''UPDATE entities SET display_name=$4,unit=$5,device_class=$6 WHERE provider_id=$1
+                        AND instance_id IS NOT DISTINCT FROM $2 AND external_entity_id=$3 RETURNING id,entity_id,device_id''',self.provider_id,self.instance_id,external_id,display_name,unit,device_class)
                 if row['entity_id'] != entity_id or row['device_id'] != device_id:
                     raise ValueError('Entity identity changes require explicit mapping')
         return row['id']
@@ -167,10 +169,10 @@ class Context:
         event=EventRecord(event_id=event_id,timestamp=datetime.now(timezone.utc).isoformat(),
             module_id='HCM',component=self.provider_id,hardware_id=None,category='integration',
             severity='info',code=event_type,message=event_type,incident_id=correlation_id or event_id,
-            metadata={'provider_id':self.provider_id,'entity_id':entity_id,'device_id':device_id,
+            metadata={'provider_id':self.provider_id,'instance_id':self.instance_id,'entity_id':entity_id,'device_id':device_id,
                       'origin':'provider','correlation_id':correlation_id,'payload':payload})
         self.registry.bus.publish(event)
         return event
 
     async def service(self,domain,name,arguments,callback,**options):
-        await self.registry.services.register(self.provider_id,domain,name,arguments,callback,**options)
+        await self.registry.services.register(self.provider_id,domain,name,arguments,callback,instance_id=self.instance_id,**options)

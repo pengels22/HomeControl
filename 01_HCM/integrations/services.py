@@ -21,7 +21,7 @@ class Services:
         self.registry=registry
         self.handlers={}
 
-    async def register(self,provider_id,domain,name,arguments,callback,*,target_required=False,target_domains=(),mutates_physical_state=False):
+    async def register(self,provider_id,domain,name,arguments,callback,*,instance_id=None,target_required=False,target_domains=(),mutates_physical_state=False):
         identifier(domain); identifier(name)
         if not isinstance(arguments,type) or not issubclass(arguments,BaseModel):
             raise TypeError('Arguments must use a Pydantic model')
@@ -33,26 +33,25 @@ class Services:
             raise TypeError('Service handler must be async')
         async with db.acquire() as conn:
             await conn.execute('''INSERT INTO service_definitions
-                (provider_id,domain,service_name,argument_schema,target_requirements,mutates_physical_state)
-                VALUES($1,$2,$3,$4::jsonb,$5::jsonb,$6)
+                (provider_id,instance_id,domain,service_name,argument_schema,target_requirements,mutates_physical_state)
+                VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7)
                 ON CONFLICT(provider_id,domain,service_name) DO UPDATE SET
                 argument_schema=EXCLUDED.argument_schema,target_requirements=EXCLUDED.target_requirements,
-                mutates_physical_state=EXCLUDED.mutates_physical_state''',provider_id,domain,name,
-                json.dumps(arguments.model_json_schema()),json.dumps({'required':target_required,'domains':list(target_domains)}),mutates_physical_state)
-        self.handlers[(provider_id,domain,name)]=Handler(arguments,callback,target_required,tuple(target_domains),mutates_physical_state)
+                mutates_physical_state=EXCLUDED.mutates_physical_state''',
+                provider_id,instance_id,domain,name,json.dumps(arguments.model_json_schema()),json.dumps({'required':target_required,'domains':list(target_domains)}),mutates_physical_state)
+        self.handlers[(provider_id,instance_id,domain,name)]=Handler(arguments,callback,target_required,tuple(target_domains),mutates_physical_state)
 
     async def inspect(self,provider_id=None):
         rows=await self.registry.inspect('services',provider_id)
         providers={r['provider_id']:r for r in await self.registry.inspect('integrations',provider_id)}
         for row in rows:
             provider=providers[row['provider_id']]
-            row['available']=bool((row['provider_id'],row['domain'],row['service_name']) in self.handlers
-                and provider['enabled'] and provider['configured'] and provider['status']=='connected'
-                and not row['mutates_physical_state'])
+            handler_present=(row['provider_id'],row.get('instance_id'),row['domain'],row['service_name']) in self.handlers or (row['provider_id'],row['domain'],row['service_name']) in self.handlers
+            row['available']=bool(handler_present and provider['enabled'] and provider['configured'] and provider['status']=='connected' and not row['mutates_physical_state'])
         return rows
 
-    async def invoke(self,provider_id,domain,name,arguments,*,target_entity_id=None,timeout=5):
-        handler=self.handlers.get((provider_id,domain,name))
+    async def invoke(self,provider_id,domain,name,arguments,*,target_entity_id=None,instance_id=None,timeout=5):
+        handler=self.handlers.get((provider_id,instance_id,domain,name)) or self.handlers.get((provider_id,domain,name))
         if handler is None:
             raise LookupError('Service handler unavailable')
         if handler.physical:

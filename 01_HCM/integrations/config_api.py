@@ -9,6 +9,7 @@ from .instances import list_instances, create as create_instance, set_enabled as
 from ..settings import settings
 from .. import db
 from . import oauth
+from . import secrets as secret_store
 
 router=APIRouter(prefix='/api/v1/integrations',dependencies=[Depends(require_user)])
 class ConfigRequest(BaseModel):
@@ -46,15 +47,25 @@ async def add_instance(request:ConfigRequest,user=Depends(require_user)):
 
 @router.post('/instances/{instance_id}/enable')
 async def enable_instance(instance_id:str,user=Depends(require_user)):
-    admin(user); await set_instance_enabled(instance_id,True,user['user']); return {'ok':True}
+    admin(user); await set_instance_enabled(instance_id,True,user['user'])
+    if instance_id not in runtime.instances:
+        async with db.acquire() as conn: row=await conn.fetchrow('SELECT provider_id,configured FROM integration_instances WHERE instance_id=$1',instance_id)
+        if row:
+            runtime.attach_instance(instance_id,row['provider_id'],runtime.registry.context(row['provider_id'],instance_id),enabled=True,configured=row['configured'])
+    if instance_id in runtime.instances: await runtime.start_instance(instance_id)
+    return {'ok':True}
 
 @router.post('/instances/{instance_id}/disable')
 async def disable_instance(instance_id:str,user=Depends(require_user)):
-    admin(user); await set_instance_enabled(instance_id,False,user['user']); return {'ok':True}
+    admin(user); await set_instance_enabled(instance_id,False,user['user']); await runtime.stop_instance(instance_id); return {'ok':True}
+
+@router.post('/instances/{instance_id}/reload')
+async def reload_instance(instance_id:str,user=Depends(require_user)):
+    admin(user); await runtime.reload_instance(instance_id); return {'ok':True}
 
 @router.delete('/instances/{instance_id}')
 async def delete_instance(instance_id:str,user=Depends(require_user)):
-    admin(user); await remove_instance(instance_id,user['user']); return {'ok':True}
+    admin(user); await runtime.stop_instance(instance_id); runtime.instances.pop(instance_id,None); await remove_instance(instance_id,user['user']); return {'ok':True}
 
 @router.get('/instances/{instance_id}/oauth/start')
 async def oauth_start(instance_id:str, authorize_endpoint:str, client_id:str, redirect_uri:str, user=Depends(require_user)):
@@ -65,8 +76,14 @@ async def oauth_start(instance_id:str, authorize_endpoint:str, client_id:str, re
     return {'authorization_url':await oauth.authorization_url(provider,authorize_endpoint,client_id,redirect_uri,instance_id=instance_id)}
 
 @router.get('/oauth/callback')
-async def oauth_callback(provider_id:str, instance_id:str, state:str, redirect_uri:str, user=Depends(require_user)):
+async def oauth_callback(provider_id:str, instance_id:str, state:str, redirect_uri:str, code:str|None=None, user=Depends(require_user)):
     await oauth.consume_state(provider_id,state,redirect_uri,instance_id)
+    if code:
+        entry=runtime.entries.get(provider_id)
+        if entry and hasattr(entry.provider,'oauth_exchange'):
+            result=await entry.provider.oauth_exchange(code)
+            ref=await secret_store.put(provider_id,'oauth_access_token',result['access_token'])
+            await oauth.associate_access_credential(instance_id,ref)
     return RedirectResponse('/settings?integration='+instance_id+'&oauth=connected')
 @router.put('/{provider_id}/configuration')
 async def configure(provider_id:str, request:ConfigRequest, user=Depends(require_user)):

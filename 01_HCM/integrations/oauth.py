@@ -34,3 +34,7 @@ async def refresh_access_token(provider_id, refresh_token, client_id, client_sec
     result=await request(refresh_token=refresh_token,client_id=client_id,client_secret=client_secret)
     if not result.get('access_token'): raise RuntimeError('OAuth refresh failed')
     return {'access_credential_ref':await put(provider_id,'oauth_access_token',result['access_token']),'expires_in':result.get('expires_in')}
+
+async def associate_access_credential(instance_id,credential_ref):
+    async with db.acquire() as conn:
+        await conn.execute("UPDATE integration_instances SET credential_ref=$2,configured=true,status='connected',last_success=now(),updated_at=now() WHERE instance_id=$1",instance_id,credential_ref)

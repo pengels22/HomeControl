@@ -1,6 +1,7 @@
 """Internal test provider. No network, credentials, timers or output bindings."""
 from pydantic import BaseModel, ConfigDict
 from .provider import Provider, ProviderInfo, Diagnostics
+from .factory import provider_factory
 
 
 class PingArguments(BaseModel):
@@ -36,6 +37,10 @@ class MockProvider(Provider):
         if not isinstance(credentials,str) or len(credentials)<4: raise ValueError('API key is invalid')
         return True
 
+    async def oauth_exchange(self, code):
+        if code != 'mock-code': raise ValueError('OAuth authorization failed')
+        return {'access_token':'mock-access-token','refresh_token':'mock-refresh-token','expires_in':3600}
+
     async def setup(self,context):
         self.context=context
         self.device_id=await context.device('test_device','Internal Test Device',available=False)
@@ -66,3 +71,6 @@ class MockProvider(Provider):
 
     async def diagnostics(self):
         return Diagnostics(counters={'state_updates':self.updates},checks={'running':self.running})
+
+if 'internal_mock' not in provider_factory.types:
+    provider_factory.register_type('internal_mock',MockProvider.info,lambda context: MockProvider())

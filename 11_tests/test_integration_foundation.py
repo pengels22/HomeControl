@@ -39,6 +39,7 @@ async def database(monkeypatch):
         await conn.execute((ROOT/'08_database/009_integration_foundation.sql').read_text())
         await conn.execute((ROOT/'08_database/010_integration_configuration.sql').read_text())
         await conn.execute((ROOT/'08_database/011_integration_instances.sql').read_text())
+        await conn.execute((ROOT/'08_database/012_instance_runtime.sql').read_text())
         after=dict(await conn.fetchrow('SELECT * FROM logical_devices WHERE id=$1',native))
         assert {key:after[key] for key in before}==before
         @asynccontextmanager
@@ -311,4 +312,34 @@ async def test_provider_chooser_and_multiple_instances(database,monkeypatch):
     assert all(r['credential_ref'] is None for r in rows)
     await instances.remove(one,'admin')
     assert any(str(r['instance_id'])==two for r in await instances.list_instances())
+    await host.stop()
+
+
+async def test_instance_runtime_siblings_are_isolated(database):
+    host=runtime_mod.Runtime(registry_mod.Registry()); mock=mock_mod.MockProvider(); await host.registry.register(mock.info,enabled=True)
+    ids=[]
+    for name in ('A','B'):
+        iid=await database.fetchval("INSERT INTO integration_instances(provider_id,display_name,enabled,configured) VALUES('internal_mock',$1,true,true) RETURNING instance_id",name)
+        ids.append(str(iid)); host.attach_instance(str(iid),'internal_mock',host.registry.context('internal_mock',str(iid)),enabled=True,configured=True)
+        await host.start_instance(str(iid))
+    assert len(await host.registry.inspect('devices'))==2
+    host.instances[ids[1]].provider.fail_health=True
+    await host._operation_instance(ids[1],'health_check')
+    assert host.instances[ids[0]].status=='connected' and host.instances[ids[1]].status=='degraded'
+    await host.stop_instance(ids[0]); assert host.instances[ids[1]].status=='degraded'
+    await host.reload_instance(ids[1]); assert host.instances[ids[1]].status=='degraded'
+    await host.stop()
+
+
+async def test_mock_oauth_state_exchange_and_replay(database,monkeypatch):
+    monkeypatch.setenv('HCM_INTEGRATION_SECRET_KEY', Fernet.generate_key().decode())
+    host=runtime_mod.Runtime(registry_mod.Registry()); mock=mock_mod.MockProvider(); host.attach(mock,enabled=True); await host.start_provider('internal_mock')
+    iid=await database.fetchval("INSERT INTO integration_instances(provider_id,display_name,enabled,configured) VALUES('internal_mock','OAuth',true,true) RETURNING instance_id")
+    oauth=import_module('01_HCM.integrations.oauth'); url=await oauth.authorization_url('internal_mock','https://auth.test/authorize','client','https://hcm.test/cb',instance_id=iid)
+    from urllib.parse import parse_qs,urlparse
+    state=parse_qs(urlparse(url).query)['state'][0]
+    await oauth.consume_state('internal_mock',state,'https://hcm.test/cb',iid)
+    with pytest.raises(ValueError,match='Invalid or expired'): await oauth.consume_state('internal_mock',state,'https://hcm.test/cb',iid)
+    token=await mock.oauth_exchange('mock-code'); ref=await import_module('01_HCM.integrations.secrets').put('internal_mock','oauth_access_token',token['access_token']); await oauth.associate_access_credential(iid,ref)
+    assert await database.fetchval('SELECT credential_ref IS NOT NULL FROM integration_instances WHERE instance_id=$1',iid)
     await host.stop()

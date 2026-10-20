@@ -5,7 +5,7 @@ REQUIRED_COLUMNS = {
     'service_definitions': {'provider_id', 'domain', 'service_name', 'argument_schema', 'target_requirements'},
     'integration_credentials': {'credential_ref', 'provider_id', 'kind', 'ciphertext', 'revoked_at'},
     'integration_instances': {'instance_id', 'provider_id', 'display_name', 'enabled', 'configured', 'status', 'config'},
-    'logical_devices': {'provider_id', 'external_device_id', 'display_name', 'availability'},
+    'logical_devices': {'provider_id', 'external_device_id', 'display_name', 'availability', 'instance_id'},
     'channel_metadata': {'id', 'module_id', 'channel_id', 'channel_kind', 'purpose', 'room_id', 'emergency', 'hvac_control', 'mqtt_enabled', 'matter_enabled'},
     'pnl_rooms': {'module_id', 'room_id', 'is_primary'},
     'matter_endpoints': {'channel_id', 'endpoint'},

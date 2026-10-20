@@ -3,6 +3,8 @@ import asyncio
 from dataclasses import dataclass
 from .registry import Registry
 from .provider import Diagnostics
+from .factory import provider_factory
+from .. import db
 
 
 @dataclass
@@ -22,6 +24,7 @@ class Runtime:
         self.entries={}
         self.task=None
         self.locks={}
+        self.instances={}
 
     def attach(self,provider,*,enabled=False,configured=True):
         key=provider.info.provider_id
@@ -29,6 +32,48 @@ class Runtime:
             raise ValueError('Provider already attached')
         self.entries[key]=Entry(provider,enabled,configured)
         self.locks[key]=asyncio.Lock()
+
+    def register_type(self,provider_id,metadata,factory): provider_factory.register_type(provider_id,metadata,factory)
+
+    def attach_instance(self,instance_id,provider_id,context,*,enabled=True,configured=True):
+        if instance_id in self.instances: raise ValueError('Instance already attached')
+        provider=provider_factory.create(provider_id,context)
+        self.instances[instance_id]=Entry(provider,enabled,configured)
+        self.locks[instance_id]=asyncio.Lock()
+
+    async def start_instance(self,instance_id):
+        async with self.locks[instance_id]:
+            entry=self.instances[instance_id]
+            if not entry.enabled or not entry.configured:
+                entry.status='disabled' if not entry.enabled else 'configuration_required'; return
+            ok,_=await self._operation_instance(instance_id,'setup',self.registry.context(entry.provider.info.provider_id,instance_id))
+            if ok: ok,_=await self._operation_instance(instance_id,'start')
+            if ok: await self._operation_instance(instance_id,'health_check')
+            else: entry.status='error'
+
+    async def _operation_instance(self,key,operation,*args):
+        try:
+            result=await asyncio.wait_for(getattr(self.instances[key].provider,operation)(*args),self.timeout)
+            self.instances[key].status='connected' if operation=='health_check' and result is True else self.instances[key].status
+            try:
+                async with db.acquire() as conn: await conn.execute('UPDATE integration_instances SET status=$2,last_error=NULL,updated_at=now() WHERE instance_id=$1',key,self.instances[key].status)
+            except Exception: pass
+            return True,result
+        except Exception as exc:
+            self.instances[key].status='degraded'; self.instances[key].last_error=f'{operation} failed ({type(exc).__name__})'
+            try:
+                async with db.acquire() as conn: await conn.execute('UPDATE integration_instances SET status=$2,last_error=$3,updated_at=now() WHERE instance_id=$1',key,self.instances[key].status,self.instances[key].last_error)
+            except Exception: pass
+            return False,None
+
+    async def stop_instance(self,instance_id):
+        if instance_id in self.instances:
+            await self._operation_instance(instance_id,'stop'); self.instances[instance_id].status='disabled'
+
+    async def reload_instance(self,instance_id):
+        if instance_id not in self.instances: raise LookupError('Instance runtime unavailable')
+        async with self.locks[instance_id]:
+            await self._operation_instance(instance_id,'reload'); await self._operation_instance(instance_id,'health_check')
 
     async def _status(self,key,status,error=None):
         entry=self.entries[key]
@@ -121,6 +166,8 @@ class Runtime:
                     await self._operation(key,'stop')
                     await self._status(key,'stopped',entry.last_error)
         self.registry.services.handlers.clear()
+        for instance_id in list(self.instances):
+            await self.stop_instance(instance_id)
 
 
 runtime=Runtime()
