@@ -26,6 +26,7 @@ These papers distinguish among:
 
 - [Integration framework foundation](INTEGRATION_FOUNDATION.md)
 - [Integration configuration and authentication](INTEGRATION_CONFIGURATION.md)
+- [First real integration providers](FIRST_REAL_PROVIDERS.md)
 - [Channel metadata, rooms, HVAC semantics and bridges](CHANNEL_METADATA_AND_BRIDGES.md)
 
 - [System Architecture](HOMECONTROL_SYSTEM_WHITE_PAPER.md)
