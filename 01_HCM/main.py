@@ -81,7 +81,7 @@ async def lifespan(app: FastAPI):
     await integrations.restore_instances()
     await integrations.start()
     from .primitives import NativePrimitives
-    integrations.native_primitives = NativePrimitives(integrations.registry, timezone_name=settings.timezone)
+    integrations.native_primitives = NativePrimitives(integrations.registry, timezone_name=settings.timezone, hvac=hvac, safety=safety)
     await integrations.native_primitives.start()
     from .automation import AutomationEngine
     integrations.automation_engine = AutomationEngine(integrations.registry, timezone_name=settings.timezone, latitude=settings.latitude, longitude=settings.longitude)

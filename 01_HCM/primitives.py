@@ -39,17 +39,27 @@ class AnnouncementArg(BaseModel):
     voice: str|None = Field(default=None, max_length=64)
     cache: bool|None = None
     backend_id: str|None = None
+class ClimateTemperatureArg(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    temperature: float
+class ClimateModeArg(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    hvac_mode: str
 
 INFO=ProviderInfo('hcm_native','HCM Native Primitives',capabilities={'helpers':True,'scripts':True,'scenes':True,'states':True,'events':True,'services':True},internal=True)
 HELPER_TYPES={'input_boolean','input_button','input_number','input_text','input_select','input_datetime','counter','timer','schedule'}
 
 class NativePrimitives:
-    def __init__(self, registry: Registry, *, timezone_name='UTC', automation_engine=None):
+    def __init__(self, registry: Registry, *, timezone_name='UTC', automation_engine=None, hvac=None, safety=None):
         self.registry=registry; self.context=None; self.engine=automation_engine; self.timezone_name=timezone_name
-        self.tasks={}; self.started=False
+        self.tasks={}; self.started=False; self.climate=None; self.hvac=hvac; self.safety=safety
     async def start(self):
         await self.registry.register(INFO,enabled=True,configured=True); await self.registry.status('hcm_native','connected')
         self.context=self.registry.context('hcm_native'); self.started=True
+        if self.hvac is not None:
+            from .climate import HVACPolicy, HVACSemanticLayer
+            self.climate=HVACSemanticLayer(self.hvac, policy=HVACPolicy(self.safety), context=self.context)
+            await self.climate.start()
         await self._register_services(); await self._restore_helpers(); await self._restore_timers(); await self._restore_schedules()
     async def stop(self):
         for task in list(self.tasks.values()): task.cancel()
@@ -77,6 +87,19 @@ class NativePrimitives:
         await c.service('scene','turn_on',Empty,self._scene_turn_on,target_required=True,target_domains=('scene',))
         await c.service('notify','send',NotificationArg,self._notify_send)
         await c.service('announcement','speak',AnnouncementArg,self._announcement_speak)
+        if self.climate:
+            await c.service('climate','set_temperature',ClimateTemperatureArg,self._climate_set_temperature,target_required=True,target_domains=('climate',))
+            await c.service('climate','set_hvac_mode',ClimateModeArg,self._climate_set_hvac_mode,target_required=True,target_domains=('climate',))
+            await c.service('climate','turn_off',Empty,self._climate_turn_off,target_required=True,target_domains=('climate',))
+
+    async def _climate_set_temperature(self, a, target):
+        return await self.climate.set_temperature(target, a.temperature)
+
+    async def _climate_set_hvac_mode(self, a, target):
+        return await self.climate.set_hvac_mode(target, a.hvac_mode)
+
+    async def _climate_turn_off(self, a, target):
+        return await self.climate.turn_off(target)
 
     async def _notify_send(self,a,t):
         from .notification_config import resolve_notification

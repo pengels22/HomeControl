@@ -62,6 +62,12 @@ runtime definition carries only the immutable native UUID. A configured
 destination/backend can still report an unavailable health state at runtime,
 which is distinct from missing import mapping.
 
+Climate actions use the native logical HVAC contract: `climate.set_temperature`,
+`climate.set_hvac_mode`, and `climate.turn_off` translate to HCM climate
+services and still require an explicit entity mapping. `climate.turn_on` and
+other HVAC-specific services remain unavailable until their semantics are
+measured and approved.
+
 Endpoints:
 
 - `POST /api/v1/import/home-assistant/analyze` (ADMIN): YAML fields or structured
