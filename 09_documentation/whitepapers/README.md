@@ -32,6 +32,7 @@ These papers distinguish among:
 - [Automation Engine V1](AUTOMATION_ENGINE.md)
 - [Automation Expressions and Templates](AUTOMATION_EXPRESSIONS.md)
 - [Native Helpers, Scripts, and Scenes](NATIVE_PRIMITIVES.md)
+- [Home Assistant Compatibility Analyzer and Importer](HA_IMPORTER.md)
 - [Channel metadata, rooms, HVAC semantics and bridges](CHANNEL_METADATA_AND_BRIDGES.md)
 
 - [System Architecture](HOMECONTROL_SYSTEM_WHITE_PAPER.md)

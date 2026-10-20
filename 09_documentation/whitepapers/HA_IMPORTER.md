@@ -1,0 +1,49 @@
+# Home Assistant Compatibility Analyzer and Importer V1
+
+HCM accepts exported `automations.yaml`, `scripts.yaml`, and `scenes.yaml` (or
+equivalent list/mapping fragments). The importer has two explicit phases:
+
+1. **Analyze** parses with `yaml.safe_load`, normalizes old and new HA keys,
+   inspects nested features and references, and returns a serializable preview.
+   It does not connect to HA, execute actions, read paths, or mutate HCM.
+2. **Apply** accepts a reviewed plan and selected eligible items. It re-analyzes
+   the source, uses native HCM validation/stores, and creates automations disabled.
+   Scripts and scenes are created without running them. `dry_run` performs all
+   checks and creates nothing.
+
+Every item and nested element receives one of `COMPATIBLE`, `TRANSLATED`,
+`NEEDS_MAPPING`, `UNAVAILABLE_SERVICE`, or `UNSUPPORTED`. Item eligibility is
+`READY`, `READY_WITH_TRANSLATIONS`, `BLOCKED_MAPPING`, `BLOCKED_SERVICE`, or
+`BLOCKED_UNSUPPORTED`; unsupported nested behavior is never silently removed.
+
+The analyzer preserves sanitized source, source type/id/index, alias, a
+deterministic source fingerprint, referenced entities/services, warnings,
+unsupported elements, and a normalized native preview. Secret-like fields are
+redacted in reports. YAML size and nesting are bounded and unsafe tags are
+rejected by the safe loader.
+
+Entity mappings are explicit (`source entity_id` to immutable HCM `entity_ref`),
+with exact, suggested, unresolved, and ambiguous outcomes represented through
+the mapping result. Device and area targets require an explicit mapping; fuzzy
+name matching is not authoritative. Service compatibility is defined in the
+data-driven `SERVICE_MAPPINGS` registry. Native services are used in previews;
+provider handlers are never called directly.
+
+State, numeric-state, time, time-pattern, sun, event, manual, boolean, template,
+delay, variables, stop, service, scene, script, if, choose, bounded repeat, and
+parallel forms are inspected. Zone and conversation triggers, unbounded waits or
+repeats, arbitrary shell/python execution, and unresolved device triggers are
+reported rather than fabricated. Templates are compiled by the bounded HCM
+Expression Engine; Jinja control blocks remain unsupported.
+
+Endpoints:
+
+- `POST /api/v1/import/home-assistant/analyze` (ADMIN): YAML fields or structured
+  `sources`, plus optional mappings.
+- `POST /api/v1/import/home-assistant/apply` (ADMIN): reviewed plan, selected
+  item IDs, mappings, and optional `dry_run`.
+
+No live Home Assistant connection or filesystem path is accepted. Provenance is
+returned with every applied item (`home_assistant`, source type/id/fingerprint),
+and source content is never overwritten. Durable plan/history storage and update
+merging can be added in a later migration once the review workflow is exercised.
