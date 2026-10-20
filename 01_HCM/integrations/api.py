@@ -29,6 +29,10 @@ async def entities(provider_id: str | None=None,host=Depends(get_runtime)):
 async def services(provider_id: str | None=None,host=Depends(get_runtime)):
     return {'services':await host.registry.services.inspect(provider_id)}
 
+@router.get('/events')
+async def events(after_id:int=0,event_type:str|None=None,limit:int=100,host=Depends(get_runtime)):
+    return {'events':await host.registry.events_after(after_id,event_type=event_type,limit=limit)}
+
 
 @router.get('/{provider_id}/status')
 async def status(provider_id: str,host=Depends(get_runtime)):

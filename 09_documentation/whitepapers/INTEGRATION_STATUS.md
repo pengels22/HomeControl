@@ -52,13 +52,11 @@ generic `entity.state_changed` event. Availability is persisted separately and
 is now also represented by `entity.availability_changed`. Provider event
 payloads include provider and instance metadata through the common event model.
 
-The current schema makes `entities.entity_id` globally unique while instance
-ownership is stored separately. Several providers still use generic names
-(`weather.current`, `calendar.events`, or `media_player.avr`), so simultaneous
-instances can collide. `service_definitions` also has a provider/domain/name
-primary key while carrying an instance column. These are blockers for fully
-generic multi-instance Automation Engine lookup and should be resolved in a
-planned schema pass before automation authoring.
+Migration 016 hardens these contracts. Existing entity IDs are retained when
+safe; a sibling instance requesting an occupied ID receives a deterministic,
+human-readable instance suffix while the immutable database entity ID and room
+assignment remain unchanged. Existing owned entities retain their allocated ID
+across display-name changes. Service bindings now use instance-aware uniqueness.
 
 ## Service inventory
 
@@ -76,9 +74,10 @@ providers rather than HCM physical outputs.
 | `media_player.play/pause/stop`, `next`, `previous`, `volume_set/up/down`, `mute`, `unmute` | HEOS | HEOS media entity |
 | `internal_mock.ping` | Internal mock | none |
 
-Service declarations are discoverable, but the current database key noted above
-means duplicate same-named services across instances are not independently
-represented in durable definitions.
+Service declarations are discoverable as semantic names plus eligible instance
+bindings. Targeted calls resolve the owning instance from the immutable entity
+ID; non-targeted calls require an explicit instance when multiple handlers
+exist.
 
 ## Event inventory
 
@@ -93,10 +92,16 @@ Generic events include `entity.state_changed` and
 - `ibeacon.entered` and `ibeacon.left`.
 - `internal_mock.started`.
 
-Weather poll state and Google/Gmail sync state are durable. Most provider event
-deduplication remains in-memory or provider sync state; there is no durable event
-queue. Denon/HEOS external state converges through entity updates, while iBeacon
-entered/left transitions are runtime-derived after fresh observations.
+Weather poll state and Google/Gmail sync state are durable. Migration 016 adds a
+bounded `integration_events` sequence log. Meaningful entity transitions,
+availability transitions, and provider lifecycle events are committed before
+the in-process bus publishes them; unchanged state writes stay best-effort and
+do not create durable rows. Payloads are sanitized, retention is incrementally
+capped by seven days, and authenticated consumers can read pages after an event
+ID through `GET /api/v1/integrations/events`. Provider deduplication remains
+provider-owned. Denon/HEOS external state converges through entity updates,
+while iBeacon entered/left transitions are runtime-derived after fresh
+observations.
 
 ## Provider-specific findings
 
@@ -175,12 +180,12 @@ is no dedicated Bluetooth discovery adoption workflow and no provider-specific
 media/weather editor. Devices and entities are available through generic API
 views; no separate SmartThings/Denon/Bluetooth database exists.
 
-The integration layer is conceptually ready for Automation to consume generic
-entity states, availability, attributes, provider events, and registered
-services. The concrete blockers are the global entity ID and provider-level
-service-definition uniqueness constraints, plus the lack of a durable event
-queue. Automation should not begin multi-instance authoring until those identity
-constraints are resolved.
+The integration layer now exposes the generic substrate Automation needs:
+immutable database entity IDs, collision-safe entity IDs, instance-aware service
+bindings and target routing, sanitized durable event cursors, current state,
+availability, and provider events. Automation can consume these interfaces
+without provider-specific knowledge. Durable event cursor ownership and
+automation trigger policy remain future Automation responsibilities.
 
 ## Deferred scope
 
@@ -205,6 +210,6 @@ Perform only with explicit credentials/devices and normal deployment safeguards:
 9. MQTT broker TLS/authentication, retained discovery, and command rejection.
 10. Matter bridge startup, persistent storage, pairing/fabric, and command path.
 
-The current classification is **INTEGRATION_LAYER_PARTIAL** until identity
-constraints and the remaining live/runtime gaps are resolved. No deployment or
-live credential testing was performed in this audit.
+The current classification is **INTEGRATION_LAYER_READY_FOR_AUTOMATION**. No
+deployment or live credential testing was performed in this audit; provider live
+verification statuses remain unchanged.

@@ -28,10 +28,18 @@ def identifier(value):
 
 def wire(row):
     result = dict(row)
+    if 'entity_id' in result and 'id' in result: result['entity_ref']=result['id']
     for key in ('capabilities','state','attributes','argument_schema','target_requirements','metadata'):
         if isinstance(result.get(key), str):
             result[key] = json.loads(result[key])
     return result
+
+def _sanitize(value):
+    if isinstance(value,dict):
+        blocked={'token','access_token','refresh_token','api_key','password','secret','authorization','body'}
+        return {str(k):_sanitize(v) for k,v in value.items() if str(k).lower() not in blocked}
+    if isinstance(value,list): return [_sanitize(v) for v in value]
+    return value
 
 
 class Registry:
@@ -87,6 +95,12 @@ class Registry:
         sql += ' ORDER BY 1'
         async with db.acquire() as conn:
             return [wire(row) for row in await conn.fetch(sql,*([provider_id] if provider_id is not None else []))]
+
+    async def events_after(self,after_id=0,*,event_type=None,limit=100):
+        limit=max(1,min(int(limit),1000)); sql='SELECT event_id,event_type,occurred_at,provider_id,instance_id,device_id,entity_id,payload,durability,created_at FROM integration_events WHERE event_id>$1'; args=[int(after_id)]
+        if event_type: sql+=' AND event_type=$2'; args.append(event_type)
+        sql+=f' ORDER BY event_id LIMIT {limit}'
+        async with db.acquire() as conn: return [wire(row) for row in await conn.fetch(sql,*args)]
 
     def context(self,provider_id,instance_id=None,*,config=None,credential_ref=None,account_ref=None,display_name=None):
         return Context(self,identifier(provider_id),instance_id,config=config,credential_ref=credential_ref,account_ref=account_ref,display_name=display_name)
@@ -149,6 +163,12 @@ class Context:
                 # Ownership is also enforced by the composite database foreign key.
                 if not await conn.fetchval('SELECT id FROM logical_devices WHERE id=$1 AND provider_id=$2 AND instance_id IS NOT DISTINCT FROM $3',device_id,self.provider_id,self.instance_id):
                     raise OwnershipError('Device belongs to another provider')
+                occupied=await conn.fetchrow('SELECT provider_id,instance_id FROM entities WHERE entity_id=$1',entity_id)
+                existing=await conn.fetchrow('SELECT entity_id FROM entities WHERE provider_id=$1 AND instance_id IS NOT DISTINCT FROM $2 AND external_entity_id=$3',self.provider_id,self.instance_id,external_id)
+                if existing and existing['entity_id']!=entity_id and not (occupied and (occupied['provider_id']!=self.provider_id or str(occupied['instance_id'])!=str(self.instance_id))): raise ValueError('Entity identity changes require explicit mapping')
+                if existing: entity_id=existing['entity_id']
+                if not existing and occupied and (occupied['provider_id']!=self.provider_id or str(occupied['instance_id'])!=str(self.instance_id)):
+                    base,local=entity_id.split('.',1); slug=re.sub(r'[^a-z0-9]+','_',str(self.display_name or self.provider_id).lower()).strip('_')[:24] or self.provider_id; suffix=sha256(f'{self.provider_id}:{self.instance_id}'.encode()).hexdigest()[:8]; entity_id=f'{base}.{local}_{slug}_{suffix}'
                 row=await conn.fetchrow('''INSERT INTO entities
                     (provider_id,instance_id,external_entity_id,entity_id,domain,device_id,display_name,unit,device_class)
                     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
@@ -168,17 +188,21 @@ class Context:
                 row=await conn.fetchrow('''UPDATE entities SET
                     last_changed=CASE WHEN last_updated IS NULL OR state IS DISTINCT FROM $3::jsonb THEN now() ELSE last_changed END,
                     state=$3::jsonb,attributes=$4::jsonb,available=$5,last_updated=now()
-                    WHERE id=$1 AND provider_id=$2 AND enabled RETURNING *''',entity_id,self.provider_id,payload,attrs,available)
+                    WHERE id=$1 AND provider_id=$2 AND enabled RETURNING *, (last_changed=last_updated) AS state_changed''',entity_id,self.provider_id,payload,attrs,available)
                 if not row:
                     raise OwnershipError('Entity absent, disabled or owned by another provider')
-        self._publish('entity.state_changed',{'state':value,'attributes':attributes or {},'available':available},
-                      entity_id=entity_id,device_id=row['device_id'],correlation_id=correlation_id)
+        payload={'state':value,'attributes':attributes or {},'available':available}; kwargs={'entity_id':entity_id,'device_id':row['device_id'],'correlation_id':correlation_id}
+        if row['state_changed']: await self._publish_durable('entity.state_changed',payload,durability='DURABLE',**kwargs)
+        else: self._publish('entity.state_changed',payload,**kwargs)
 
     async def availability(self,entity_id,available):
         async with db.acquire() as conn:
-            row=await conn.fetchrow('UPDATE entities SET available=$3,last_updated=now() WHERE id=$1 AND provider_id=$2 RETURNING device_id,state,attributes',entity_id,self.provider_id,available)
-            if not row: raise OwnershipError('Entity absent or owned by another provider')
-        self._publish('entity.availability_changed',{'available':available},entity_id=entity_id,device_id=row['device_id'])
+            row=await conn.fetchrow('UPDATE entities SET available=$3,last_updated=now() WHERE id=$1 AND provider_id=$2 AND available IS DISTINCT FROM $3 RETURNING device_id,state,attributes',entity_id,self.provider_id,available)
+            if not row:
+                exists=await conn.fetchval('SELECT 1 FROM entities WHERE id=$1 AND provider_id=$2',entity_id,self.provider_id)
+                if not exists: raise OwnershipError('Entity absent or owned by another provider')
+                return
+        await self._publish_durable('entity.availability_changed',{'available':available},entity_id=entity_id,device_id=row['device_id'],durability='DURABLE')
 
     async def emit(self,event_type,payload,*,entity_id=None,device_id=None,correlation_id=None):
         if not event_type.startswith(self.provider_id+'.'):
@@ -191,6 +215,8 @@ class Context:
                 device_id=owned_device
             if device_id is not None and not await conn.fetchval('SELECT id FROM logical_devices WHERE id=$1 AND provider_id=$2',device_id,self.provider_id):
                 raise OwnershipError('Event device ownership mismatch')
+        durability=None if event_type.endswith('device_state_changed') else 'DURABLE'
+        if durability: return await self._publish_durable(event_type,payload,entity_id=entity_id,device_id=device_id,correlation_id=correlation_id,durability=durability)
         return self._publish(event_type,payload,entity_id=entity_id,device_id=device_id,correlation_id=correlation_id)
 
     def _publish(self,event_type,payload,*,entity_id=None,device_id=None,correlation_id=None):
@@ -203,6 +229,12 @@ class Context:
                       'origin':'provider','correlation_id':correlation_id,'payload':payload})
         self.registry.bus.publish(event)
         return event
+
+    async def _publish_durable(self,event_type,payload,*,durability,**kwargs):
+        async with db.acquire() as conn:
+            await conn.execute('''INSERT INTO integration_events(event_type,provider_id,instance_id,device_id,entity_id,payload,durability) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)''',event_type,self.provider_id,self.instance_id,kwargs.get('device_id'),kwargs.get('entity_id'),json.dumps(_sanitize(payload),allow_nan=False),durability)
+            await conn.execute("DELETE FROM integration_events WHERE event_id IN (SELECT event_id FROM integration_events WHERE created_at < now()-interval '7 days' ORDER BY event_id LIMIT 1000)")
+        return self._publish(event_type,payload,**kwargs)
 
     async def service(self,domain,name,arguments,callback,**options):
         await self.registry.services.register(self.provider_id,domain,name,arguments,callback,instance_id=self.instance_id,**options)

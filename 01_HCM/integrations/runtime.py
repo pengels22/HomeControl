@@ -94,7 +94,7 @@ class Runtime:
     async def stop_instance(self,instance_id):
         if instance_id in self.instances:
             refresh_scheduler.cancel(instance_id)
-            await self._operation_instance(instance_id,'stop'); self.instances[instance_id].status='disabled'
+            await self._operation_instance(instance_id,'stop'); self.instances[instance_id].status='disabled'; await self.registry.services.unregister_instance(self.instance_contexts[instance_id].provider_id,instance_id)
 
     async def reload_instance(self,instance_id):
         if instance_id not in self.instances: raise LookupError('Instance runtime unavailable')

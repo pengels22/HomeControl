@@ -19,7 +19,7 @@ class Advertisement:
 
 class BluetoothScanner:
     def __init__(self,adapter='auto',backend=None,cache_size=256,expiry=300):
-        self.adapter=adapter; self.backend=backend; self.cache_size=cache_size; self.expiry=expiry; self.cache=OrderedDict(); self.subscribers=set(); self.running=False; self.count=0; self.restarts=0; self.last_error=None; self.task=None
+        self.adapter=adapter; self.backend=backend; self.cache_size=cache_size; self.expiry=expiry; self.cache=OrderedDict(); self.subscribers=set(); self.running=False; self.count=0; self.restarts=0; self.last_error=None; self.task=None; self.tasks=set(); self.pending={}
     def subscribe(self,callback): self.subscribers.add(callback); return lambda: self.subscribers.discard(callback)
     def observe(self,advertisement):
         if not isinstance(advertisement,Advertisement): raise TypeError('Advertisement required')
@@ -28,7 +28,13 @@ class BluetoothScanner:
         for callback in tuple(self.subscribers):
             try: result=callback(advertisement); 
             except Exception: continue
-            if asyncio.iscoroutine(result): asyncio.create_task(result)
+            if asyncio.iscoroutine(result):
+                if advertisement.address in self.pending: result.close(); continue
+                task=asyncio.create_task(result); self.tasks.add(task); self.pending[advertisement.address]=task
+                def done(finished,address=advertisement.address):
+                    self.tasks.discard(finished); self.pending.pop(address,None)
+                    if not finished.cancelled(): finished.exception()
+                task.add_done_callback(done)
     def recent(self):
         now=time.monotonic(); stale=[key for key,(seen,_) in self.cache.items() if now-seen>self.expiry]
         for key in stale: self.cache.pop(key,None)
@@ -42,6 +48,9 @@ class BluetoothScanner:
     async def stop(self):
         self.running=False
         if self.backend and hasattr(self.backend,'stop'): await self.backend.stop()
+        for task in tuple(self.tasks): task.cancel()
+        if self.tasks: await asyncio.gather(*self.tasks,return_exceptions=True)
+        self.tasks.clear(); self.pending.clear()
     async def restart(self): self.restarts+=1; await self.stop(); await self.start()
     def status(self): return {'adapter':self.adapter,'running':self.running,'advertisement_count':self.count,'recent_device_count':len(self.recent()),'restart_count':self.restarts,'last_error':self.last_error}
 

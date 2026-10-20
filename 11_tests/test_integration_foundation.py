@@ -43,6 +43,7 @@ async def database(monkeypatch):
         await conn.execute((ROOT/'08_database/013_integration_runtime_status.sql').read_text())
         await conn.execute((ROOT/'08_database/014_provider_poll_state.sql').read_text())
         await conn.execute((ROOT/'08_database/015_google_sync_state.sql').read_text())
+        await conn.execute((ROOT/'08_database/016_integration_core_hardening.sql').read_text())
         after=dict(await conn.fetchrow('SELECT * FROM logical_devices WHERE id=$1',native))
         assert {key:after[key] for key in before}==before
         @asynccontextmanager
@@ -442,6 +443,23 @@ async def test_smartthings_rsa_webhook_verification_and_event_dedup():
     with pytest.raises(ValueError): await verifier.verify('POST','/hook',headers,b'bad')
 
 
+async def test_multi_instance_identity_service_routing_and_durable_events(database):
+    reg=registry_mod.Registry(events.EventBus()); await reg.register(mock_mod.MockProvider.info,enabled=False)
+    ids=[str(uuid.uuid4()),str(uuid.uuid4())]
+    for index,iid in enumerate(ids): await database.execute("INSERT INTO integration_instances(instance_id,provider_id,display_name,enabled,configured,status) VALUES($1,'internal_mock',$2,true,true,'connected')",iid,f'Mock {index}')
+    contexts=[reg.context('internal_mock',iid,display_name=f'Mock {index}') for index,iid in enumerate(ids)]
+    devices=[await ctx.device('shared','Device') for ctx in contexts]; entities=[await ctx.entity('state','sensor.state',device,'State') for ctx,device in zip(contexts,devices)]
+    rows=await reg.inspect('entities'); names=[row['entity_id'] for row in rows]; assert len(set(names))==2 and entities[0]!=entities[1]
+    seen=[]
+    async def first(args,target): seen.append(('first',target)); return {'owner':'first'}
+    async def second(args,target): seen.append(('second',target)); return {'owner':'second'}
+    class Args(BaseModel): model_config=ConfigDict(extra='forbid')
+    await contexts[0].service('test','route',Args,first,target_required=True,target_domains=('sensor',)); await contexts[1].service('test','route',Args,second,target_required=True,target_domains=('sensor',))
+    for ctx,entity in zip(contexts,entities): await ctx.state(entity,1)
+    assert await reg.services.invoke('internal_mock','test','route',{},target_entity_id=entities[0])=={'owner':'first'}
+    durable=await reg.events_after(0,event_type='entity.state_changed'); assert len(durable)>=2 and durable[-1]['event_id']>durable[0]['event_id']; assert all('token' not in str(row['payload']).lower() for row in durable)
+
+
 def test_denon_and_heos_media_transport_normalization():
     denon=import_module('01_HCM.integrations.denon'); receiver=denon.DenonProvider(); receiver.parse_line('PWON'); receiver.parse_line('MVFL-40.0'); receiver.parse_line('MUON'); receiver.parse_line('SICBL/SAT'); assert receiver.state['power'] and receiver.state['volume_level']==0.5 and receiver.state['muted'] and receiver.state['source']=='CBL/SAT'
     heos=import_module('01_HCM.integrations.heos'); parsed=heos.HEOSTransport('host').parse('heos://event/player_state?pid=7&state=play\r\n'); assert parsed['command']=='event/player_state' and parsed['params']['pid']=='7'
@@ -450,3 +468,9 @@ def test_denon_and_heos_media_transport_normalization():
 def test_native_bluetooth_and_ibeacon_parsing_cache():
     bt=import_module('01_HCM.bluetooth'); ibeacon=import_module('01_HCM.integrations.ibeacon'); raw=b'\x02\x15'+bytes.fromhex('00112233445566778899aabbccddeeff')+(1).to_bytes(2,'big')+(2).to_bytes(2,'big')+(-59).to_bytes(1,'big',signed=True); adv=bt.Advertisement('hci1','AA:BB',rssi=-61,manufacturer_data={0x004c:raw}); parsed=ibeacon.IBeaconProvider.parse(adv); assert parsed['uuid']=='00112233-4455-6677-8899-aabbccddeeff' and parsed['major']==1 and parsed['minor']==2 and parsed['tx_power']==-59
     scanner=bt.BluetoothScanner(cache_size=1); scanner.observe(adv); scanner.observe(bt.Advertisement('hci1','CC:DD')); assert len(scanner.recent())==1
+
+
+async def test_bluetooth_callback_tasks_are_tracked_and_stopped():
+    bt=import_module('01_HCM.bluetooth'); finished=asyncio.Event()
+    async def callback(advertisement): await asyncio.sleep(0); finished.set()
+    scanner=bt.BluetoothScanner(); scanner.subscribe(callback); scanner.observe(bt.Advertisement('hci0','AA')); await asyncio.wait_for(finished.wait(),1); await asyncio.sleep(0); assert not scanner.tasks; await scanner.stop(); assert not scanner.pending
