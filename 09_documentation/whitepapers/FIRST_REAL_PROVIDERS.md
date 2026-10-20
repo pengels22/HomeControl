@@ -29,3 +29,12 @@ instance context and are never returned by normal APIs or diagnostics.
 
 These providers are software-tested with mocked transports only. Real service
 credentials and live network validation are intentionally excluded from CI.
+
+Weather polling records last attempt, last successful poll, consecutive failures,
+and stale state on the instance row. Three consecutive failed polls mark data
+stale while retaining the last known state; a successful poll clears the failure
+counter and stale flag. NWS active alerts are normalized and deduplicated by
+provider alert ID and meaningful content changes, producing started, updated,
+and ended integration events. OpenWeatherMap forecasts use the same normalized
+forecast entry shape. OpenAI responses expose text, model, and safe response
+metadata only; prompt and response bodies are excluded from diagnostics.

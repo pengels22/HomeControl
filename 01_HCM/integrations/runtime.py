@@ -7,6 +7,7 @@ from .provider import Diagnostics
 from .factory import provider_factory
 from .oauth import refresh_scheduler
 from .. import db
+from .http import ProviderHTTPError
 
 
 @dataclass
@@ -84,7 +85,7 @@ class Runtime:
             except Exception: pass
             return True,result
         except Exception as exc:
-            self.instances[key].status='degraded'; self.instances[key].last_error=f'{operation} failed ({type(exc).__name__})'
+            self.instances[key].status='authentication_required' if isinstance(exc,ProviderHTTPError) and exc.category in {'authentication','authorization'} else 'degraded'; self.instances[key].last_error=f'{operation} failed ({getattr(exc,"category",type(exc).__name__)})'
             try:
                 async with db.acquire() as conn: await conn.execute('UPDATE integration_instances SET status=$2,last_error=$3,updated_at=now() WHERE instance_id=$1',key,self.instances[key].status,self.instances[key].last_error)
             except Exception: pass

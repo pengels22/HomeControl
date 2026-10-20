@@ -41,6 +41,7 @@ async def database(monkeypatch):
         await conn.execute((ROOT/'08_database/011_integration_instances.sql').read_text())
         await conn.execute((ROOT/'08_database/012_instance_runtime.sql').read_text())
         await conn.execute((ROOT/'08_database/013_integration_runtime_status.sql').read_text())
+        await conn.execute((ROOT/'08_database/014_provider_poll_state.sql').read_text())
         after=dict(await conn.fetchrow('SELECT * FROM logical_devices WHERE id=$1',native))
         assert {key:after[key] for key in before}==before
         @asynccontextmanager
@@ -373,3 +374,22 @@ def test_weather_and_openai_normalization_contracts():
     assert state.as_dict()=={'condition':'Sunny','temperature':72,'provider':'nws'}
     openai=import_module('01_HCM.integrations.openai_provider'); args=openai.GenerateText(prompt='hello',max_tokens=10)
     assert args.prompt=='hello' and args.max_tokens==10
+
+
+async def test_nws_alert_deduplication_and_forecast(database):
+    nws=import_module('01_HCM.integrations.nws'); calls=[]
+    class Client:
+        def __init__(self): self.alerts=[{'features':[{'id':'a1','properties':{'event':'Storm','severity':'Severe','headline':'Storm'}}]},{'features':[] }]
+        async def json(self,method,url,**kwargs):
+            if '/points/' in url: return {'properties':{'forecast':'forecast'}},200
+            if url=='forecast': return {'properties':{'periods':[{'shortForecast':'Sunny','temperature':70,'windSpeed':'5 mph','windDirection':'N','startTime':'s','endTime':'e'}]}},200
+            return self.alerts.pop(0),200
+        async def close(self): pass
+    bus=events.EventBus(); reg=registry_mod.Registry(bus); await reg.register(nws.NWSProvider.info,enabled=True); iid=str(uuid.uuid4()); await database.execute("INSERT INTO integration_instances(instance_id,provider_id,display_name,enabled,configured) VALUES($1,'nws','Alert test',true,true)",iid); context=reg.context('nws',iid)
+    # use a real instance-shaped context without requiring provider runtime registration
+    provider=nws.NWSProvider(Client()); provider.context=context; provider.device=await context.device('weather','Weather'); provider.entity=await context.entity('current','weather.current',provider.device,'Weather'); provider.temperature=await context.entity('temperature','temperature.outdoor',provider.device,'Temperature'); provider.alert_count=await context.entity('alert_count','sensor.weather_alert_count',provider.device,'Count'); provider.alert_active=await context.entity('alert_active','binary_sensor.weather_alert_active',provider.device,'Active'); context.config={'latitude':1,'longitude':2}
+    with bus.subscribe() as sub:
+        await provider.poll(); await provider.poll()
+        codes=[]
+        while not sub.queue.empty(): codes.append(sub.queue.get_nowait().code)
+    assert 'nws.alert_started' in codes and 'nws.alert_ended' in codes and codes.count('nws.alert_started')==1
