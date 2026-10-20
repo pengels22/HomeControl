@@ -19,6 +19,7 @@ provider_mod=import_module('01_HCM.integrations.provider')
 mock_mod=import_module('01_HCM.integrations.mock')
 api_mod=import_module('01_HCM.integrations.api')
 instances_mod=import_module('01_HCM.integrations.instances')
+config_api_mod=import_module('01_HCM.integrations.config_api')
 events=import_module('01_HCM.events')
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -37,6 +38,26 @@ async def test_instance_enable_passes_asyncpg_arguments_individually(monkeypatch
     monkeypatch.setattr(instances_mod.db, 'acquire', lambda: Acquire())
     await instances_mod.set_enabled('instance-1', True, 'admin')
     assert calls[0] == ('instance-1', True, 'configuration_required')
+
+@pytest.mark.asyncio
+async def test_instance_enable_hydrates_persisted_context(monkeypatch):
+    class Conn:
+        async def fetchrow(self, query, *args):
+            return {'provider_id':'heos','display_name':'Living Room HEOS','configured':True,
+                    'config':'{"host":"192.0.2.10"}','credential_ref':None,'account_ref':None}
+    class Acquire:
+        async def __aenter__(self): return Conn()
+        async def __aexit__(self, *args): pass
+    captured={}
+    monkeypatch.setattr(config_api_mod, 'admin', lambda user: None)
+    monkeypatch.setattr(config_api_mod, 'set_instance_enabled', AsyncMock())
+    monkeypatch.setattr(config_api_mod.db, 'acquire', lambda: Acquire())
+    config_api_mod.runtime.instances.clear()
+    config_api_mod.runtime.attach_instance=lambda instance_id,provider_id,context,**kwargs: captured.update({'id':instance_id,'provider':provider_id,'context':context,'kwargs':kwargs})
+    config_api_mod.runtime.start_instance=AsyncMock()
+    await config_api_mod.enable_instance('instance-1', {'user':'admin','role':'ADMIN'})
+    assert captured['context'].config == {'host':'192.0.2.10'}
+    assert captured['kwargs']=={'enabled':True,'configured':True}
 
 
 @pytest.fixture

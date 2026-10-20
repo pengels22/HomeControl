@@ -52,9 +52,11 @@ async def add_instance(request:ConfigRequest,user=Depends(require_user)):
 async def enable_instance(instance_id:str,user=Depends(require_user)):
     admin(user); await set_instance_enabled(instance_id,True,user['user'])
     if instance_id not in runtime.instances:
-        async with db.acquire() as conn: row=await conn.fetchrow('SELECT provider_id,configured FROM integration_instances WHERE instance_id=$1',instance_id)
+        async with db.acquire() as conn: row=await conn.fetchrow('SELECT provider_id,display_name,configured,config,credential_ref,account_ref FROM integration_instances WHERE instance_id=$1',instance_id)
         if row:
-            runtime.attach_instance(instance_id,row['provider_id'],runtime.registry.context(row['provider_id'],instance_id),enabled=True,configured=row['configured'])
+            config=row['config'] or {}
+            if isinstance(config,str): config=__import__('json').loads(config)
+            runtime.attach_instance(instance_id,row['provider_id'],runtime.registry.context(row['provider_id'],instance_id,config=config,credential_ref=row['credential_ref'],account_ref=row['account_ref'],display_name=row['display_name']),enabled=True,configured=row['configured'])
     if instance_id in runtime.instances: await runtime.start_instance(instance_id)
     return {'ok':True}
 
