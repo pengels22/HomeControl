@@ -429,3 +429,14 @@ def test_smartthings_capability_mapping_and_webhook_guard():
     payload=b'{"deviceId":"d1"}'; import hashlib,hmac
     signature=hmac.new(b'secret',payload,hashlib.sha256).hexdigest()
     assert provider.guard.verify(payload,signature,'secret','nonce')['provider_id']=='smartthings'
+
+
+async def test_smartthings_rsa_webhook_verification_and_event_dedup():
+    smart=import_module('01_HCM.integrations.smartthings'); from cryptography.hazmat.primitives.asymmetric import rsa, padding; from cryptography.hazmat.primitives import hashes, serialization; from datetime import datetime, timezone; import base64
+    private=rsa.generate_private_key(public_exponent=65537,key_size=2048); public=private.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo).decode()
+    class Client:
+        async def json(self,*args,**kwargs): return {'publicKey':public},200
+    verifier=smart.SmartThingsRequestVerifier(Client()); body=b'{"eventId":"e1"}'; date=datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT'); digest=smart.digest_value(body); signing=f'(request-target): post /hook\ndigest: {digest}\ndate: {date}'
+    signature=base64.b64encode(private.sign(signing.encode(),padding.PKCS1v15(),hashes.SHA256())).decode(); headers={'Authorization':f'Signature keyId="k1",algorithm="rsa-sha256",headers="(request-target) digest date",signature="{signature}"','Digest':digest,'Date':date}
+    assert await verifier.verify('POST','/hook',headers,body)=='k1'
+    with pytest.raises(ValueError): await verifier.verify('POST','/hook',headers,b'bad')

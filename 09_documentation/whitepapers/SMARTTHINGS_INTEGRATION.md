@@ -24,7 +24,21 @@ and replay-protected webhook guard before state synchronization. SmartThings
 devices are convenience integrations and never participate in HCM fire,
 life-safety, HVAC safety, or physical-output authority.
 
-The current provider uses discovery polling and the shared webhook admission
-primitive. Provider subscriptions, richer capability-specific commands, and
-provider-specific signature verification beyond the configured HCM webhook
-secret remain follow-up work.
+The provider exposes an instance-aware webhook endpoint at
+`/api/v1/integrations/smartthings/webhook/{instance_id}`. Requests are checked
+using the SmartThings RSA-SHA256 HTTP Signature, signed `(request-target)`,
+`digest`, and `date` headers, a bounded clock-skew window, digest validation,
+and a cached public key resolved only from the SmartThings API host. Duplicate
+event IDs are ignored. Device events update normalized entities; health events
+update availability; uninstall events stop only the matching instance and
+invalidate its account credential.
+
+On startup and reconciliation, the provider records installed-app and location
+identity in generic instance sync state and reconciles deterministic installed
+app subscriptions without creating duplicates. Webhook delivery is primary;
+bounded discovery/state reconciliation remains the recovery path. Switch
+on/off and light-level commands use HCM service authorization and the official
+SmartThings command API.
+
+The implementation is software-tested with mocked APIs and locally generated
+RSA keys. It is not live-account verified.

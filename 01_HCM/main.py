@@ -114,6 +114,8 @@ from .integrations.api import router as integration_router
 app.include_router(integration_router)
 from .integrations.config_api import router as integration_config_router
 app.include_router(integration_config_router)
+from .integrations.smartthings import webhook_router as smartthings_webhook_router
+app.include_router(smartthings_webhook_router)
 WEB_ROOT = Path(__file__).resolve().parent / 'www'
 app.mount('/static', StaticFiles(directory=WEB_ROOT), name='static')
 

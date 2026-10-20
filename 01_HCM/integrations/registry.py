@@ -174,6 +174,12 @@ class Context:
         self._publish('entity.state_changed',{'state':value,'attributes':attributes or {},'available':available},
                       entity_id=entity_id,device_id=row['device_id'],correlation_id=correlation_id)
 
+    async def availability(self,entity_id,available):
+        async with db.acquire() as conn:
+            row=await conn.fetchrow('UPDATE entities SET available=$3,last_updated=now() WHERE id=$1 AND provider_id=$2 RETURNING device_id,state,attributes',entity_id,self.provider_id,available)
+            if not row: raise OwnershipError('Entity absent or owned by another provider')
+        self._publish('entity.availability_changed',{'available':available},entity_id=entity_id,device_id=row['device_id'])
+
     async def emit(self,event_type,payload,*,entity_id=None,device_id=None,correlation_id=None):
         if not event_type.startswith(self.provider_id+'.'):
             raise ValueError('Provider events must use their provider namespace')
