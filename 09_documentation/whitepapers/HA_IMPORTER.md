@@ -157,3 +157,27 @@ unsafe. Alarm and lock mutation is safety/security-sensitive; shell commands,
 system/update control, todo/list operations, and dynamic `scene.create` remain
 separate subsystem or intentionally unsupported work. No HA-specific runtime
 service or arbitrary process execution was added.
+
+### Native security alarm semantics V1
+
+The real source contains 10 alarm service calls across 9 source items: arm home
+(3), arm away (2), arm vacation (3), and disarm (2). Every call includes a
+literal code; the audit records only `code_present: true` and `code_form:
+literal`. No alarm triggers, alarm conditions, lock actions, or security
+notification actions were found in the measured source set.
+
+HCM now exposes a provider-neutral `SecurityAlarmLayer` with canonical states
+`disarmed`, `arming`, `armed_home`, `armed_away`, `armed_vacation`, `pending`,
+`triggered`, and `unavailable`; canonical arm modes are home, away, and
+vacation. Requests are serialized, capability-checked, policy-gated, and
+delegated to a controller. A deterministic mock controller is test-only.
+Disarm from an automation is denied by default; disarm requires a configured
+credential reference when the controller requires one. Request results expose
+credential presence only, never credential values or resolved secret material.
+
+HA alarm services translate to native semantic services while source codes are
+removed from runtime service data. Without an explicit
+`alarm_credential:<target>` mapping, an item remains blocked with
+`SECURITY_CREDENTIAL_MAPPING_REQUIRED` and `security_review_required`. Fire and
+life-safety authority, GPIO, relay handling, maintenance lockout, and HVAC fire
+shutdown are unchanged and remain separate from burglary/security state.

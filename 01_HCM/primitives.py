@@ -50,9 +50,11 @@ INFO=ProviderInfo('hcm_native','HCM Native Primitives',capabilities={'helpers':T
 HELPER_TYPES={'input_boolean','input_button','input_number','input_text','input_select','input_datetime','counter','timer','schedule'}
 
 class NativePrimitives:
-    def __init__(self, registry: Registry, *, timezone_name='UTC', automation_engine=None, hvac=None, safety=None):
+    def __init__(self, registry: Registry, *, timezone_name='UTC', automation_engine=None, hvac=None, safety=None,
+                 alarm_controller=None, alarm_credential_configured=False):
         self.registry=registry; self.context=None; self.engine=automation_engine; self.timezone_name=timezone_name
         self.tasks={}; self.started=False; self.climate=None; self.hvac=hvac; self.safety=safety
+        self.alarm_controller=alarm_controller; self.alarm_credential_configured=bool(alarm_credential_configured); self.alarm=None
     async def start(self):
         await self.registry.register(INFO,enabled=True,configured=True); await self.registry.status('hcm_native','connected')
         self.context=self.registry.context('hcm_native'); self.started=True
@@ -60,6 +62,12 @@ class NativePrimitives:
             from .climate import HVACPolicy, HVACSemanticLayer
             self.climate=HVACSemanticLayer(self.hvac, policy=HVACPolicy(self.safety), context=self.context)
             await self.climate.start()
+        if self.alarm_controller is not None:
+            from .security_alarm import SecurityAlarmLayer
+            device=await self.context.device('alarm','HCM Alarm',available=True)
+            entity=await self.context.entity('alarm','alarm_control_panel.hcm_alarm',device,'HCM Alarm')
+            self.alarm=SecurityAlarmLayer(self.alarm_controller,entity_ref=entity,context=self.context)
+            await self.alarm._publish()
         await self._register_services(); await self._restore_helpers(); await self._restore_timers(); await self._restore_schedules()
     async def stop(self):
         for task in list(self.tasks.values()): task.cancel()
@@ -91,6 +99,12 @@ class NativePrimitives:
             await c.service('climate','set_temperature',ClimateTemperatureArg,self._climate_set_temperature,target_required=True,target_domains=('climate',))
             await c.service('climate','set_hvac_mode',ClimateModeArg,self._climate_set_hvac_mode,target_required=True,target_domains=('climate',))
             await c.service('climate','turn_off',Empty,self._climate_turn_off,target_required=True,target_domains=('climate',))
+        if self.alarm:
+            from .security_alarm import AlarmServiceArgs
+            await c.service('alarm_control_panel','arm_home',AlarmServiceArgs,self._alarm_home,target_required=True,target_domains=('alarm_control_panel',))
+            await c.service('alarm_control_panel','arm_away',AlarmServiceArgs,self._alarm_away,target_required=True,target_domains=('alarm_control_panel',))
+            await c.service('alarm_control_panel','arm_vacation',AlarmServiceArgs,self._alarm_vacation,target_required=True,target_domains=('alarm_control_panel',))
+            await c.service('alarm_control_panel','disarm',AlarmServiceArgs,self._alarm_disarm,target_required=True,target_domains=('alarm_control_panel',))
 
     async def _climate_set_temperature(self, a, target):
         return await self.climate.set_temperature(target, a.temperature)
@@ -100,6 +114,18 @@ class NativePrimitives:
 
     async def _climate_turn_off(self, a, target):
         return await self.climate.turn_off(target)
+
+    async def _alarm_request(self, operation, args):
+        configured=self.alarm_credential_configured
+        if args.credential_ref:
+            from .integrations.secrets import configured as credential_configured
+            configured = configured or await credential_configured(args.credential_ref)
+        if operation == 'disarm': return await self.alarm.disarm(credential_ref=args.credential_ref,credential_configured=configured)
+        return await self.alarm.arm(operation,credential_ref=args.credential_ref,credential_configured=configured)
+    async def _alarm_home(self,a,t): return await self._alarm_request('home',a)
+    async def _alarm_away(self,a,t): return await self._alarm_request('away',a)
+    async def _alarm_vacation(self,a,t): return await self._alarm_request('vacation',a)
+    async def _alarm_disarm(self,a,t): return await self._alarm_request('disarm',a)
 
     async def _notify_send(self,a,t):
         from .notification_config import resolve_notification

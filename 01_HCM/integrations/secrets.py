@@ -33,6 +33,12 @@ async def get(ref):
         except json.JSONDecodeError: return value
     except (InvalidToken, ValueError, UnicodeDecodeError) as exc: raise RuntimeError('Credential unavailable') from exc
 
+async def configured(ref):
+    """Check credential presence without decrypting or returning its value."""
+    if not ref: return False
+    async with db.acquire() as conn:
+        return bool(await conn.fetchval('SELECT 1 FROM integration_credentials WHERE credential_ref=$1 AND revoked_at IS NULL', ref))
+
 async def get_record(ref):
     async with db.acquire() as conn:
         row=await conn.fetchrow('SELECT ciphertext,metadata,kind,provider_id FROM integration_credentials WHERE credential_ref=$1 AND revoked_at IS NULL',ref)

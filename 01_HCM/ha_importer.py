@@ -63,6 +63,10 @@ SERVICE_MAPPINGS: dict[str, dict[str, Any]] = {
     "climate.set_temperature": {"status": TRANSLATED, "domain": "climate", "service": "set_temperature"},
     "climate.set_hvac_mode": {"status": TRANSLATED, "domain": "climate", "service": "set_hvac_mode"},
     "climate.turn_off": {"status": TRANSLATED, "domain": "climate", "service": "turn_off"},
+    "alarm_control_panel.alarm_arm_home": {"status": TRANSLATED, "domain": "alarm_control_panel", "service": "arm_home"},
+    "alarm_control_panel.alarm_arm_away": {"status": TRANSLATED, "domain": "alarm_control_panel", "service": "arm_away"},
+    "alarm_control_panel.alarm_arm_vacation": {"status": TRANSLATED, "domain": "alarm_control_panel", "service": "arm_vacation"},
+    "alarm_control_panel.alarm_disarm": {"status": TRANSLATED, "domain": "alarm_control_panel", "service": "disarm"},
     "weather.get_forecasts": {"status": TRANSLATED, "domain": "weather", "service": "get_forecast"},
     "automation.trigger": {"status": TRANSLATED, "domain": "automation", "service": "trigger"},
     "automation.turn_on": {"status": TRANSLATED, "domain": "automation", "service": "turn_on"},
@@ -398,6 +402,26 @@ class HACompatibilityAnalyzer:
         data = deepcopy(action.get("data", action.get("service_data", {})) or {})
         if not isinstance(data, dict):
             statuses.append(UNSUPPORTED); data = {}
+        security_review_required = service_name.startswith("alarm_control_panel.")
+        credential_mapping_required = False
+        if security_review_required:
+            # HA codes are never runtime service data. Keep only a redacted
+            # presence/form marker and require an explicit HCM credential ref.
+            original_data = action.get("data", action.get("service_data", {}))
+            original_code = original_data.get("code") if isinstance(original_data, dict) else None
+            code = data.pop("code", None)
+            if code is not None:
+                credential_mapping_required = True
+                reason = "SECURITY_CREDENTIAL_MAPPING_REQUIRED"
+            alarm_target = (action.get("target") or {}).get("entity_id") if isinstance(action.get("target"), dict) else None
+            credential_ref = self.mappings.get(f"alarm_credential:{alarm_target}") or self.mappings.get(f"alarm_credential:{service_name}")
+            if credential_ref is not None:
+                data["credential_ref"] = str(credential_ref)
+                credential_mapping_required = False
+                statuses.append(TRANSLATED)
+                reason = None
+            elif code is not None:
+                statuses.append(NEEDS_MAPPING)
         if service_name == "media_player.play_media" and isinstance(data.get("media"), dict):
             media = data.pop("media")
             for key in ("media_content_id", "media_content_type", "metadata"):
@@ -445,6 +469,12 @@ class HACompatibilityAnalyzer:
         result = {"type": "service", "status": _combine(statuses), "source": _safe(raw), "service": service_name,
                   "native": {**native, **native_target, "service_data": _safe(data)}, "target_mappings": target_refs,
                   "expression_references": sorted(set(expression_refs))}
+        if security_review_required:
+            result["security_review_required"] = True
+            result["credential_present_in_source"] = credential_mapping_required
+            result["credential_mapping_required"] = credential_mapping_required
+            result["code_form"] = ("template" if isinstance(original_code, str) and "{{" in original_code
+                                    else "literal" if credential_mapping_required else "none")
         if mapping_key: result['source_mapping_key']=mapping_key
         if reason: result["reason"] = reason
         if action.get("response_variable"):
@@ -642,12 +672,19 @@ class HACompatibilityAnalyzer:
         walk(list(nested))
         if status in (UNSUPPORTED, UNAVAILABLE_SERVICE): errors.append("One or more nested elements cannot be represented")
         if status == NEEDS_MAPPING: warnings.append("One or more entity or device mappings require confirmation")
+        # security_review_required is carried by the nested semantic node; do
+        # not infer it from generic unsupported/mapping nodes.
+        def has_security(value):
+            if isinstance(value, dict): return bool(value.get("security_review_required")) or any(has_security(v) for v in value.values())
+            if isinstance(value, list): return any(has_security(v) for v in value)
+            return False
+        security_review = any(has_security(x) for x in nested)
         return {"source_type": source_type, "source_id": source_id, "source_name": obj.get("alias", obj.get("name", source_id)),
                 "source_index": index, "source": _safe(obj), "source_fingerprint": _source_fingerprint(source_type, obj),
                 "compatibility": status, "eligibility": _ELIGIBILITY[status], "confidence": "EXACT" if status == COMPATIBLE else "SUGGESTED" if status == TRANSLATED else "UNRESOLVED",
                 "preview": preview, "warnings": warnings, "errors": errors, "referenced_entities": sorted(self._entity_refs),
                 "referenced_services": sorted(self._services), "unsupported_features": unsupported, "required_mappings": sorted(self._entity_refs),
-                "nested": _safe(nested)}
+                "nested": _safe(nested), "security_review_required": security_review}
 
     def analyze(self, sources: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(sources, dict): raise HAImportError("Source payload must be a mapping")
