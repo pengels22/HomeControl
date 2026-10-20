@@ -91,7 +91,9 @@ async def oauth_callback(provider_id:str, instance_id:str, state:str, redirect_u
         if isinstance(config,str): config=__import__('json').loads(config)
         client_id=config.get('client_id'); client_secret=await secret_store.get(row['credential_ref']) if row['credential_ref'] else None
         info=provider_factory.types.get(provider_id).info
-        metadata=oauth.OAuthMetadata('https://accounts.google.com/o/oauth2/v2/auth','https://oauth2.googleapis.com/token',tuple((info.config_flow or {}).get('scopes',())))
+        endpoints={'smartthings':('https://api.smartthings.com/oauth/authorize','https://api.smartthings.com/oauth/token'),'google_calendar':('https://accounts.google.com/o/oauth2/v2/auth','https://oauth2.googleapis.com/token'),'gmail':('https://accounts.google.com/o/oauth2/v2/auth','https://oauth2.googleapis.com/token')}
+        authorize_endpoint,token_endpoint=endpoints.get(provider_id,('https://accounts.google.com/o/oauth2/v2/auth','https://oauth2.googleapis.com/token'))
+        metadata=oauth.OAuthMetadata(authorize_endpoint,token_endpoint,tuple((info.config_flow or {}).get('scopes',())))
         http=ProviderHTTP(timeout=15)
         async def request(url,data,auth_style):
             return (await http.json('POST',url,form_body=data,headers={'Accept':'application/json'}))[0]

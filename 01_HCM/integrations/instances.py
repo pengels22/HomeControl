@@ -5,7 +5,9 @@ from .. import db
 
 async def list_instances():
     async with db.acquire() as conn:
-        rows=await conn.fetch('''SELECT i.*,p.display_name AS provider_display_name,p.capabilities
+        rows=await conn.fetch('''SELECT i.*,p.display_name AS provider_display_name,p.capabilities,
+            (SELECT count(*) FROM logical_devices d WHERE d.instance_id=i.instance_id) AS device_count,
+            (SELECT count(*) FROM entities e WHERE e.instance_id=i.instance_id) AS entity_count
             FROM integration_instances i JOIN integration_providers p USING(provider_id) ORDER BY i.display_name''')
     result=[]
     for r in rows:

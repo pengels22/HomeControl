@@ -419,3 +419,13 @@ async def test_gmail_history_cursor_baseline_and_dedup():
     provider.google_json=fake
     await provider.poll(); await provider.poll()
     assert context.saved['history_id']=='12' and [event[1]['message_id'] for event in context.events]==['new']
+
+
+def test_smartthings_capability_mapping_and_webhook_guard():
+    smart=import_module('01_HCM.integrations.smartthings'); provider=smart.SmartThingsProvider()
+    assert provider._mapping('switch')==('switch','state')
+    assert provider._mapping('washerOperatingState')==('sensor','job_state')
+    assert provider._mapping('unknown') is None
+    payload=b'{"deviceId":"d1"}'; import hashlib,hmac
+    signature=hmac.new(b'secret',payload,hashlib.sha256).hexdigest()
+    assert provider.guard.verify(payload,signature,'secret','nonce')['provider_id']=='smartthings'

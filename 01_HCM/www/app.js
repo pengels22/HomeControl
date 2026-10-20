@@ -1188,7 +1188,7 @@ async function renderIntegrations() {
     const admin=currentUser?.role === "ADMIN";
     panel.innerHTML=`<div class="integration-grid">${cards.map((item)=>`
       <article class="card integration-card"><div class="panel-head"><h4>${esc(item.display_name)}</h4>${statusPill(item.status === "connected",esc(item.status))}</div>
-      <p class="muted">${item.enabled ? "Enabled" : "Disabled"} · ${item.configured ? "Configured" : "Configuration required"} · ${item.credential_configured ? "Credential configured" : "No credential"}</p>
+      <p class="muted">${item.enabled ? "Enabled" : "Disabled"} · ${item.configured ? "Configured" : "Configuration required"} · ${item.credential_configured ? "Credential configured" : "No credential"}${item.instance_id ? ` · ${item.device_count||0} devices · ${item.entity_count||0} entities` : ""}</p>
       <p class="muted">Last success: ${esc(item.last_success || "Never")}</p>
       ${item.last_error ? `<div class="notice warn">${esc(item.last_error)}</div>` : ""}
       ${admin ? `<div class="modal-actions inline-actions"><button type="button" data-integration-toggle="${esc(item.instance_id||item.provider_id)}" data-instance-toggle="${item.instance_id ? "true" : "false"}">${item.enabled ? "Disable" : "Enable"}</button>${item.instance_id ? `<button type="button" class="secondary" data-integration-reload="${esc(item.instance_id)}">Reload</button>` : ""}<button type="button" class="secondary" data-integration-config="${esc(item.provider_id)}">Configure</button></div>` : ""}
@@ -1642,7 +1642,7 @@ document.addEventListener("click", async (event) => {
     const credentialKind=integrationForm.dataset.credentialKind || "api_key";
     const created=await api("/integrations/instances",{method:"POST",body:JSON.stringify({config:{...config,provider_id:integrationForm.dataset.provider,display_name:formData.get("display_name")},...(credential?{credential_kind:credentialKind,credential}:{})})});
     if (credentialKind === "client_secret" && created?.instance_id && config.client_id && config.redirect_uri) {
-      const endpoint=integrationForm.dataset.provider === "gmail" || integrationForm.dataset.provider === "google_calendar" ? "https://accounts.google.com/o/oauth2/v2/auth" : "";
+      const endpoint=integrationForm.dataset.provider === "smartthings" ? "https://api.smartthings.com/oauth/authorize" : (integrationForm.dataset.provider === "gmail" || integrationForm.dataset.provider === "google_calendar" ? "https://accounts.google.com/o/oauth2/v2/auth" : "");
       if (endpoint) { const started=await api(`/integrations/instances/${encodeURIComponent(created.instance_id)}/oauth/start?authorize_endpoint=${encodeURIComponent(endpoint)}&client_id=${encodeURIComponent(config.client_id)}&redirect_uri=${encodeURIComponent(config.redirect_uri)}`); if (started.authorization_url) { window.location.href=started.authorization_url; return; } }
     }
     await renderIntegrations(); return;
