@@ -12,6 +12,11 @@ class ProviderInfo:
     capabilities: dict[str, bool] = field(default_factory=dict)
     config_schema: dict = field(default_factory=dict)
     config_flow: dict = field(default_factory=dict)
+    description: str = ''
+    icon: str | None = None
+    setup_type: str = 'simple'
+    supports_multiple: bool = False
+    internal: bool = False
 
 
 class Diagnostics(BaseModel):

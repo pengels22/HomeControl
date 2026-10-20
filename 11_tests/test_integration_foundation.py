@@ -38,6 +38,7 @@ async def database(monkeypatch):
         before=dict(await conn.fetchrow('SELECT * FROM logical_devices WHERE id=$1',native))
         await conn.execute((ROOT/'08_database/009_integration_foundation.sql').read_text())
         await conn.execute((ROOT/'08_database/010_integration_configuration.sql').read_text())
+        await conn.execute((ROOT/'08_database/011_integration_instances.sql').read_text())
         after=dict(await conn.fetchrow('SELECT * FROM logical_devices WHERE id=$1',native))
         assert {key:after[key] for key in before}==before
         @asynccontextmanager
@@ -298,3 +299,16 @@ def test_webhook_guard_authentication_replay_and_size():
     assert h.verify(payload,sig,'secret','nonce')['provider_id']=='internal_mock'
     with pytest.raises(ValueError,match='replay'): h.verify(payload,sig,'secret','nonce')
     with pytest.raises(ValueError,match='authentication'): h.verify(payload,'bad','secret','new')
+
+
+async def test_provider_chooser_and_multiple_instances(database,monkeypatch):
+    monkeypatch.setenv('HCM_INTEGRATION_SECRET_KEY', Fernet.generate_key().decode())
+    host=runtime_mod.Runtime(registry_mod.Registry()); mock=mock_mod.MockProvider(); host.attach(mock,enabled=True); await host.start_provider('internal_mock')
+    instances=import_module('01_HCM.integrations.instances')
+    one=await instances.create('internal_mock','Mock One',{'host':'one'},credential='one-secret',actor='admin')
+    two=await instances.create('internal_mock','Mock Two',{'host':'two'},credential='two-secret',actor='admin')
+    rows=await instances.list_instances(); assert {str(r['instance_id']) for r in rows} >= {one,two}
+    assert all(r['credential_ref'] is None for r in rows)
+    await instances.remove(one,'admin')
+    assert any(str(r['instance_id'])==two for r in await instances.list_instances())
+    await host.stop()

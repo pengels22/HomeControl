@@ -1,9 +1,11 @@
 # Integration configuration and authentication
 
-Migration `010_integration_configuration.sql` adds non-secret provider config,
+Migrations `010_integration_configuration.sql` and `011_integration_instances.sql` add non-secret provider config,
 schema/flow metadata, credential references, encrypted credential rows, and
 single-use OAuth state. Existing provider/device/entity/service identities are
-preserved.
+preserved. Provider definitions and configured instances are separate; an
+instance has a stable UUID, display name, status, and independent credential
+reference. Existing provider-level APIs remain compatible during migration.
 
 Credential values are encrypted with Fernet using the externally supplied
 `HCM_INTEGRATION_SECRET_KEY` or the administrator-managed
@@ -21,7 +23,8 @@ Mutation actions write sanitized management-audit events and never actuate
 physical outputs.
 
 `oauth.py` provides provider-neutral state creation/consumption, injected code
-exchange, refresh, and encrypted token storage. `webhooks.py` provides bounded
+exchange, refresh, encrypted token storage, and one-time callback routing.
+`webhooks.py` provides bounded
 payload, HMAC, rate, nonce replay, ownership, and normalized event hooks. No
 real third-party provider is implemented here, and no external HTTP request is
 made in CI.

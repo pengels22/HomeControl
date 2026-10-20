@@ -5,19 +5,20 @@ from urllib.parse import urlencode
 from .. import db
 from .secrets import put
 
-async def authorization_url(provider_id, authorize_endpoint, client_id, redirect_uri, scopes=()):
+async def authorization_url(provider_id, authorize_endpoint, client_id, redirect_uri, scopes=(), instance_id=None):
     state=secrets.token_urlsafe(32); digest=hashlib.sha256(state.encode()).hexdigest()
     async with db.acquire() as conn:
         await conn.execute('''INSERT INTO integration_oauth_states(state_hash,provider_id,redirect_uri,expires_at)
             VALUES($1,$2,$3,now()+interval '10 minutes')''',digest,provider_id,redirect_uri)
+        if instance_id: await conn.execute('UPDATE integration_oauth_states SET instance_id=$2 WHERE state_hash=$1',digest,instance_id)
     query=urlencode({'response_type':'code','client_id':client_id,'redirect_uri':redirect_uri,'scope':' '.join(scopes),'state':state})
     return f'{authorize_endpoint}?{query}'
 
-async def consume_state(provider_id,state,redirect_uri):
+async def consume_state(provider_id,state,redirect_uri,instance_id=None):
     digest=hashlib.sha256(str(state).encode()).hexdigest()
     async with db.acquire() as conn:
         row=await conn.fetchrow('''UPDATE integration_oauth_states SET consumed_at=now() WHERE state_hash=$1 AND provider_id=$2
-            AND redirect_uri=$3 AND consumed_at IS NULL AND expires_at>now() RETURNING state_hash''',digest,provider_id,redirect_uri)
+            AND redirect_uri=$3 AND ($4::uuid IS NULL OR instance_id=$4) AND consumed_at IS NULL AND expires_at>now() RETURNING state_hash''',digest,provider_id,redirect_uri,instance_id)
     if not row: raise ValueError('Invalid or expired OAuth state')
     return True
 

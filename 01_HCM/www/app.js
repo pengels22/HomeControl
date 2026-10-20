@@ -1196,12 +1196,16 @@ async function renderIntegrations() {
 }
 
 async function configureIntegration(providerId) {
-  const host=window.prompt("Non-secret configuration JSON", "{\"host\":\"\"}");
-  if (host===null) return;
-  const key=window.prompt("API key (write-only; leave blank to keep current credential)", "");
-  const config=JSON.parse(host);
-  await api(`/integrations/${encodeURIComponent(providerId)}/configuration`,{method:"PUT",body:JSON.stringify({config,...(key?{credential_kind:"api_key",credential:key}:{})})});
-  await renderIntegrations();
+  const data=await api("/integrations/providers");
+  const provider=(data.providers||[]).find((item)=>item.provider_id===providerId);
+  const panel=$("integration-settings"); if (!provider) return;
+  const fields=(provider.config_flow?.fields||[]).map((field)=>`<label>${esc(field.label||field.name)}${field.required?" *":""}<input name="${esc(field.name)}" type="${field.type === "password" || field.type === "api_key" ? "password" : field.type === "integer" || field.type === "number" ? "number" : "text"}" placeholder="${esc(field.placeholder||"")}" ${field.required?"required":""}></label>`).join("");
+  panel.innerHTML=`<section class="panel"><div class="panel-head"><h3>Configure ${esc(provider.display_name)}</h3><button type="button" data-cancel-integration>Cancel</button></div><form data-integration-form data-provider="${esc(providerId)}"><label>Instance name *<input name="display_name" required value="${esc(provider.display_name)}"></label>${fields}<label>Replace API key<input name="credential" type="password" autocomplete="new-password"></label><button type="submit">Validate &amp; Save</button><p class="muted">Secret fields are write-only.</p></form></section>`;
+}
+
+async function showIntegrationChooser() {
+  const panel=$("integration-settings"); const data=await api("/integrations/providers");
+  panel.innerHTML=`<section class="panel"><div class="panel-head"><h3>Add Integration</h3><button type="button" data-cancel-integration>Cancel</button></div><div class="integration-grid">${(data.providers||[]).map((p)=>`<article class="card"><h4>${esc(p.display_name)}</h4><p class="muted">${esc(p.description||p.setup_type)}</p><button type="button" data-select-provider="${esc(p.provider_id)}">Configure</button></article>`).join("")}</div></section>`;
 }
 
 function gitSettingsForm(git) {
@@ -1622,7 +1626,20 @@ document.addEventListener("click", async (event) => {
     return;
   }
   const addIntegration = event.target.closest("[data-add-integration]");
-  if (addIntegration) { await configureIntegration("internal_mock"); return; }
+  if (addIntegration) { await showIntegrationChooser(); return; }
+  const selectProvider = event.target.closest("[data-select-provider]");
+  if (selectProvider) { await configureIntegration(selectProvider.dataset.selectProvider); return; }
+  const cancelIntegration = event.target.closest("[data-cancel-integration]");
+  if (cancelIntegration) { await renderIntegrations(); return; }
+  const integrationForm = event.target.closest("[data-integration-form]");
+  if (integrationForm) {
+    event.preventDefault();
+    const formData=new FormData(integrationForm), config={};
+    for (const [key,value] of formData.entries()) if (key !== "display_name" && key !== "credential") config[key]=(value === "" ? value : (/^\d+$/.test(value) ? Number(value) : value));
+    const credential=formData.get("credential");
+    await api("/integrations/instances",{method:"POST",body:JSON.stringify({config:{...config,provider_id:integrationForm.dataset.provider,display_name:formData.get("display_name")},...(credential?{credential_kind:"api_key",credential}:{})})});
+    await renderIntegrations(); return;
+  }
   const integrationConfig = event.target.closest("[data-integration-config]");
   if (integrationConfig) { await configureIntegration(integrationConfig.dataset.integrationConfig); return; }
   const integrationToggle = event.target.closest("[data-integration-toggle]");

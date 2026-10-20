@@ -12,7 +12,8 @@ class MockProvider(Provider):
         'devices':True,'entities':True,'states':True,'events':True,'services':True,
         'reload':True,'physical_control':False,
     }, config_schema={'type':'object','properties':{'host':{'type':'string'},'port':{'type':'integer','minimum':1}},'additionalProperties':False},
-    config_flow={'type':'api_key','fields':[{'name':'host','type':'text','required':True},{'name':'port','type':'number'}], 'credential_kinds':['api_key']})
+    config_flow={'type':'api_key','fields':[{'name':'host','type':'text','required':True},{'name':'port','type':'number'}], 'credential_kinds':['api_key']},
+    description='Internal provider for configuration tests',setup_type='api_key',supports_multiple=True,internal=True)
 
     def __init__(self):
         self.context=None
