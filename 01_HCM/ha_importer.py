@@ -71,6 +71,10 @@ SERVICE_MAPPINGS: dict[str, dict[str, Any]] = {
     "automation.trigger": {"status": TRANSLATED, "domain": "automation", "service": "trigger"},
     "automation.turn_on": {"status": TRANSLATED, "domain": "automation", "service": "turn_on"},
     "automation.turn_off": {"status": TRANSLATED, "domain": "automation", "service": "turn_off"},
+    "automation.toggle": {"status": TRANSLATED, "domain": "automation", "service": "toggle"},
+    "number.set_value": {"status": TRANSLATED, "domain": "number", "service": "set_value"},
+    "select.select_option": {"status": TRANSLATED, "domain": "select", "service": "select_option"},
+    "system_log.write": {"status": TRANSLATED, "domain": "system", "service": "log"},
     "automation.trigger": {"status": TRANSLATED, "domain": "automation", "service": "trigger"},
     "media_player.turn_on": {"status": TRANSLATED, "domain": "media_player", "service": "turn_on"},
     "media_player.turn_off": {"status": TRANSLATED, "domain": "media_player", "service": "turn_off"},
@@ -435,6 +439,18 @@ class HACompatibilityAnalyzer:
             # a raw HA media_player ID as an HCM identity.
             if not action.get("target"):
                 action = dict(action); action["target"] = {"entity_id": data.pop("entity_id")}
+        if service_name == "system_log.write":
+            allowed = {"message", "level", "logger"}
+            extra = set(data) - allowed
+            if extra:
+                statuses.append(UNSUPPORTED)
+                reason = "Unsupported system_log.write fields"
+            level = str(data.get("level", "info")).lower()
+            if level not in {"debug", "info", "warning", "error"}:
+                statuses.append(UNSUPPORTED)
+                reason = "Unsupported system_log severity"
+            data = {"message": data.get("message", ""), "severity": level,
+                    **({"category": data["logger"]} if data.get("logger") else {})}
         mapping_key = None
         if service_name.startswith('notify.'):
             mapping_key=f'notification_destination:{service_name}'

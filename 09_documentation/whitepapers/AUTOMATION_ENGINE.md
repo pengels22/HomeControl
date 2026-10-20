@@ -117,3 +117,13 @@ imply a leave. V1 uses metres, the haversine distance, reported accuracy
 conservatively, and a fixed five-metre leave hysteresis to reduce boundary
 jitter. Coordinates are configuration and provider state; normal automation
 trace context contains references and transition metadata, not coordinates.
+Automation control includes `automation.turn_on`, `automation.turn_off`, and
+serialized `automation.toggle`. Toggle changes only the enabled state; enabling
+does not trigger a run, while disabling uses the existing cancellation and
+timer cleanup policy. The result includes the previous and new enabled states.
+
+Native diagnostic logging is exposed as the bounded `system.log` service. It
+accepts only debug/info/warning/error severity, bounded message/category fields,
+and supports dry-run. Secret-like key/value material is redacted before the
+existing logging sink; it cannot configure files, loggers, processes, or system
+destinations.

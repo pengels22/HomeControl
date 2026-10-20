@@ -329,6 +329,7 @@ class AutomationEngine:
         self.expressions=ExpressionEngine(timezone_name=timezone_name)
         self.active=defaultdict(dict); self.queues=defaultdict(deque); self.timers={}; self.tasks=set(); self.task=None; self.wake=asyncio.Event(); self.scheduler_started_at=None; self.waiters=[]; self._services_registered=False
         self.max_invocation_depth=10
+        self._control_lock=asyncio.Lock()
         self.zone_evaluator = None
         self._automation_device_id=None
 
@@ -384,6 +385,7 @@ class AutomationEngine:
             context=self.registry.context('hcm_native')
             await context.service('automation','turn_on',AutomationControlArgs,self._service_turn_on)
             await context.service('automation','turn_off',AutomationControlArgs,self._service_turn_off)
+            await context.service('automation','toggle',AutomationControlArgs,self._service_toggle)
             await context.service('automation','trigger',AutomationControlArgs,self._service_trigger)
             self._services_registered=True
         except Exception:
@@ -399,6 +401,18 @@ class AutomationEngine:
 
     async def _service_turn_on(self,args,target): return await self.set_enabled(await self._automation_id_from_target(target,args.automation_id),True)
     async def _service_turn_off(self,args,target): return await self.set_enabled(await self._automation_id_from_target(target,args.automation_id),False)
+    async def _service_toggle(self,args,target):
+        async with self._control_lock:
+            aid=await self._automation_id_from_target(target,args.automation_id)
+            current=await self.store.get(aid)
+            previous=bool(current.get('enabled'))
+            if previous: await self.cancel_automation(aid)
+            updated=await self.store.set_enabled(aid,not previous)
+            try: await self._sync_automation_entity(self.registry.context('hcm_native'),updated)
+            except Exception: pass
+            return {'status':'changed' if previous != bool(updated.get('enabled')) else 'no_change',
+                    'previous_enabled':previous,'enabled':bool(updated.get('enabled')),
+                    'automation_id':str(updated.get('automation_id',aid))}
     async def _service_trigger(self,args,target):
         automation=await self.store.get(await self._automation_id_from_target(target,args.automation_id))
         if not automation.get('enabled'):
@@ -424,11 +438,12 @@ class AutomationEngine:
         return automation
 
     async def set_enabled(self, automation_id, enabled):
-        if not enabled: await self.cancel_automation(automation_id)
-        automation=await self.store.set_enabled(automation_id,enabled)
-        try: await self._sync_automation_entity(self.registry.context('hcm_native'),automation)
-        except Exception: pass
-        return automation
+        async with self._control_lock:
+            if not enabled: await self.cancel_automation(automation_id)
+            automation=await self.store.set_enabled(automation_id,enabled)
+            try: await self._sync_automation_entity(self.registry.context('hcm_native'),automation)
+            except Exception: pass
+            return automation
 
     async def delete_automation(self, automation_id):
         await self.cancel_automation(automation_id)

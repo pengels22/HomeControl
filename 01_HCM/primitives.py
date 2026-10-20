@@ -5,7 +5,7 @@ mutations use the normal Service Registry. This module contains no GPIO or
 provider-specific paths.
 """
 from __future__ import annotations
-import asyncio, json, re
+import asyncio, json, re, logging
 from datetime import datetime, timezone, timedelta
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
@@ -45,6 +45,12 @@ class ClimateTemperatureArg(BaseModel):
 class ClimateModeArg(BaseModel):
     model_config=ConfigDict(extra='forbid')
     hvac_mode: str
+class SystemLogArg(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    message: str = Field(min_length=1, max_length=4096)
+    severity: str = Field(default='info', pattern='^(debug|info|warning|error)$')
+    category: str|None = Field(default=None, max_length=64)
+    dry_run: bool = False
 
 INFO=ProviderInfo('hcm_native','HCM Native Primitives',capabilities={'helpers':True,'scripts':True,'scenes':True,'states':True,'events':True,'services':True},internal=True)
 HELPER_TYPES={'input_boolean','input_button','input_number','input_text','input_select','input_datetime','counter','timer','schedule'}
@@ -95,6 +101,7 @@ class NativePrimitives:
         await c.service('scene','turn_on',Empty,self._scene_turn_on,target_required=True,target_domains=('scene',))
         await c.service('notify','send',NotificationArg,self._notify_send)
         await c.service('announcement','speak',AnnouncementArg,self._announcement_speak)
+        await c.service('system','log',SystemLogArg,self._system_log)
         if self.climate:
             await c.service('climate','set_temperature',ClimateTemperatureArg,self._climate_set_temperature,target_required=True,target_domains=('climate',))
             await c.service('climate','set_hvac_mode',ClimateModeArg,self._climate_set_hvac_mode,target_required=True,target_domains=('climate',))
@@ -156,6 +163,13 @@ class NativePrimitives:
             except Exception:
                 return {'status':'playback_failed','backend_id':str(backend['backend_id']),'target_entity_ref':int(target)}
         return {'status':'success','backend_id':str(backend['backend_id']),'target_entity_refs':[int(x) for x in targets],'message_length':len(a.message),'playback':results}
+    async def _system_log(self,a,t):
+        if a.dry_run:
+            return {'status':'dry_run','severity':a.severity,'message_length':len(a.message)}
+        message=re.sub(r'(?i)\b(password|token|pin|code|secret|credential)\s*[:=]\s*[^\s,;]+',r'\1=[REDACTED]',a.message)[:4096]
+        logger=logging.getLogger(a.category or 'hcm.automation')
+        getattr(logger,a.severity)(message)
+        return {'status':'success','severity':a.severity,'message_length':len(message)}
     async def _helper(self,entity_ref,kind=None):
         async with db.acquire() as conn:
             row=await conn.fetchrow('SELECT h.*,e.state,e.attributes FROM native_helpers h JOIN entities e ON e.id=h.entity_ref WHERE h.entity_ref=$1 AND ($2::text IS NULL OR h.helper_type=$2)',int(entity_ref),kind)

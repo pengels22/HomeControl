@@ -181,3 +181,32 @@ removed from runtime service data. Without an explicit
 `SECURITY_CREDENTIAL_MAPPING_REQUIRED` and `security_review_required`. Fire and
 life-safety authority, GPIO, relay handling, maintenance lockout, and HVAC fire
 shutdown are unchanged and remain separate from burglary/security state.
+
+### Writable controls and safe service cleanup V1
+
+The measured source forms are: `number.set_value` (3 calls in 3 items, static
+`value` and entity targets), `select.select_option` (1 call in 1 item, static
+`option` and a device target), `automation.toggle` (1 call in 1 item), and
+`system_log.write` (2 calls in 2 items using `message`, `level`, and optional
+`logger`). Neither measured number nor select argument used a template. The
+two entity lifecycle calls were `homeassistant.update_entity` (2) and
+`homeassistant.reload_config_entry` (1), both with entity targets.
+
+Writable numbers and selects now have provider-neutral argument/capability
+contracts. Providers opt in by registering the semantic service against their
+owned entity; domain names alone do not imply writability. Number validation
+enforces numeric type, declared bounds, and declared step without clamping.
+Select validation rejects options not currently advertised. Existing
+`input_number` and `input_select` helper services remain separate and unchanged.
+
+`automation.toggle` is registered beside `turn_on` and `turn_off`, uses the
+existing scheduler cleanup behavior, does not trigger an automation when
+enabling it, and serializes the read/change operation. `system_log.write` maps
+to bounded native `system.log` with debug/info/warning/error levels, bounded
+message/category fields, dry-run support, and secret-like message redaction.
+It cannot configure loggers, files, subprocesses, or system destinations.
+
+Entity refresh and integration reload remain deferred: current providers own
+their polling and lifecycle and no generic safe refresh/reload semantic is
+available. Climate turn-on, software updates, shell commands, todo/list
+operations, dynamic scenes, and conversation remain intentionally deferred.
