@@ -13,6 +13,52 @@ endpoint is `192.168.20.26`, Jetson is `192.168.20.27`, and the old rule
 installed deployment. Explicit approval is required for deployed host changes.
 
 
+## Test execution and agent efficiency
+
+Preserve development-agent usage and avoid unnecessary repeated repository-wide
+validation.
+
+During implementation:
+
+- Run focused tests for the files, components, migrations, or features currently
+  being changed.
+- Do not repeatedly run the complete pytest suite while actively developing.
+- Do not repeatedly rescan the entire repository when the relevant files and
+  architecture have already been identified.
+- Prefer targeted searches and targeted test selection while debugging.
+- Run database integration tests only when the change affects database behavior,
+  migrations, persistence, or code paths requiring PostgreSQL.
+- Run hardware/HIL tests only when explicitly required and authorized. Never use
+  broad hardware validation as a substitute for focused software tests.
+
+At the end of an implementation pass:
+
+1. Run the complete pytest suite once.
+2. Run compileall once.
+3. Run JavaScript syntax validation once.
+4. Run `git diff --check` once.
+5. Run required migration/configuration validation once.
+
+If the full pytest suite fails:
+
+- Investigate and rerun only the failing test(s) or directly related test group
+  while fixing the problem.
+- Do not rerun the full suite after every attempted fix.
+- After focused failing tests pass, run the complete suite one final time.
+
+A normal implementation pass should therefore require no more than two complete
+pytest-suite runs:
+- one initial final-validation run;
+- one final rerun only if failures required fixes.
+
+Large feature requests should be divided into coherent implementation passes
+when practical rather than consuming a single agent session on unrelated work.
+
+Do not sacrifice correctness, safety validation, migration testing, or required
+deployment acceptance checks merely to reduce test execution. The intent is to
+eliminate redundant work, not required verification.
+
+
 ## Active watchdog reference (2026-10-10)
 
 Jetson now has a successfully tested HCM-only watchdog. Maintain `10_scripts/hcm-watchdog.py`, `07_servises/systemd/hcm-watchdog.service` and `.timer`, and consult [Jetson operations](09_documentation/JETSON_OPERATIONS.md) when changing the Docker service lifecycle. The installed watchdog must never restart PostgreSQL or host Heartbeat V3, and should suppress recovery when `hcm.service` is intentionally stopped. Do not claim phone notifications or 3/15-minute rate limiting have been validated.
