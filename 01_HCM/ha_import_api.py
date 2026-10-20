@@ -14,6 +14,7 @@ from .ha_importer import (
     analyze_home_assistant, analyze_yaml, parse_registry_exports,
 )
 from .integrations.runtime import runtime as integrations
+from . import mapping_registry
 
 router = APIRouter(prefix="/api/v1/import/home-assistant", dependencies=[Depends(require_user)])
 
@@ -23,11 +24,19 @@ def _admin(user: dict[str, str]):
         raise HTTPException(403, "ADMIN role required")
 
 
+async def _analysis_mappings(temporary):
+    try:
+        durable = await mapping_registry.analyzer_mappings("home_assistant")
+    except Exception:
+        durable = {}
+    return {**durable, **(temporary or {})}
+
+
 @router.post("/analyze")
 async def analyze(body: dict, user=Depends(require_user)):
     _admin(user)
     try:
-        mappings = body.get("mappings") or {}
+        mappings = await _analysis_mappings(body.get("mappings") or {})
         registry = parse_registry_exports(body.get("ha_entity_registry"), body.get("ha_device_registry"), body.get("ha_area_registry")) if any(key in body for key in ("ha_entity_registry", "ha_device_registry", "ha_area_registry")) else None
         if any(k in body for k in ("automations_yaml", "scripts_yaml", "scenes_yaml")):
             return analyze_yaml(automations=body.get("automations_yaml"), scripts=body.get("scripts_yaml"), scenes=body.get("scenes_yaml"), mappings=mappings, registry=registry)
@@ -77,7 +86,7 @@ async def apply(body: dict, user=Depends(require_user)):
                 reanalysis_source = {"helpers": {helper_type: {helper_name: item.get("source", {})}}}
             else:
                 reanalysis_source = {source_type: {source_id: item.get("source", {})}}
-            analyzed = analyze_home_assistant(reanalysis_source, mappings=body.get("mappings") or {})
+            analyzed = analyze_home_assistant(reanalysis_source, mappings=await _analysis_mappings(body.get("mappings") or {}))
             current = analyzed["items"][0]
             if current.get("eligibility") not in ("READY", "READY_WITH_TRANSLATIONS"):
                 report["blocked"].append({"source_id": source_id, "reason": current.get("eligibility")}); continue

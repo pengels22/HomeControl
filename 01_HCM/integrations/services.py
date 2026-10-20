@@ -54,6 +54,33 @@ class Services:
             row['available']=bool(handler_present and instance_ok and provider_ok and not row['mutates_physical_state'])
         return rows
 
+    async def validate_capability(self, target_entity_id, domain, name, arguments=None):
+        """Validate a semantic operation without executing it."""
+        async with db.acquire() as conn:
+            target = await conn.fetchrow('SELECT id,provider_id,domain,enabled,available FROM entities WHERE id=$1', int(target_entity_id))
+            if not target:
+                return {'status': 'TARGET_MISSING', 'reason': 'Target entity does not exist'}
+            definition = await conn.fetchrow('''SELECT * FROM service_definitions
+                WHERE provider_id=$1 AND domain=$2 AND service_name=$3''', target['provider_id'], domain, name)
+            if not definition:
+                return {'status': 'SERVICE_NOT_REGISTERED', 'reason': 'Target provider does not register this service'}
+            requirements = definition['target_requirements']
+            if isinstance(requirements, str): requirements = json.loads(requirements)
+            domains = requirements.get('domains', []) if isinstance(requirements, dict) else []
+            if domains and target['domain'] not in domains:
+                return {'status': 'TARGET_DOES_NOT_SUPPORT', 'reason': 'Target domain is not supported by this service'}
+        handler = self.handlers.get((target['provider_id'], None, domain, name))
+        if handler is None:
+            for key, candidate in self.handlers.items():
+                if key[0] == target['provider_id'] and key[2:] == (domain, name): handler = candidate; break
+        if handler is not None and arguments is not None:
+            try: handler.arguments.model_validate(arguments)
+            except Exception: return {'status': 'INVALID_ARGUMENT', 'reason': 'Arguments fail the registered service schema'}
+        available = bool(target['enabled'] and target['available'])
+        if not available:
+            return {'status': 'SUPPORTED_BUT_UNAVAILABLE', 'reason': 'Target or provider is unavailable'}
+        return {'status': 'SUPPORTED', 'reason': 'Registered service and target capability are valid'}
+
     async def invoke(self,provider_id,domain,name,arguments,*,target_entity_id=None,instance_id=None,timeout=5):
         resolved=instance_id
         if target_entity_id is not None and resolved is None:

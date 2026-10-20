@@ -138,6 +138,8 @@ from .primitives_api import router as primitives_router
 app.include_router(primitives_router)
 from .ha_import_api import router as ha_import_router
 app.include_router(ha_import_router)
+from .mapping_api import router as mapping_router
+app.include_router(mapping_router)
 from .integrations.smartthings import webhook_router as smartthings_webhook_router
 app.include_router(smartthings_webhook_router)
 from .bluetooth import bluetooth_router
