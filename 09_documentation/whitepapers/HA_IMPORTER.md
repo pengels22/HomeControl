@@ -62,6 +62,18 @@ runtime definition carries only the immutable native UUID. A configured
 destination/backend can still report an unavailable health state at runtime,
 which is distinct from missing import mapping.
 
+The preview endpoint can optionally enrich this offline plan with the native
+Service Registry when HCM is running. Enrichment is read-only: it validates each
+mapped target and operation, caches repeated checks, and uses bounded concurrent
+requests. Results distinguish `SUPPORTED`, `SUPPORTED_BUT_UNAVAILABLE`, missing
+services, missing targets, target capability mismatches, and invalid arguments.
+Those capability results are folded back into the normal item eligibility while
+leaving the pure `analyze_home_assistant` function deterministic and offline.
+Unmapped targets, notification destinations, and dynamic template destinations
+are marked `NOT_CHECKED`; they require mapping or their dedicated registry at
+apply/runtime time. Apply re-analysis remains authoritative and never invokes a
+provider during analysis.
+
 Climate actions use the native logical HVAC contract: `climate.set_temperature`,
 `climate.set_hvac_mode`, and `climate.turn_off` translate to HCM climate
 services and still require an explicit entity mapping. `climate.turn_on` and

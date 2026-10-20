@@ -15,6 +15,7 @@ from .ha_importer import (
 )
 from .integrations.runtime import runtime as integrations
 from . import mapping_registry
+from .ha_capability_enrichment import enrich_plan
 
 router = APIRouter(prefix="/api/v1/import/home-assistant", dependencies=[Depends(require_user)])
 
@@ -39,9 +40,14 @@ async def analyze(body: dict, user=Depends(require_user)):
         mappings = await _analysis_mappings(body.get("mappings") or {})
         registry = parse_registry_exports(body.get("ha_entity_registry"), body.get("ha_device_registry"), body.get("ha_area_registry")) if any(key in body for key in ("ha_entity_registry", "ha_device_registry", "ha_area_registry")) else None
         if any(k in body for k in ("automations_yaml", "scripts_yaml", "scenes_yaml")):
-            return analyze_yaml(automations=body.get("automations_yaml"), scripts=body.get("scripts_yaml"), scenes=body.get("scenes_yaml"), mappings=mappings, registry=registry)
-        sources = body.get("sources", body.get("source", body))
-        return analyze_home_assistant(sources, mappings=mappings, registry=registry)
+            plan = analyze_yaml(automations=body.get("automations_yaml"), scripts=body.get("scripts_yaml"), scenes=body.get("scenes_yaml"), mappings=mappings, registry=registry)
+        else:
+            sources = body.get("sources", body.get("source", body))
+            plan = analyze_home_assistant(sources, mappings=mappings, registry=registry)
+        if getattr(integrations, "registry", None) is not None:
+            try: plan = await enrich_plan(plan, integrations.registry.services)
+            except Exception: pass
+        return plan
     except HAImportError as exc:
         raise HTTPException(400, str(exc)) from None
     except (TypeError, ValueError) as exc:
@@ -87,6 +93,8 @@ async def apply(body: dict, user=Depends(require_user)):
             else:
                 reanalysis_source = {source_type: {source_id: item.get("source", {})}}
             analyzed = analyze_home_assistant(reanalysis_source, mappings=await _analysis_mappings(body.get("mappings") or {}))
+            if getattr(integrations, "registry", None) is not None:
+                analyzed = await enrich_plan(analyzed, integrations.registry.services)
             current = analyzed["items"][0]
             if current.get("eligibility") not in ("READY", "READY_WITH_TRANSLATIONS"):
                 report["blocked"].append({"source_id": source_id, "reason": current.get("eligibility")}); continue
