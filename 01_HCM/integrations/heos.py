@@ -20,8 +20,19 @@ class HEOSTransport:
         if not self.writer: await self.connect()
         query=urllib.parse.urlencode(params or {}); self.writer.write((f'heos://{path}?{query}\r\n').encode()); await self.writer.drain(); line=await asyncio.wait_for(self.reader.readline(),self.timeout); return self.parse(line.decode(errors='replace'))
     def parse(self,line):
+        line=line.strip()
+        if line.startswith('{'):
+            try: envelope=json.loads(line)
+            except json.JSONDecodeError: return {}
+            heos=envelope.get('heos') or {}
+            command=str(heos.get('command') or '')
+            payload=envelope.get('payload')
+            if command=='player/get_players': params={'players':payload}
+            elif isinstance(payload,dict): params=payload
+            else: params={'payload':payload}
+            return {'command':command,'params':params}
         if not line.startswith('heos://'): return {}
-        parsed=urllib.parse.urlsplit(line.strip()); return {'command':parsed.netloc+parsed.path,'params':dict(urllib.parse.parse_qsl(parsed.query))}
+        parsed=urllib.parse.urlsplit(line); return {'command':parsed.netloc+parsed.path,'params':dict(urllib.parse.parse_qsl(parsed.query))}
     async def close(self):
         if self.writer: self.writer.close(); await self.writer.wait_closed()
         self.reader=self.writer=None
