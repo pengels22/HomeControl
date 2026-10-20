@@ -440,3 +440,8 @@ async def test_smartthings_rsa_webhook_verification_and_event_dedup():
     signature=base64.b64encode(private.sign(signing.encode(),padding.PKCS1v15(),hashes.SHA256())).decode(); headers={'Authorization':f'Signature keyId="k1",algorithm="rsa-sha256",headers="(request-target) digest date",signature="{signature}"','Digest':digest,'Date':date}
     assert await verifier.verify('POST','/hook',headers,body)=='k1'
     with pytest.raises(ValueError): await verifier.verify('POST','/hook',headers,b'bad')
+
+
+def test_denon_and_heos_media_transport_normalization():
+    denon=import_module('01_HCM.integrations.denon'); receiver=denon.DenonProvider(); receiver.parse_line('PWON'); receiver.parse_line('MVFL-40.0'); receiver.parse_line('MUON'); receiver.parse_line('SICBL/SAT'); assert receiver.state['power'] and receiver.state['volume_level']==0.5 and receiver.state['muted'] and receiver.state['source']=='CBL/SAT'
+    heos=import_module('01_HCM.integrations.heos'); parsed=heos.HEOSTransport('host').parse('heos://event/player_state?pid=7&state=play\r\n'); assert parsed['command']=='event/player_state' and parsed['params']['pid']=='7'
