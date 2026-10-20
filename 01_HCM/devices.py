@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import asyncio
 import logging
 from typing import Any
 from importlib import import_module
@@ -25,6 +26,8 @@ def _payload(row, command: dict[str, Any]) -> dict[str, Any]:
     binding_metadata = _metadata(row)
     payload = dict(binding_metadata)
     payload.update(command)
+    if binding_metadata.get('channel_enabled') is False and (command.get('value') or command.get('percent', 0)):
+        raise PermissionError('Channel is disabled')
     if 'channel' not in payload and row['channel']:
         payload['channel'] = row['channel']
     # Binding metadata is durable HCM authority. A request payload cannot
@@ -65,10 +68,14 @@ async def _resolve_single_binding(conn, *, logical_name: str | None = None, logi
         where, value = 'd.id=$1', int(logical_device_id)
     rows = await conn.fetch(f'''
         SELECT d.id AS logical_device_id, d.logical_name, m.hostname, m.module_type,
-               d.maintenance_locked, b.channel, b.metadata
+               d.maintenance_locked, b.channel,
+               CASE WHEN c.id IS NULL THEN b.metadata ELSE b.metadata || jsonb_build_object(
+                   'emergency_lighting', c.purpose='LIGHTING' AND c.emergency AND c.enabled,
+                   'hvac_shutdown', c.purpose='HVAC' OR COALESCE((b.metadata->>'hvac_shutdown')::boolean,false), 'semantic_hvac', c.purpose='HVAC', 'hvac_control', c.hvac_control, 'metadata_channel_id', c.id, 'channel_enabled', c.enabled) END AS metadata
         FROM logical_devices d
         JOIN device_bindings b ON b.logical_device_id=d.id
         JOIN modules m ON m.id=b.module_id
+        LEFT JOIN channel_metadata c ON c.module_id=b.module_id AND c.channel_id=b.channel
         WHERE {where} AND d.enabled=true AND b.enabled=true
         ORDER BY b.id
     ''', value)
@@ -79,7 +86,61 @@ async def _resolve_single_binding(conn, *, logical_name: str | None = None, logi
     return rows[0]
 
 
-async def _dispatch_with_arbitration(row, command: dict[str, Any], source: OutputSource, extra_conditions: set[str] | None = None) -> dict[str, Any]:
+_semantic_hvac_lock = asyncio.Lock()
+_hvac_command_states = {}
+
+
+async def _dispatch_with_arbitration(row, command, source, extra_conditions=None):
+    metadata = _metadata(row)
+    if not metadata.get('semantic_hvac'):
+        return await _dispatch_resolved(row, command, source, extra_conditions)
+    from .channel_registry import channels, contract
+    from .bridges import reported_state
+    def state_key(channel):
+        connection = registry.connections.get(channel['device_id'])
+        return (id(connection), channel['id'])
+    async with _semantic_hvac_lock:
+        records = [c for c in await channels() if c['purpose'] == 'HVAC']
+        on = bool(command.get('value') or command.get('percent', 0))
+        role = metadata.get('hvac_control')
+        opposite = contract.COOLING if role in contract.HEATING else contract.HEATING if role in contract.COOLING else set()
+        if on:
+            for channel in records:
+                if channel['hvac_control'] not in opposite:
+                    continue
+                state = _hvac_command_states.get(state_key(channel))
+                if state is None:
+                    report = reported_state(channel)
+                    state = None if report is None else report['state'] == 'ON'
+                if state is not False:
+                    raise PermissionError('HCM heating/cooling interlock: opposite output active or unknown')
+        current = next((c for c in records if c['id'] == metadata['metadata_channel_id']), None)
+        try:
+            result = await _dispatch_resolved(row, command, source, extra_conditions)
+        except Exception:
+            if current:
+                _hvac_command_states.pop(state_key(current), None)
+            raise
+        if current:
+            if result.get('ok', True):
+                _hvac_command_states[state_key(current)] = result['arbitration']['effective_state']['energized']
+            else:
+                _hvac_command_states.pop(state_key(current), None)
+        return result
+
+
+async def _dispatch_resolved(row, command: dict[str, Any], source: OutputSource, extra_conditions: set[str] | None = None) -> dict[str, Any]:
+    from . import api
+    extra_conditions = set(extra_conditions or set())
+    if api.safety is not None:
+        if api.safety.fire_active:
+            extra_conditions.add('fire_active')
+        if api.safety.maintenance_lockout_active:
+            extra_conditions.add('maintenance_lockout')
+    if _metadata(row).get('semantic_hvac') and (command.get('value') or command.get('percent', 0)):
+        from .bridges import bridge
+        if not await bridge.module_metadata_current(row['hostname']):
+            raise PermissionError('HVAC metadata has not been acknowledged by the module')
     payload = _payload(row, command)
     channel = str(payload.get('channel') or row['channel'] or row['logical_name'])
     decision = _arbiter_for(row).decide(

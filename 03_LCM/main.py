@@ -57,6 +57,15 @@ class LCMAgent(common_agent.ModuleAgent):
             hvac_shutdown_channels=set(safety_cfg.get('hvac_shutdown_channels', [])),
         )
 
+        import json
+        try:
+            cached = json.loads((self.runtime_root / '.state' / f'channel-metadata-{self.module_type}.json').read_text())
+            result = self.accept_channel_metadata([{'channel_id': ch, 'metadata': value} for ch, value in cached.items()])
+            if not result['ok']:
+                raise ValueError(result['error'])
+        except FileNotFoundError:
+            pass  # Legacy configuration remains authoritative until first sync.
+
     def _clamp_percent(self, value):
         return max(
             float(self.global_config.Lighting_Dimmer_Min_Percent),
@@ -233,6 +242,23 @@ class LCMAgent(common_agent.ModuleAgent):
         raise KeyError(logical)
 
     async def apply_command(self, payload):
+        if payload.get('op') == 'metadata_hvac_off':
+            failures = []
+            metadata = getattr(self, 'channel_metadata', {})
+            targets = {ch for ch, value in metadata.items() if value['purpose'] == 'HVAC'} | self.safety.hvac_shutdown_channels
+            for ch in sorted(targets):
+                try:
+                    if ch not in self.relays.values:
+                        raise ValueError('unknown HVAC relay')
+                    if self.io_mode == 'real':
+                        if not self.driver_bundle or not self.driver_bundle.get('lcm_relays'):
+                            raise RuntimeError('physical driver unavailable')
+                        self.driver_bundle['lcm_relays'].set_channel(self._relay_index(ch), False)
+                    self.relays.set(ch, False)
+                except Exception as exc:
+                    failures.append({'channel': ch, 'error': str(exc)})
+            return {'ok': not failures, 'failures': failures, 'attempted': sorted(targets)}
+
         op = payload.get('op')
         if op == 'safety_state':
             conditions = payload.get('conditions', {})

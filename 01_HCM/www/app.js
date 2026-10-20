@@ -841,6 +841,7 @@ async function renderDeviceDetail(identifier) {
   if (role === "RCM") return renderRcm(device);
   if (role === "LCM") return renderLcm(device);
   if (role === "SIM") return renderSim(device);
+  if (role === "PNL") return renderPanelRooms(device);
   return renderRoleShell(device, "Unassigned Device");
 }
 
@@ -883,6 +884,7 @@ async function renderRcm(device) {
       </div>
       <div class="rcm-grid">${data.channels.map(channelCard).join("")}</div>
     </section>`;
+  await renderChannelMetadata(device.module.device_id || device.module.hostname);
 }
 
 function roleManagementBlock(device) {
@@ -930,6 +932,7 @@ async function renderLcm(device) {
         ${lcmColumn("110V Dimmers", `${hvDimmers.length} outputs`, hvDimmers.map(dimmerTile).join(""))}
       </div>
     </section>`;
+  await renderChannelMetadata(device.module.device_id || device.module.hostname);
 }
 
 function lcmColumn(title, count, body) {
@@ -1169,6 +1172,7 @@ async function renderSettings() {
       </div>
       ${git ? gitSettingsForm(git) : `<div class="notice warn">Git repository settings are unavailable for this account or HCM instance.</div>`}
     </section>`;
+  await renderRegistrySettings();
 }
 
 function gitSettingsForm(git) {
@@ -2004,3 +2008,125 @@ window.onpopstate = () => renderRoute();
     showApp(false);
   }
 })();
+
+// Shared RCM/LCM metadata editor. Export flags never gate native HCM controls.
+const metadataPurposes = ['LIGHTING', 'HVAC', 'LANDSCAPE', 'GENERAL', 'SECURITY', 'OTHER'];
+const metadataHvacRoles = ['G', 'Y1', 'Y2', 'W1', 'W2', 'O/B', 'AUX', 'E', 'OTHER_HVAC'];
+function metadataOptions(values, selected) {
+  return values.map(value => `<option value="${esc(value)}" ${value === selected ? 'selected' : ''}>${esc(value)}</option>`).join('');
+}
+function roomOptions(rooms, selected) {
+  return '<option value="">Unassigned</option>' + rooms.filter(r => r.enabled || r.id === selected).map(r => `<option value="${r.id}" ${r.id === selected ? 'selected' : ''}>${esc(r.name)}${r.enabled ? '' : ' (disabled)'}</option>`).join('');
+}
+async function renderChannelMetadata(identifier) {
+  const [channels, rooms] = await Promise.all([api(`/channels?identifier=${encodeURIComponent(identifier)}`), api('/rooms')]);
+  const section = document.createElement('section');
+  section.className = 'panel';
+  const disabled = currentUser?.role === 'ADMIN' ? '' : 'disabled';
+  section.innerHTML = `<div class="panel-head"><h3>Channel Configuration</h3></div><div class="rcm-grid">${channels.map(c => `
+    <form class="metadata-card" data-metadata-id="${c.id}">
+      <h4>${esc(c.channel_id)} · ${esc(c.channel_kind.replaceAll('_', ' '))}</h4>
+      <fieldset ${disabled}>
+      <label>Name <input name="display_name" maxlength="120" value="${esc(c.display_name)}"></label>
+      <label>Room <select name="room_id">${roomOptions(rooms, c.room_id)}</select></label>
+      <label>Purpose <select name="purpose" ${c.channel_kind !== 'relay' ? 'disabled' : ''}>${metadataOptions(metadataPurposes, c.purpose)}</select></label>
+      ${c.channel_kind !== 'relay' ? '<p class="muted">Dimmer purpose is fixed to Lighting.</p>' : ''}
+      <label><input type="checkbox" name="enabled" ${c.enabled ? 'checked' : ''}> Enabled</label>
+      <p>Bridge Exposure</p>
+      <label><input type="checkbox" name="mqtt_enabled" ${c.mqtt_enabled ? 'checked' : ''}> MQTT</label>
+      <label><input type="checkbox" name="matter_enabled" ${c.matter_enabled ? 'checked' : ''}> Matter</label>
+      <div data-purpose="LIGHTING"><label><input type="checkbox" name="emergency" ${c.emergency ? 'checked' : ''}> Emergency</label></div>
+      <div data-purpose="HVAC"><label>HVAC Control <select name="hvac_control">${metadataOptions(metadataHvacRoles, c.hvac_control || 'G')}</select></label>
+      <label data-hvac-description>Other HVAC description <input name="hvac_description" maxlength="120" value="${esc(c.hvac_description || '')}"></label></div>
+      <div data-purpose="SECURITY"><label>Endpoint Label <input name="security_endpoint_label" maxlength="120" value="${esc(c.security_endpoint_label || '')}"></label></div>
+      <div data-purpose="OTHER"><label>Function <input name="other_function" maxlength="120" value="${esc(c.other_function || '')}"></label></div>
+      <button type="submit">Save Configuration</button><p data-metadata-result role="status"></p>
+      </fieldset>
+    </form>`).join('')}</div>`;
+  $('content').append(section);
+  for (const form of section.querySelectorAll('form')) {
+    const update = () => {
+      const purpose = form.elements.purpose.value;
+      for (const group of form.querySelectorAll('[data-purpose]')) group.hidden = group.dataset.purpose !== purpose;
+      form.querySelector('[data-hvac-description]').hidden = form.elements.hvac_control.value !== 'OTHER_HVAC';
+    };
+    form.addEventListener('change', update);
+    update();
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const f = form.elements, purpose = f.purpose.value;
+      const body = {display_name: f.display_name.value, room_id: f.room_id.value ? Number(f.room_id.value) : null,
+        purpose, enabled: f.enabled.checked, mqtt_enabled: f.mqtt_enabled.checked, matter_enabled: f.matter_enabled.checked,
+        emergency: purpose === 'LIGHTING' && f.emergency.checked,
+        hvac_control: purpose === 'HVAC' ? f.hvac_control.value : null,
+        hvac_description: purpose === 'HVAC' && f.hvac_control.value === 'OTHER_HVAC' ? f.hvac_description.value || null : null,
+        security_endpoint_label: purpose === 'SECURITY' ? f.security_endpoint_label.value || null : null,
+        other_function: purpose === 'OTHER' ? f.other_function.value || null : null};
+      const result = form.querySelector('[data-metadata-result]');
+      try { await api(`/channels/${form.dataset.metadataId}`, {method: 'PATCH', body: JSON.stringify(body)}); result.textContent = 'Saved'; }
+      catch (error) { result.textContent = error.message; }
+    });
+  }
+}
+async function renderRegistrySettings() {
+  const [rooms, bridges] = await Promise.all([api('/rooms'), api('/bridges')]);
+  const section = document.createElement('section');
+  section.className = 'panel';
+  const disabled = currentUser?.role === 'ADMIN' ? '' : 'disabled';
+  section.innerHTML = `<h3>Rooms</h3><p>Room assignments remain intact when a room is renamed or disabled.</p>
+    ${rooms.map(r => `<form data-room-id="${r.id}"><fieldset ${disabled}><input name="name" aria-label="Room name" required maxlength="120" value="${esc(r.name)}"><label><input name="enabled" type="checkbox" ${r.enabled ? 'checked' : ''}> Enabled</label><button>Save Room</button><span role="status"></span></fieldset></form>`).join('')}
+    <form data-new-room><fieldset ${disabled}><input name="name" placeholder="New room name" required maxlength="120"><button>Add Room</button><span role="status"></span></fieldset></form>
+    ${['mqtt', 'matter'].map(b => `<h3>${b.toUpperCase()} Bridge</h3><p>${esc(bridges[b].status)}</p><form data-bridge-name="${b}"><fieldset ${disabled}>
+      <label><input name="enabled" type="checkbox" ${bridges.settings[b].enabled ? 'checked' : ''}> Enabled</label>
+      ${b === 'mqtt' ? `<label>Broker <input name="host" value="${esc(bridges.settings.mqtt.host)}"></label><label>Port <input name="port" type="number" min="1" max="65535" value="${bridges.settings.mqtt.port}"></label><label><input name="tls" type="checkbox" ${bridges.settings.mqtt.tls ? 'checked' : ''}> TLS</label>` : '<p>Pairing code and persistent fabric storage are provisioned on HCM.</p>'}
+      <button>Save Bridge Settings</button><span role="status"></span></fieldset></form>
+    <ul>${bridges[b].channels.filter(c => c.kind || c.reason !== 'Exposure disabled').map(c => `<li>${esc(c.name)} — ${esc(c.reason || c.kind)}${c.endpoint ? ` · endpoint ${c.endpoint}` : ''}</li>`).join('') || '<li>No channels selected for export.</li>'}</ul>`).join('')}`;
+  $('content').append(section);
+  for (const form of section.querySelectorAll('form')) form.addEventListener('submit', async event => {
+    event.preventDefault();
+    try {
+      if (form.dataset.bridgeName) {
+        const body = {enabled: form.elements.enabled.checked};
+        if (form.dataset.bridgeName === 'mqtt') Object.assign(body, {host: form.elements.host.value, port: Number(form.elements.port.value), tls: form.elements.tls.checked});
+        await api(`/bridges/${form.dataset.bridgeName}/settings`, {method: 'PUT', body: JSON.stringify(body)});
+        await renderSettings(); return;
+      }
+      const roomId = form.dataset.roomId;
+      await api(roomId ? `/rooms/${roomId}` : '/rooms', {method: roomId ? 'PUT' : 'POST', body: JSON.stringify({name: form.elements.name.value, enabled: roomId ? form.elements.enabled.checked : true})});
+      await renderSettings();
+    } catch (error) { form.querySelector('[role=status]').textContent = error.message; }
+  });
+}
+async function renderPanelRooms(device) {
+  renderRoleShell(device, 'Panel');
+  const identifier = encodeURIComponent(device.module.device_id || device.module.hostname);
+  const [rooms, assigned, controls] = await Promise.all([api('/rooms'), api(`/modules/${identifier}/rooms`), api(`/modules/${identifier}/room-controls`)]);
+  const section = document.createElement('section'); section.className = 'panel';
+  section.innerHTML = `<h3>Room Controls</h3><form><label>Primary Room <select name="room_id">${roomOptions(rooms, assigned.find(r => r.is_primary)?.room_id)}</select></label><button ${currentUser?.role === 'ADMIN' ? '' : 'disabled'}>Save Assignment</button><span role="status"></span></form>
+  <ul>${controls.map(c => `<li>${esc(c.display_name || c.logical_name || c.channel_id)}</li>`).join('') || '<li>No lighting channels assigned.</li>'}</ul>`;
+  $('content').append(section);
+  const drawControls = items => {
+    section.querySelector('ul').innerHTML = items.map(c => `<li>${esc(c.display_name || c.logical_name || c.channel_id)}
+      ${c.logical_enabled && currentUser?.role === 'ADMIN' ? `<button type="button" data-panel-control="${c.id}" data-panel-value="true">On</button><button type="button" data-panel-control="${c.id}" data-panel-value="false">Off</button>` : '<span class="muted"> Control unavailable</span>'}</li>`).join('') || '<li>No lighting channels assigned.</li>';
+    for (const button of section.querySelectorAll('[data-panel-control]')) button.onclick = async () => {
+      const c = items.find(item => item.id === Number(button.dataset.panelControl));
+      const value = button.dataset.panelValue === 'true';
+      const command = c.channel_kind === 'relay' ? {op: 'set_relay', value} : {op: 'light', value, percent: value ? 100 : 0};
+      try { await api('/device/command', {method: 'POST', body: JSON.stringify({logical_name: c.logical_name, command})}); }
+      catch (error) { section.querySelector('[role=status]').textContent = error.message; }
+    };
+  };
+  drawControls(controls);
+  const refreshControls = async () => {
+    if (!section.isConnected) return;
+    try { drawControls(await api(`/modules/${identifier}/room-controls`)); }
+    catch (error) { section.querySelector('[role=status]').textContent = error.message; }
+    if (section.isConnected) setTimeout(refreshControls, 5000);
+  };
+  setTimeout(refreshControls, 5000);
+  section.querySelector('form').addEventListener('submit', async event => {
+    event.preventDefault(); const id = Number(event.target.elements.room_id.value) || null;
+    try { await api(`/modules/${identifier}/rooms`, {method: 'PUT', body: JSON.stringify({room_ids: id ? [id] : [], primary_room_id: id})}); await renderPanelRooms(device); }
+    catch (error) { section.querySelector('[role=status]').textContent = error.message; }
+  });
+}

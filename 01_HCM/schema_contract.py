@@ -1,5 +1,10 @@
 """Read-only schema prerequisites for the current authentication/application API."""
 REQUIRED_COLUMNS = {
+    'channel_metadata': {'id', 'module_id', 'channel_id', 'channel_kind', 'purpose', 'room_id', 'emergency', 'hvac_control', 'mqtt_enabled', 'matter_enabled'},
+    'pnl_rooms': {'module_id', 'room_id', 'is_primary'},
+    'matter_endpoints': {'channel_id', 'endpoint'},
+    'bridge_settings': {'bridge', 'settings'},
+    'bridge_publications': {'bridge', 'topic'},
     'users': {'username', 'role', 'password_hash', 'enabled', 'touchscreen_pin_hash',
               'touchscreen_pin_lookup', 'touchscreen_pin_enabled', 'touchscreen_permission',
               'touchscreen_pin_changed_at', 'touchscreen_session_policy'},
@@ -22,4 +27,4 @@ async def check_schema(conn):
     if missing:
         raise RuntimeError('HCM schema prerequisites missing: ' + ', '.join(missing) +
                            '; review backup and migrations before replacing HCM')
-    return {'ok': True, 'schema_contract': 'authentication-v7'}
+    return {'ok': True, 'schema_contract': 'metadata-v8'}

@@ -3,6 +3,7 @@ import asyncio, logging, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from importlib import import_module
+channel_contract = import_module('07_servises.common.channel_metadata')
 common_agent = import_module('07_servises.common.agent')
 common_cfg = import_module('07_servises.common.config')
 common_hw = import_module('07_servises.common.hardware')
@@ -69,6 +70,20 @@ class RCMAgent(common_agent.ModuleAgent):
             hvac_shutdown_channels=set(safety_cfg.get('hvac_shutdown_channels', [])),
         )
 
+        import json
+        try:
+            cached = json.loads((self.runtime_root / '.state' / f'channel-metadata-{self.module_type}.json').read_text())
+            result = self.accept_channel_metadata([{'channel_id': ch, 'metadata': value} for ch, value in cached.items()])
+            if not result['ok']:
+                raise ValueError(result['error'])
+        except FileNotFoundError:
+            pass  # Legacy configuration remains authoritative until first sync.
+
+    def _hvac_interlock(self, channel, value):
+        roles = {ch: metadata['hvac_control'] for ch, metadata in getattr(self, 'channel_metadata', {}).items() if metadata['purpose'] == 'HVAC'}
+        candidate = {**self.relays.snapshot(), channel: value}
+        return channel_contract.hvac_conflict(roles, candidate)
+
     def _safety_requires_output_shutdown(self, conditions):
         return any(bool((conditions or {}).get(name)) for name in (
             'maintenance_lockout',
@@ -130,6 +145,23 @@ class RCMAgent(common_agent.ModuleAgent):
         }
 
     async def apply_command(self, payload):
+        if payload.get('op') == 'metadata_hvac_off':
+            failures = []
+            metadata = getattr(self, 'channel_metadata', {})
+            targets = {ch for ch, value in metadata.items() if value['purpose'] == 'HVAC'} | self.safety.hvac_shutdown_channels
+            for ch in sorted(targets):
+                try:
+                    if ch not in self.relays.values:
+                        raise ValueError('unknown HVAC relay')
+                    if self.io_mode == 'real':
+                        if not self.driver_bundle or not self.driver_bundle.get('rcm_relays'):
+                            raise RuntimeError('physical driver unavailable')
+                        self.driver_bundle['rcm_relays'].set_channel(common_infra.RCM_RELAY_CHANNELS.index(ch), False)
+                    self.relays.set(ch, False)
+                except Exception as exc:
+                    failures.append({'channel': ch, 'error': str(exc)})
+            return {'ok': not failures, 'failures': failures, 'attempted': sorted(targets)}
+
         if payload.get('op') == 'simulate_relay':
             if not self.simulation:
                 return {
@@ -139,6 +171,8 @@ class RCMAgent(common_agent.ModuleAgent):
                     'physical_outputs_commanded': False,
                 }
             ch = payload['channel'].upper()
+            if bool(payload['value']) and self._hvac_interlock(ch, True):
+                return {'ok': False, 'error': 'hvac_heating_cooling_interlock', 'physical_outputs_commanded': False}
             self.relays.set(ch, bool(payload['value']))
             return {
                 'ok': True,
@@ -159,14 +193,16 @@ class RCMAgent(common_agent.ModuleAgent):
             physical_requested = bool(payload.get('physical_write_requested'))
             if physical_requested and self.io_mode != 'real':
                 return {'ok': False, 'error': 'io_mode_not_real', 'channel': ch, 'physical_outputs_commanded': False, 'state_confidence_label': state_confidence.UNKNOWN}
-            if physical_requested and not common_commissioning.physical_write_allowed(self.hardware_profile, ch):
-                return {'ok': False, 'error': common_commissioning.physical_write_denial_reason(self.hardware_profile, ch), 'channel': ch, 'physical_outputs_commanded': False, 'state_confidence_label': state_confidence.UNKNOWN}
             decision = self.safety.decide(common_safety.OutputRequest(
                 self.identity.get('device_id'),
                 ch,
                 payload,
                 payload.get('source', 'module_api'),
             ))
+            if physical_requested and bool(decision.final_command.get('value', False)) and not common_commissioning.physical_write_allowed(self.hardware_profile, ch):
+                return {'ok': False, 'error': common_commissioning.physical_write_denial_reason(self.hardware_profile, ch), 'channel': ch, 'physical_outputs_commanded': False, 'state_confidence_label': state_confidence.UNKNOWN}
+            if bool(decision.final_command.get('value', False)) and self._hvac_interlock(ch, True):
+                return {'ok': False, 'error': 'hvac_heating_cooling_interlock', 'physical_outputs_commanded': False}
             physical_commanded = False
             if physical_requested:
                 if not self.driver_bundle:

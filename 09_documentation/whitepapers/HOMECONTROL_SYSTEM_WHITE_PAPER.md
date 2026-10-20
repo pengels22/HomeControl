@@ -437,3 +437,10 @@ At the audited baseline, HomeControl is best described as:
 **a software-complete distributed control framework with production-shaped physical RCM/LCM/CAN pathways, strong safety gating, independent supervision, and uncommissioned field hardware.**
 
 The next hardware milestone is a controlled single-channel RCM bench test using explicit real I2C configuration and a safe test load.
+
+## Channel registry extension
+
+See [channel metadata, rooms, HVAC semantics and bridges](CHANNEL_METADATA_AND_BRIDGES.md)
+for migration 008, the shared editor, safety compatibility, and optional bridge
+transports. Software checks do not establish physical commissioning, MQTT broker
+connectivity, or Matter fabric acceptance.

@@ -1256,3 +1256,9 @@ th {
 [hidden] {
   display: none !important;
 }
+
+.metadata-card { padding: 1rem; border: 1px solid var(--border, #ccd3dc); border-radius: .6rem; }
+.metadata-card fieldset { border: 0; padding: 0; display: grid; gap: .65rem; min-width: 0; }
+.metadata-card label { display: block; }
+.metadata-card input:not([type=checkbox]), .metadata-card select { width: 100%; }
+.metadata-card [hidden] { display: none; }

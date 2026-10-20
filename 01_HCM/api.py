@@ -595,8 +595,13 @@ async def set_setpoint(body: HvacSetpointIn, user=Depends(require_user)):
 async def room(body: RoomStateIn, user=Depends(require_user)):
     if user['role'] != 'ADMIN': raise HTTPException(403)
     from .hvac import RoomReading
-    hvac.rooms[body.room] = RoomReading(**body.model_dump())
-    await hvac.persist_room(hvac.rooms[body.room])
+    reading = RoomReading(**body.model_dump())
+    try:
+        await hvac.persist_room(reading)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    hvac.rooms = {name: value for name, value in hvac.rooms.items() if value.room_id != reading.room_id}
+    hvac.rooms[reading.room] = reading
     await hvac.evaluate()
     return {'ok': True, 'average_f': hvac.average_temperature()}
 

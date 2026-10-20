@@ -23,6 +23,7 @@ class RoomReading:
     actuated_damper: bool = True
     damper_logical_device: str | None = None
     sensor_ok: bool = True
+    room_id: int | None = None
 
 @dataclass
 class HVACState:
@@ -84,6 +85,7 @@ class HVACController:
             rows = await conn.fetch(
                 """
                 SELECT
+                    r.id AS room_id,
                     r.name AS room,
                     COALESCE(rh.temperature_f, 70) AS temperature_f,
                     COALESCE(rh.occupied, false) AS occupied,
@@ -104,6 +106,7 @@ class HVACController:
             self.rooms = {
                 r["room"]: RoomReading(
                     room=r["room"],
+                    room_id=r["room_id"],
                     temperature_f=float(r["temperature_f"]),
                     occupied=bool(r["occupied"]),
                     actuated_damper=bool(r["actuated_damper"]),
@@ -132,16 +135,24 @@ class HVACController:
         from . import db
 
         async with db.acquire() as conn:
-            room = await conn.fetchrow(
-                """
-                INSERT INTO rooms(name, permanently_open_hvac)
-                VALUES($1, $2)
-                ON CONFLICT(name) DO UPDATE SET enabled=true
-                RETURNING id
-                """,
-                reading.room,
-                not reading.actuated_damper,
-            )
+            if reading.room_id is not None:
+                room = await conn.fetchrow('SELECT id,name,enabled FROM rooms WHERE id=$1', reading.room_id)
+                if not room:
+                    raise ValueError('Unknown HVAC room ID')
+            else:
+                room = await conn.fetchrow(
+                    """
+                    INSERT INTO rooms(name, permanently_open_hvac)
+                    VALUES($1, $2)
+                    ON CONFLICT(name) DO UPDATE SET name=EXCLUDED.name
+                    RETURNING id,name,enabled
+                    """,
+                    reading.room, not reading.actuated_damper,
+                )
+            if not room['enabled']:
+                raise ValueError('HVAC room is disabled')
+            reading.room_id = room['id']
+            reading.room = room['name']
             damper_id = None
             if reading.damper_logical_device:
                 damper = await conn.fetchrow(
@@ -175,6 +186,8 @@ class HVACController:
             )
 
     async def _set_output(self, name: str, value: bool):
+        if value and ((name == 'HEAT' and self.state.cool) or (name == 'COOL' and self.state.heat)):
+            raise RuntimeError('HVAC heating/cooling interlock')
         await self.output(name, value)
         setattr(self.state, name.lower(), value)
 
@@ -233,6 +246,11 @@ class HVACController:
                 if self.state.cool: await self._set_output('COOL', False); self.state.last_cool_off = now
                 if not self.state.fan: await self._set_output('FAN', True)
                 return
+
+            # A mode change must drop the prior call before considering demand.
+            # Preserve that family's restart timestamp and fan post-run.
+            if (mode == Mode.COOL and self.state.heat) or (mode == Mode.HEAT and self.state.cool):
+                await self._stop_conditioning(now, immediate_fan_off=False)
 
             if not any(r.occupied for r in self.rooms.values()):
                 await self._stop_conditioning(now, immediate_fan_off=True)

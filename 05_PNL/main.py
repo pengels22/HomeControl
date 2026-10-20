@@ -12,6 +12,7 @@ class PNLAgent(common_agent.ModuleAgent):
         super().__init__('PNL', config)
         self.global_config = common_global_config.load_global_config('PNL')
         self.room = config.get('room')
+        self.room_controls = []
         self.dashboard_url = config.get('dashboard_url')
         self.auto_refresh_interval_ms = int(config.get('auto_refresh_interval_ms', self.global_config.Panel_Auto_Refresh_Interval))
         self.default_brightness = int(config.get('default_brightness', self.global_config.Panel_Default_Brightness))
@@ -20,6 +21,7 @@ class PNLAgent(common_agent.ModuleAgent):
     async def collect_state(self):
         return {
             'room': self.room,
+            'room_controls': self.room_controls,
             'dashboard_url': self.dashboard_url,
             'display': {
                 'auto_refresh_interval_ms': self.auto_refresh_interval_ms,
@@ -29,6 +31,9 @@ class PNLAgent(common_agent.ModuleAgent):
         }
 
     async def apply_config(self, payload):
+        if 'room_controls' in payload:
+            self.room_controls = payload['room_controls']
+            return {'ok': True, 'room_controls_contract': 1, 'controls': len(self.room_controls)}
         result = await super().apply_config(payload)
         self.room = payload.get('room', self.room)
         self.dashboard_url = payload.get('dashboard_url', self.dashboard_url)

@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from typing import Any, Literal
 
 class RoomStateIn(BaseModel):
+    room_id: int | None = Field(default=None, gt=0)
     room: str
     temperature_f: float
     occupied: bool = False

@@ -206,6 +206,13 @@ class SafetyController:
         await self.heartbeat.fault('fire_alarm_active', 'fire alarm active' if active else None)
         if active:
             hvac_result = await self.hvac.force_off()
+            from .channel_registry import fire_shutdown
+            try:
+                metadata_failures = await fire_shutdown()
+                if metadata_failures:
+                    log.error('Metadata HVAC safety shutdown failures: %s', metadata_failures)
+            except Exception:
+                log.exception('Metadata HVAC safety shutdown failed')
             if isinstance(hvac_result, dict) and not hvac_result.get('ok', True):
                 log.error('life-safety HVAC shutdown had output failures: %s', hvac_result.get('failures'))
             await notifications.send(Notification(title='Fire alarm', body='Fire alarm active. HVAC shutdown initiated. Emergency lighting actions initiated where permitted.', priority='critical', category='life_safety'))
@@ -218,11 +225,13 @@ class SafetyController:
                         rows = [{'logical_name': name} for name in self.emergency_lighting_logical_names]
                     else:
                         rows = await conn.fetch("""
-                            SELECT logical_name
-                            FROM logical_devices
-                            WHERE device_class='light'
-                              AND enabled=true
-                              AND COALESCE((metadata->>'emergency_lighting')::boolean,false)=true
+                            SELECT DISTINCT d.logical_name
+                            FROM logical_devices d
+                            LEFT JOIN device_bindings b ON b.logical_device_id=d.id AND b.enabled
+                            LEFT JOIN channel_metadata c ON c.module_id=b.module_id AND c.channel_id=b.channel
+                            WHERE d.enabled AND (
+                                (c.id IS NOT NULL AND c.enabled AND c.purpose='LIGHTING' AND c.emergency)
+                                OR (c.id IS NULL AND d.device_class='light' AND COALESCE((d.metadata->>'emergency_lighting')::boolean,false)))
                         """)
             for r in rows:
                 try:

@@ -959,6 +959,13 @@ async def get_rcm_channels(identifier: str | int) -> dict[str, Any]:
             "simulation": simulation,
             "simulation_control_enabled": simulation and control_online and not bool(row and row["maintenance_locked"]) and not bool(stored.get("lockout")),
         })
+    authoritative = await _channel_metadata_overlay(module["module"]["id"])
+    for item in channels:
+        metadata = authoritative.get(item["channel"])
+        if metadata:
+            item["name"] = metadata["display_name"]
+            item["emergency_lighting"] = metadata["emergency"]
+            item["channel_metadata"] = metadata
     return {
         "device": module,
         "channels": channels,
@@ -983,6 +990,7 @@ async def update_rcm_channel_name(
         raise ValidationError(f"module {module['module']['hostname']} is not currently assigned the RCM role")
     async with db.acquire() as conn:
         async with _transaction(conn):
+            await conn.execute("UPDATE channel_metadata SET display_name=$3 WHERE module_id=$1 AND channel_id=$2", module["module"]["id"], normalized_channel, name.strip())
             before_row = await conn.fetchrow(
                 """
                 SELECT d.*, NULL::text AS room
@@ -1170,6 +1178,13 @@ async def get_lcm_channels(identifier: str | int) -> dict[str, Any]:
             "control_enabled": disabled_reason is None,
             "disabled_reason": disabled_reason,
         })
+    authoritative = await _channel_metadata_overlay(module["module"]["id"])
+    for item in channels:
+        metadata = authoritative.get(item["channel"])
+        if metadata:
+            item["name"] = metadata["display_name"]
+            item["emergency_lighting"] = metadata["emergency"]
+            item["channel_metadata"] = metadata
     return {"device": module, "channels": channels}
 
 
@@ -1298,6 +1313,7 @@ async def update_lcm_channel_settings(
         metadata_patch["fade_seconds"] = 3 if fade_seconds is None else float(fade_seconds)
     async with db.acquire() as conn:
         async with _transaction(conn):
+            await conn.execute("UPDATE channel_metadata SET display_name=$3, emergency=$4 WHERE module_id=$1 AND channel_id=$2", module["module"]["id"], normalized_channel, name.strip(), bool(emergency_lighting))
             before_row = await conn.fetchrow(
                 """
                 SELECT d.*, NULL::text AS room
@@ -2108,3 +2124,9 @@ async def update_binding(
                 after_state=after,
             )
     return after
+
+
+async def _channel_metadata_overlay(module_id):
+    async with db.acquire() as conn:
+        rows = await conn.fetch('SELECT * FROM channel_metadata WHERE module_id=$1', module_id)
+    return {r['channel_id']: dict(r) for r in rows if 'channel_id' in r}

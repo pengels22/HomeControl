@@ -120,3 +120,10 @@ Safety deenergization is allowed to command initialized real hardware OFF even w
 5. Advance to RCM module commissioning only after successful bench evidence.
 6. Repeat a controlled process for LCM.
 7. Commission physical HCM fire GPIO separately.
+
+## Channel registry extension
+
+See [channel metadata, rooms, HVAC semantics and bridges](CHANNEL_METADATA_AND_BRIDGES.md)
+for migration 008, the shared editor, safety compatibility, and optional bridge
+transports. Software checks do not establish physical commissioning, MQTT broker
+connectivity, or Matter fabric acceptance.

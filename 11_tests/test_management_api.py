@@ -791,6 +791,8 @@ class FakeDeviceAdminConn:
         raise AssertionError(f'unexpected fetchrow: {query}')
 
     async def fetch(self, query, *args):
+        if 'FROM channel_metadata' in query:
+            return []
         if 'FROM module_capabilities' in query:
             return self.capabilities
         if 'FROM device_bindings b' in query and 'JOIN logical_devices d' in query:
@@ -801,6 +803,8 @@ class FakeDeviceAdminConn:
         raise AssertionError(f'unexpected fetch: {query}')
 
     async def execute(self, query, *args):
+        if 'UPDATE channel_metadata' in query:
+            return
         if 'INSERT INTO device_management_events' in query:
             self.audit_events.append(args)
             return

@@ -8,6 +8,18 @@ on:
 jobs:
   checks:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test-only
+          POSTGRES_DB: homecontrol_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      HCM_TEST_DATABASE_URL: postgresql://postgres:test-only@localhost:5432/homecontrol_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,7 +39,11 @@ jobs:
         run: |
           ! grep -RInE '192\.168\.60|CAN_250KBPS|250000' 02_SIM 04_RCM 06_config/02_SIM 06_config/04_RCM 06_config/06_RMC
       - name: JavaScript syntax
-        run: node --check 01_HCM/www/app.js
+        run: |
+          node --check 01_HCM/www/app.js
+          npm ci --prefix 07_servises/matter_bridge --ignore-scripts
+          npm run check --prefix 07_servises/matter_bridge
+          HCM_MATTER_VALIDATE_ONLY=true HCM_MATTER_STORAGE="$RUNNER_TEMP/hcm-matter" HCM_MATTER_PASSCODE=20202021 node 07_servises/matter_bridge/bridge.mjs
       - name: Build and verify HCM deployment image (no GPIO or app lifespan)
         run: |
           docker build --build-arg HCM_GIT_SHA="$GITHUB_SHA" -f 06_config/01_HCM/Dockerfile.live -t hcm-ci .

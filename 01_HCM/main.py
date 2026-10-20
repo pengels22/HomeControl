@@ -22,10 +22,10 @@ from .devices import command_logical
 log = logging.getLogger(__name__)
 
 async def hvac_output(name: str, value: bool):
-    # These logical devices are expected to be bound in PostgreSQL.
-    # FAN/COOL/HEAT map to the relay outputs switching R->G, R->Y, R->W.
-    logical = {'FAN':'HVAC Fan Call','COOL':'HVAC Cool Call','HEAT':'HVAC Heat Call'}[name]
-    await command_logical(logical, {'op':'set_relay','value':value})
+    if value and (safety.fire_active or safety.maintenance_lockout_active):
+        raise PermissionError('HVAC energization inhibited by safety')
+    from .channel_registry import thermostat_output
+    await thermostat_output(name, value, command_logical)
 
 async def hvac_damper(room, open_: bool):
     if not room.damper_logical_device: return
@@ -65,6 +65,8 @@ async def lifespan(app: FastAPI):
     storage.ensure_storage_layout()
     await hvac.load_from_db()
     await registry.start()
+    from .bridges import bridge
+    await bridge.start()
     storage.git_sync_manager.start()
     rule_task = asyncio.create_task(rules.run())
     hvac_task = asyncio.create_task(hvac_loop())
@@ -72,6 +74,7 @@ async def lifespan(app: FastAPI):
     yield
     rules.running=False
     rule_task.cancel(); hvac_task.cancel(); alarm_task.cancel()
+    await bridge.stop()
     await storage.git_sync_manager.stop()
     await safety_relays.shutdown()
     await registry.stop(); await db.close()
@@ -94,6 +97,8 @@ async def alarm_contact_loop():
 
 app = FastAPI(title='HomeControl HCM', version='0.1.0', lifespan=lifespan)
 app.include_router(api.router)
+from .metadata_api import router as metadata_router
+app.include_router(metadata_router)
 WEB_ROOT = Path(__file__).resolve().parent / 'www'
 app.mount('/static', StaticFiles(directory=WEB_ROOT), name='static')
 

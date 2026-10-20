@@ -31,6 +31,8 @@ class FakeConn:
 
     async def fetch(self, query):
         self.fetches.append(query)
+        if 'SELECT c.*' in query:
+            return []
         return [{'logical_name': 'Kitchen Light'}, {'logical_name': 'Hall Light'}]
 
 
@@ -83,7 +85,7 @@ async def test_fire_forces_hvac_off_and_commands_only_available_lights(monkeypat
         ('Kitchen Light', {'op': 'light', 'percent': 100, 'value': True}, safety_mod.OutputSource.LIFE_SAFETY, {'fire_active'}),
         ('Hall Light', {'op': 'light', 'percent': 100, 'value': True}, safety_mod.OutputSource.LIFE_SAFETY, {'fire_active'}),
     ]
-    assert "metadata->>'emergency_lighting'" in conn.fetches[0]
+    assert any("metadata->>'emergency_lighting'" in sql for sql in conn.fetches)
     assert conn.executed[0][1:3] == ('fire', True)
     assert sent[0].body == 'Fire alarm active. HVAC shutdown initiated. Emergency lighting actions initiated where permitted.'
 

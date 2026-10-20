@@ -1,0 +1,1 @@
+{"name":"homecontrol-matter-bridge","private":true,"type":"module","scripts":{"check":"node --check bridge.mjs"},"dependencies":{"@matter/main":"0.17.9"}}

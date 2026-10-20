@@ -368,7 +368,8 @@ async def test_lab1_role_transition_persists_audits_and_confirms_from_heartbeat(
         audit_count = await conn.fetchval(
             "SELECT count(*) FROM device_management_events WHERE action LIKE 'module_role.%'"
         )
-        assert audit_count == 5
+        assert audit_count == 4
+        assert await conn.fetchval("SELECT count(*) FROM device_management_events WHERE action='module.registration_reconciled'") == 1
 
 
 @pytest.mark.asyncio

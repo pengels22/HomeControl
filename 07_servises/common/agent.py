@@ -517,7 +517,43 @@ $('login-form').addEventListener('submit',login);$('refresh').addEventListener('
         server = uvicorn.Server(config)
         await server.serve()
 
+    def accept_channel_metadata(self, rows):
+        from .channel_metadata import validate_metadata, hvac_conflict
+        if self.module_type not in {'RCM', 'LCM'} or not isinstance(rows, list):
+            return {'ok': False, 'error': 'invalid metadata snapshot'}
+        validated = {}
+        try:
+            from .module_infra import RCM_RELAY_CHANNELS, LCM_RELAY_CHANNELS, LCM_ANALOG_DIMMER_CHANNELS, LCM_HV_DIMMER_CHANNELS
+            expected = set(RCM_RELAY_CHANNELS if self.module_type == 'RCM' else LCM_RELAY_CHANNELS + LCM_ANALOG_DIMMER_CHANNELS + LCM_HV_DIMMER_CHANNELS)
+            for row in rows:
+                channel = row['channel_id']
+                kind = 'relay' if channel in (RCM_RELAY_CHANNELS if self.module_type == 'RCM' else LCM_RELAY_CHANNELS) else 'lv_dimmer' if channel in LCM_ANALOG_DIMMER_CHANNELS else 'hv_dimmer'
+                if channel not in expected or channel in validated:
+                    raise ValueError('invalid or duplicate channel')
+                validated[channel] = validate_metadata(self.module_type, kind, row['metadata']).model_dump(mode='json')
+            if set(validated) != expected:
+                raise ValueError('incomplete metadata snapshot')
+            roles = {ch: value['hvac_control'] for ch, value in validated.items() if value['purpose'] == 'HVAC'}
+            if hasattr(self, 'relays') and hvac_conflict(roles, self.relays.snapshot()):
+                raise ValueError('metadata would classify active heat and cool together')
+        except (ValueError, KeyError, TypeError) as exc:
+            return {'ok': False, 'error': str(exc)}
+        # A separate durable snapshot survives legacy CSV/package reconciliation.
+        from .module_infra import atomic_write_text
+        if not hasattr(self, 'channel_metadata'):
+            legacy_emergency = set(self.config.get('safety', {}).get('emergency_lighting_channels', []))
+            if any(ch not in validated or not validated[ch]['emergency'] for ch in legacy_emergency):
+                return {'ok': False, 'error': 'legacy emergency designations require reconciliation in HCM'}
+        atomic_write_text(self.runtime_root / '.state' / f'channel-metadata-{self.module_type}.json', json.dumps(validated))
+        self.channel_metadata = validated
+        if hasattr(self, 'safety'):
+            self.safety.hvac_shutdown_channels = set(roles) | set(self.config.get('safety', {}).get('hvac_shutdown_channels', []))
+            self.safety.emergency_lighting_channels = {ch for ch, value in validated.items() if value['purpose'] == 'LIGHTING' and value['emergency'] and value['enabled']}
+        return {'ok': True, 'metadata_contract': 1, 'metadata_channels': len(validated), 'physical_outputs_commanded': False}
+
     async def apply_config(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if 'channel_metadata' in payload:
+            return self.accept_channel_metadata(payload['channel_metadata'])
         snapshot = payload.get('user_snapshot')
         if isinstance(snapshot, dict):
             self.local_auth.provision_snapshot(snapshot, device_id=str(self.identity.get('device_id') or ''))

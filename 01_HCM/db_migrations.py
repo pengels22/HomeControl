@@ -47,6 +47,9 @@ async def migrate(versions: list[int] | None = None) -> list[int]:
                 continue
             async with conn.transaction():
                 await conn.execute(path.read_text())
+                if version == 8:
+                    from .channel_registry import import_legacy_configuration
+                    await import_legacy_configuration(conn)
                 await conn.execute(
                     'INSERT INTO homecontrol_schema_migrations(version, filename) VALUES($1,$2)',
                     version, path.name,

@@ -24,6 +24,8 @@ These papers distinguish among:
 
 ## White papers
 
+- [Channel metadata, rooms, HVAC semantics and bridges](CHANNEL_METADATA_AND_BRIDGES.md)
+
 - [System Architecture](HOMECONTROL_SYSTEM_WHITE_PAPER.md)
 - [Implementation Status](IMPLEMENTATION_STATUS.md)
 - [Life-Safety and Safety Arbitration](LIFE_SAFETY_AND_ARBITRATION.md)
