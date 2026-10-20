@@ -1,5 +1,9 @@
 """Read-only schema prerequisites for the current authentication/application API."""
 REQUIRED_COLUMNS = {
+    'integration_providers': {'provider_id', 'enabled', 'configured', 'status', 'capabilities'},
+    'entities': {'id', 'entity_id', 'provider_id', 'device_id', 'state', 'available'},
+    'service_definitions': {'provider_id', 'domain', 'service_name', 'argument_schema', 'target_requirements'},
+    'logical_devices': {'provider_id', 'external_device_id', 'display_name', 'availability'},
     'channel_metadata': {'id', 'module_id', 'channel_id', 'channel_kind', 'purpose', 'room_id', 'emergency', 'hvac_control', 'mqtt_enabled', 'matter_enabled'},
     'pnl_rooms': {'module_id', 'room_id', 'is_primary'},
     'matter_endpoints': {'channel_id', 'endpoint'},
@@ -27,4 +31,4 @@ async def check_schema(conn):
     if missing:
         raise RuntimeError('HCM schema prerequisites missing: ' + ', '.join(missing) +
                            '; review backup and migrations before replacing HCM')
-    return {'ok': True, 'schema_contract': 'metadata-v8'}
+    return {'ok': True, 'schema_contract': 'integrations-v9'}

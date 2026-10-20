@@ -67,6 +67,11 @@ async def lifespan(app: FastAPI):
     await registry.start()
     from .bridges import bridge
     await bridge.start()
+    from .integrations.runtime import runtime as integrations
+    from .integrations.mock import MockProvider
+    if 'internal_mock' not in integrations.entries:
+        integrations.attach(MockProvider(), enabled=settings.integration_mock_enabled)
+    await integrations.start()
     storage.git_sync_manager.start()
     rule_task = asyncio.create_task(rules.run())
     hvac_task = asyncio.create_task(hvac_loop())
@@ -74,6 +79,7 @@ async def lifespan(app: FastAPI):
     yield
     rules.running=False
     rule_task.cancel(); hvac_task.cancel(); alarm_task.cancel()
+    await integrations.stop()
     await bridge.stop()
     await storage.git_sync_manager.stop()
     await safety_relays.shutdown()
@@ -99,6 +105,8 @@ app = FastAPI(title='HomeControl HCM', version='0.1.0', lifespan=lifespan)
 app.include_router(api.router)
 from .metadata_api import router as metadata_router
 app.include_router(metadata_router)
+from .integrations.api import router as integration_router
+app.include_router(integration_router)
 WEB_ROOT = Path(__file__).resolve().parent / 'www'
 app.mount('/static', StaticFiles(directory=WEB_ROOT), name='static')
 
