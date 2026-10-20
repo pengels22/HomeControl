@@ -11,6 +11,7 @@ def ms_to_s(value: int) -> int:
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix='HCM_', env_file='.env', extra='ignore')
     integration_mock_enabled: bool = False
+    integration_secret_key_file: Path | None = Path('/etc/homecontrol/integration-secrets.key')
     api_host: str = '0.0.0.0'
     api_port: int = hcm_globals.API_HCM_Port
     module_host: str = '0.0.0.0'

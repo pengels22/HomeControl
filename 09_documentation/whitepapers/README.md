@@ -25,6 +25,7 @@ These papers distinguish among:
 ## White papers
 
 - [Integration framework foundation](INTEGRATION_FOUNDATION.md)
+- [Integration configuration and authentication](INTEGRATION_CONFIGURATION.md)
 - [Channel metadata, rooms, HVAC semantics and bridges](CHANNEL_METADATA_AND_BRIDGES.md)
 
 - [System Architecture](HOMECONTROL_SYSTEM_WHITE_PAPER.md)

@@ -52,8 +52,10 @@ class Registry:
                     ON CONFLICT(provider_id) DO UPDATE SET display_name=EXCLUDED.display_name,
                     version=EXCLUDED.version,enabled=EXCLUDED.enabled,configured=EXCLUDED.configured,
                     capabilities=EXCLUDED.capabilities,status=EXCLUDED.status,updated_at=now()''',
-                    info.provider_id,info.display_name,info.version,enabled,configured,json.dumps(info.capabilities),
-                    'starting' if enabled and configured else 'configuration_required' if enabled else 'disabled')
+                info.provider_id,info.display_name,info.version,enabled,configured,json.dumps(info.capabilities),
+                'starting' if enabled and configured else 'configuration_required' if enabled else 'disabled')
+                await conn.execute('''UPDATE integration_providers SET config_schema=$2::jsonb,config_flow=$3::jsonb
+                    WHERE provider_id=$1''',info.provider_id,json.dumps(getattr(info,'config_schema',{})),json.dumps(getattr(info,'config_flow',{})))
                 # A fresh process cannot truthfully claim old entity states are live.
                 await self._unavailable(conn,info.provider_id)
 

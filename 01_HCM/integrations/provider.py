@@ -10,6 +10,8 @@ class ProviderInfo:
     display_name: str
     version: str = '1'
     capabilities: dict[str, bool] = field(default_factory=dict)
+    config_schema: dict = field(default_factory=dict)
+    config_flow: dict = field(default_factory=dict)
 
 
 class Diagnostics(BaseModel):
@@ -37,6 +39,21 @@ class Provider(ABC):
     async def reload(self):
         await self.stop()
         await self.start()
+
+    def config_schema(self):
+        return {}
+
+    def config_flow(self):
+        return {'type': 'simple', 'fields': []}
+
+    async def validate_config(self, config):
+        return True
+
+    async def validate_credentials(self, credentials):
+        return True
+
+    async def test_connection(self):
+        return await self.health_check()
 
     @abstractmethod
     async def health_check(self) -> bool:

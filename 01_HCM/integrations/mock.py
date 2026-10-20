@@ -11,13 +11,29 @@ class MockProvider(Provider):
     info=ProviderInfo('internal_mock','Internal Test Provider',capabilities={
         'devices':True,'entities':True,'states':True,'events':True,'services':True,
         'reload':True,'physical_control':False,
-    })
+    }, config_schema={'type':'object','properties':{'host':{'type':'string'},'port':{'type':'integer','minimum':1}},'additionalProperties':False},
+    config_flow={'type':'api_key','fields':[{'name':'host','type':'text','required':True},{'name':'port','type':'number'}], 'credential_kinds':['api_key']})
 
     def __init__(self):
         self.context=None
         self.running=False
         self.fail_health=False
         self.updates=0
+
+    def config_schema(self):
+        return {'type':'object','properties':{'host':{'type':'string'},'port':{'type':'integer','minimum':1}},'additionalProperties':False}
+
+    def config_flow(self):
+        return {'type':'api_key','fields':[{'name':'host','type':'text','required':True},{'name':'port','type':'number'}], 'credential_kinds':['api_key']}
+
+    async def validate_config(self, config):
+        if not config.get('host'): raise ValueError('Host is required')
+        if 'port' in config and (not isinstance(config['port'],int) or config['port']<1): raise ValueError('Port is invalid')
+        return True
+
+    async def validate_credentials(self, credentials):
+        if not isinstance(credentials,str) or len(credentials)<4: raise ValueError('API key is invalid')
+        return True
 
     async def setup(self,context):
         self.context=context

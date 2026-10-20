@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 import asyncpg
 import pytest
+from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel, ConfigDict
@@ -36,6 +37,7 @@ async def database(monkeypatch):
         native=await conn.fetchval("INSERT INTO logical_devices(logical_name,device_class,maintenance_locked) VALUES('Pre-migration lamp','light',true) RETURNING id")
         before=dict(await conn.fetchrow('SELECT * FROM logical_devices WHERE id=$1',native))
         await conn.execute((ROOT/'08_database/009_integration_foundation.sql').read_text())
+        await conn.execute((ROOT/'08_database/010_integration_configuration.sql').read_text())
         after=dict(await conn.fetchrow('SELECT * FROM logical_devices WHERE id=$1',native))
         assert {key:after[key] for key in before}==before
         @asynccontextmanager
@@ -263,3 +265,36 @@ async def test_service_failure_does_not_break_runtime(running):
     assert await host.registry.services.invoke('internal_mock','internal_mock','ping',{})=={'ok':True,'mock':True}
     await host.health('internal_mock')
     assert host.entries['internal_mock'].status=='connected'
+
+
+async def test_configuration_encrypts_redacts_and_replaces_credentials(database,monkeypatch):
+    monkeypatch.setenv('HCM_INTEGRATION_SECRET_KEY', Fernet.generate_key().decode())
+    host=runtime_mod.Runtime(registry_mod.Registry()); mock=mock_mod.MockProvider(); host.attach(mock,enabled=True)
+    await host.start_provider('internal_mock')
+    config=import_module('01_HCM.integrations.config'); secrets=import_module('01_HCM.integrations.secrets')
+    first=await config.save(mock,config.ConfigInput(config={'host':'lan.local','port':1234},credential_kind='api_key',credential='first-secret'),actor='admin')
+    assert first[0]['credential_configured'] and first[0]['credential_ref'] is None
+    public=await config.inspect('internal_mock'); assert 'first-secret' not in str(public) and public[0]['config']=={'host':'lan.local','port':1234}
+    ref=await database.fetchval('SELECT credential_ref FROM integration_providers WHERE provider_id=$1','internal_mock')
+    assert await secrets.get(ref)=='first-secret'
+    await config.save(mock,config.ConfigInput(config={'host':'lan.local'},credential_kind='api_key',credential='second-secret'),actor='admin')
+    assert await database.fetchval('SELECT revoked_at IS NOT NULL FROM integration_credentials WHERE credential_ref=$1',ref)
+    with pytest.raises(LookupError): await secrets.get(ref)
+    await host.stop()
+
+
+async def test_configuration_authorization_and_validation(database):
+    app=FastAPI(); from importlib import import_module
+    app.include_router(import_module('01_HCM.integrations.config_api').router)
+    async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client:
+        app.dependency_overrides[import_module('01_HCM.integrations.config_api').require_user]=lambda:{'user':'viewer','role':'READONLY'}
+        assert (await client.post('/api/v1/integrations/internal_mock/disable')).status_code==403
+
+
+def test_webhook_guard_authentication_replay_and_size():
+    webhooks=import_module('01_HCM.integrations.webhooks'); h=webhooks.WebhookGuard('internal_mock',max_bytes=8)
+    import hmac,hashlib
+    payload=b'payload'; sig=hmac.new(b'secret',payload,hashlib.sha256).hexdigest()
+    assert h.verify(payload,sig,'secret','nonce')['provider_id']=='internal_mock'
+    with pytest.raises(ValueError,match='replay'): h.verify(payload,sig,'secret','nonce')
+    with pytest.raises(ValueError,match='authentication'): h.verify(payload,'bad','secret','new')
