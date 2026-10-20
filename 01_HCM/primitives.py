@@ -205,17 +205,80 @@ class NativePrimitives:
         run_id=await self.engine.trigger(definition,source='script',kind='script',variables={k:v for k,v in values.items() if k!='_hcm_depth'})
         return {'run_id':str(run_id),'script_id':str(row['script_id'])}
     async def _scene_turn_on(self,a,t):
-        async with db.acquire() as conn: row=await conn.fetchrow('SELECT targets FROM native_scenes WHERE entity_ref=$1 AND enabled',int(t))
+        return await self.activate_scene(int(t),dry_run=False)
+
+    async def _service_declarations(self,provider_id,domain):
+        rows=await self.registry.inspect('services',provider_id)
+        return {row['service_name']:row for row in rows if row['domain']==domain}
+
+    async def _scene_plan_target(self,target):
+        entity=int(target['entity_ref']); desired=target.get('state'); attrs=target.get('attributes') or {}
+        async with db.acquire() as conn: info=await conn.fetchrow('SELECT id,entity_id,provider_id,domain,available FROM entities WHERE id=$1',entity)
+        base={'entity_ref':entity,'entity_id':info['entity_id'] if info else None,'requested':{'state':desired,'attributes':attrs},'operations':[],'unsupported_attributes':[],'skipped':False,'missing':False}
+        if not info: base.update(success=False,missing=True,error='Target missing'); return base
+        domain=info['domain']; base['domain']=domain
+        if domain in {'sensor','binary_sensor','weather','calendar','device_tracker','input_button','timer','schedule'}:
+            base.update(success=True,skipped=True,reason='read-only or non-restorable domain'); base['unsupported_attributes']=list(attrs); return base
+        declarations=await self._service_declarations(info['provider_id'],domain)
+        def add(service,args=None):
+            if service in declarations: base['operations'].append({'service':service,'arguments':args or {}}); return True
+            return False
+        state=str(desired).lower() if desired is not None else None
+        if domain in {'switch','light','input_boolean'}:
+            if state in {'on','true','1'}: add('turn_on')
+            elif state in {'off','false','0'}: add('turn_off')
+            elif desired is not None: base['unsupported_attributes'].append('state')
+        elif domain=='input_number':
+            if desired is not None and not add('set_value',{'value':float(desired)}): base['unsupported_attributes'].append('state')
+        elif domain=='input_text':
+            if desired is not None and not add('set_value',{'value':str(desired)}): base['unsupported_attributes'].append('state')
+        elif domain=='input_select':
+            if desired is not None and not add('select_option',{'option':str(desired)}): base['unsupported_attributes'].append('state')
+        elif domain=='input_datetime':
+            if desired is not None and not add('set_datetime',{'value':str(desired)}): base['unsupported_attributes'].append('state')
+        elif domain=='counter':
+            if desired is not None and not add('set_value',{'value':int(desired)}): base['unsupported_attributes'].append('state')
+        elif domain=='media_player':
+            if state in {'on','playing','idle'} and not add('turn_on' if state=='on' else state): base['unsupported_attributes'].append('state')
+            elif state=='off' and not add('turn_off'): base['unsupported_attributes'].append('state')
+        else:
+            base['unsupported_attributes'].append('state' if desired is not None else 'domain')
+        if domain=='light' and 'brightness' in attrs:
+            if not add('set_level',{'level':attrs['brightness']}): base['unsupported_attributes'].append('brightness')
+            for key in set(attrs)-{'brightness'}: base['unsupported_attributes'].append(key)
+        elif domain=='media_player':
+            if 'volume_level' in attrs and not add('volume_set',{'volume_level':attrs['volume_level']}): base['unsupported_attributes'].append('volume_level')
+            if 'muted' in attrs:
+                service='mute' if attrs['muted'] else 'unmute'
+                if not add(service): base['unsupported_attributes'].append('muted')
+            if 'source' in attrs and not add('select_source',{'source':attrs['source']}): base['unsupported_attributes'].append('source')
+            for key in set(attrs)-{'volume_level','muted','source'}: base['unsupported_attributes'].append(key)
+        for key in set(attrs)-({'brightness'} if domain=='light' else {'volume_level','muted','source'} if domain=='media_player' else set()):
+            if domain not in {'light','media_player'}: base['unsupported_attributes'].append(key)
+        base['unsupported_attributes']=sorted(set(base['unsupported_attributes'])); base['success']=bool(info['available']) and not base['missing'];
+        if not info['available']: base.update(success=False,unavailable=True,error='Target unavailable')
+        return base
+
+    async def activate_scene(self,entity_ref,dry_run=False):
+        async with db.acquire() as conn: row=await conn.fetchrow('SELECT targets FROM native_scenes WHERE entity_ref=$1 AND enabled',int(entity_ref))
         if not row: raise LookupError('Scene not found')
-        result={'success':True,'partial':False,'targets':[]}
+        result={'success':True,'partial':False,'dry_run':dry_run,'targets':[]}
         for target in row['targets']:
-            try:
-                state=target.get('state'); entity=int(target['entity_ref'])
-                async with db.acquire() as conn: info=await conn.fetchrow('SELECT provider_id,domain,available FROM entities WHERE id=$1',entity)
-                if not info or not info['available']: raise LookupError('Target unavailable')
-                service='turn_on' if state in ('on',True) else 'turn_off'; value=await self.registry.services.invoke(info['provider_id'],info['domain'],service,{},target_entity_id=entity); result['targets'].append({'entity_ref':entity,'success':True,'result':value})
-            except Exception as exc: result['success']=False; result['partial']=True; result['targets'].append({'entity_ref':target.get('entity_ref'),'success':False,'error':type(exc).__name__})
+            plan=await self._scene_plan_target(target); plan['applied_operations']=[]
+            if plan.get('success') and not plan.get('skipped') and not dry_run:
+                for operation in plan['operations']:
+                    try:
+                        async with db.acquire() as conn: info=await conn.fetchrow('SELECT provider_id FROM entities WHERE id=$1',plan['entity_ref'])
+                        value=await self.registry.services.invoke(info['provider_id'],plan['domain'],operation['service'],operation['arguments'],target_entity_id=plan['entity_ref'])
+                        plan['applied_operations'].append({'service':operation['service'],'result':value})
+                    except Exception as exc:
+                        plan['success']=False; plan['error']=type(exc).__name__; result['partial']=True; break
+            elif plan.get('skipped'):
+                plan['applied_operations']=[]
+            if plan.get('unsupported_attributes') or not plan.get('success'): result['partial']=True; result['success']=False
+            result['targets'].append(plan)
         return result
+
     async def create_helper(self,helper_type,name,config,*,entity_id=None):
         self._validate_helper(helper_type,config); slug=entity_id or f'{helper_type}.{re.sub("[^a-z0-9]+","_",name.lower()).strip("_")}'
         if '.' not in slug: slug=f'{helper_type}.{slug}'
@@ -237,6 +300,38 @@ class NativePrimitives:
         async with db.acquire() as conn: row=await conn.fetchrow('SELECT h.*,e.state,e.attributes,e.available FROM native_helpers h JOIN entities e ON e.id=h.entity_ref WHERE h.helper_id=$1',UUID(str(helper_id)))
         if not row: raise LookupError('Helper not found')
         return dict(row)
+    async def references_entity(self,entity_ref):
+        entity_ref=int(entity_ref); references=[]
+        async with db.acquire() as conn:
+            entity=await conn.fetchrow('SELECT entity_id FROM entities WHERE id=$1',entity_ref)
+            automations=await conn.fetch('SELECT automation_id,name,trigger_definitions,condition_definition,action_sequence FROM automations')
+            scripts=await conn.fetch('SELECT script_id,name,action_sequence FROM native_scripts')
+            scenes=await conn.fetch('SELECT scene_id,name,targets FROM native_scenes')
+        entity_id=entity['entity_id'] if entity else None
+        def scan(value,path,source,source_id):
+            if isinstance(value,dict):
+                for key,item in value.items(): scan(item,f'{path}.{key}',source,source_id)
+            elif isinstance(value,list):
+                for index,item in enumerate(value): scan(item,f'{path}[{index}]',source,source_id)
+            elif value==entity_ref or (entity_id and value==entity_id): references.append({'source':source,'source_id':str(source_id),'path':path})
+            elif isinstance(value,str) and entity_id and ('{{' in value or 'states(' in value or 'state_attr(' in value or 'is_state(' in value):
+                try:
+                    deps=self.engine.expressions.dependencies(self.engine.expressions.compile(value,syntax='jinja' if '{{' in value else 'native'))
+                    if entity_id in deps: references.append({'source':source,'source_id':str(source_id),'path':path,'expression':True})
+                except Exception: pass
+        for row in automations:
+            scan(row['trigger_definitions'],'triggers','automation',row['automation_id']); scan(row['condition_definition'],'conditions','automation',row['automation_id']); scan(row['action_sequence'],'actions','automation',row['automation_id'])
+        for row in scripts: scan(row['action_sequence'],'actions','script',row['script_id'])
+        for row in scenes: scan(row['targets'],'targets','scene',row['scene_id'])
+        return references
+    async def references_primitive(self,kind,primitive_id):
+        table={'script':'native_scripts','scene':'native_scenes','helper':'native_helpers'}[kind]
+        async with db.acquire() as conn: row=await conn.fetchrow(f'SELECT entity_ref,entity_id FROM {table} WHERE {kind}_id=$1' if kind!='helper' else 'SELECT entity_ref,entity_id FROM native_helpers WHERE helper_id=$1',UUID(str(primitive_id)))
+        if not row: return []
+        refs=await self.references_entity(row['entity_ref'])
+        # Direct service target references are already captured by entity_ref.
+        return refs
+
     async def update_helper(self,helper_id,config):
         row=await self.get_helper(helper_id); self._validate_helper(row['helper_type'],config)
         async with db.acquire() as conn: updated=await conn.fetchrow('UPDATE native_helpers SET config=$2::jsonb,updated_at=now() WHERE helper_id=$1 RETURNING *',UUID(str(helper_id)),json.dumps(config))
@@ -244,9 +339,9 @@ class NativePrimitives:
 
     async def delete_helper(self,helper_id):
         row=await self.get_helper(helper_id)
+        refs=await self.references_entity(row['entity_ref'])
+        if refs: raise ValueError(json.dumps({'message':'Helper is referenced','references':refs}))
         async with db.acquire() as conn:
-            used=await conn.fetchval("SELECT EXISTS(SELECT 1 FROM automations WHERE trigger_definitions::text LIKE $1 OR action_sequence::text LIKE $1)",f'%{row["entity_ref"]}%')
-            if used: raise ValueError('Helper is referenced by an automation')
             await conn.execute('DELETE FROM native_helpers WHERE helper_id=$1',UUID(str(helper_id)))
             await conn.execute('UPDATE entities SET enabled=false WHERE id=$1',row['entity_ref'])
         return True
@@ -276,17 +371,21 @@ class NativePrimitives:
         if not row: raise LookupError('Script not found')
         return dict(row)
     async def delete_script(self,script_id):
-        await self.get_script(script_id)
+        row=await self.get_script(script_id); refs=await self.references_entity(row['entity_ref'])
+        if refs: raise ValueError(json.dumps({'message':'Script is referenced','references':refs}))
         async with db.acquire() as conn: await conn.execute('DELETE FROM native_scripts WHERE script_id=$1',UUID(str(script_id)))
         return True
     async def create_scene(self,name,targets,*,description=None,snapshot=False,entity_id=None):
         normalized=[]
         for target in targets:
             ref=int(target['entity_ref'])
+            async with db.acquire() as conn: entity=await conn.fetchrow('SELECT state,attributes,domain,provider_id FROM entities WHERE id=$1 AND enabled',ref)
             if snapshot:
-                async with db.acquire() as conn: row=await conn.fetchrow('SELECT state,attributes FROM entities WHERE id=$1 AND enabled',ref)
-                if not row: raise LookupError('Scene target unavailable')
-                normalized.append({'entity_ref':ref,'state':row['state'],'attributes':row['attributes'] or {}})
+                if not entity: raise LookupError('Scene target unavailable')
+                source_attrs=entity['attributes'] or {}; domain=entity['domain']
+                allowed={'light':{'brightness'},'media_player':{'volume_level','muted','source'},'switch':set(),'input_boolean':set(),'input_number':set(),'input_text':set(),'input_select':set(),'input_datetime':set(),'counter':set()}.get(domain,set())
+                attrs={k:v for k,v in source_attrs.items() if k in allowed}; state=entity['state'] if domain not in {'sensor','binary_sensor','weather','calendar','device_tracker','input_button','timer','schedule'} else None
+                normalized.append({'entity_ref':ref,'state':state,'attributes':attrs})
             else: normalized.append({'entity_ref':ref,'state':target.get('state'),'attributes':target.get('attributes',{})})
         slug=entity_id or f'scene.{re.sub("[^a-z0-9]+","_",name.lower()).strip("_")}'
         device=await self.context.device('scene:'+slug,name,available=True); ref=await self.context.entity('scene:'+slug,slug,device,name)
@@ -307,7 +406,8 @@ class NativePrimitives:
         if not row: raise LookupError('Scene not found')
         return dict(row)
     async def delete_scene(self,scene_id):
-        await self.get_scene(scene_id)
+        row=await self.get_scene(scene_id); refs=await self.references_entity(row['entity_ref'])
+        if refs: raise ValueError(json.dumps({'message':'Scene is referenced','references':refs}))
         async with db.acquire() as conn: await conn.execute('DELETE FROM native_scenes WHERE scene_id=$1',UUID(str(scene_id)))
         return True
     def _initial(self,kind,cfg):

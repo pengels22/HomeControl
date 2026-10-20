@@ -64,7 +64,10 @@ async def run_script(script_id:str,body:dict|None=None,user=Depends(user)):
 async def script_runs(script_id:str,limit:int=100,user=Depends(user)): return {'runs':await native().engine.list_script_runs(script_id,limit)}
 @router.delete('/scripts/{script_id}')
 async def delete_script(script_id:str,user=Depends(user)):
-    role(user,True); await native().delete_script(script_id); return {'deleted':True}
+    role(user,True)
+    try: await native().delete_script(script_id); return {'deleted':True}
+    except LookupError as exc: raise HTTPException(404,str(exc))
+    except ValueError as exc: raise HTTPException(409,str(exc))
 
 @router.get('/scenes')
 async def scenes(user=Depends(user)): return {'scenes':await native().list_scenes()}
@@ -85,12 +88,25 @@ async def get_scene(scene_id:str,user=Depends(user)):
     try:return await native().get_scene(scene_id)
     except LookupError as exc:raise HTTPException(404,str(exc))
 @router.post('/scenes/{scene_id}/activate')
-async def activate_scene(scene_id:str,user=Depends(user)):
+async def activate_scene(scene_id:str,body:dict|None=None,user=Depends(user)):
     role(user,True)
     try:
         row=await native().get_scene(scene_id)
+        if (body or {}).get('dry_run'): return await native().activate_scene(row['entity_ref'],dry_run=True)
         return await native().registry.services.invoke('hcm_native','scene','turn_on',{},target_entity_id=row['entity_ref'])
     except LookupError as exc:raise HTTPException(404,str(exc))
 @router.delete('/scenes/{scene_id}')
 async def delete_scene(scene_id:str,user=Depends(user)):
-    role(user,True); await native().delete_scene(scene_id); return {'deleted':True}
+    role(user,True)
+    try: await native().delete_scene(scene_id); return {'deleted':True}
+    except LookupError as exc: raise HTTPException(404,str(exc))
+    except ValueError as exc: raise HTTPException(409,str(exc))
+
+@router.get('/references/entity/{entity_ref}')
+async def entity_references(entity_ref:int,user=Depends(user)):
+    return {'references':await native().references_entity(entity_ref)}
+
+@router.get('/references/{kind}/{primitive_id}')
+async def primitive_references(kind:str,primitive_id:str,user=Depends(user)):
+    if kind not in {'helper','script','scene'}: raise HTTPException(404,'Unknown primitive kind')
+    return {'references':await native().references_primitive(kind,primitive_id)}
