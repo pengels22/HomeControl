@@ -18,8 +18,25 @@ runtime_mod=import_module('01_HCM.integrations.runtime')
 provider_mod=import_module('01_HCM.integrations.provider')
 mock_mod=import_module('01_HCM.integrations.mock')
 api_mod=import_module('01_HCM.integrations.api')
+instances_mod=import_module('01_HCM.integrations.instances')
 events=import_module('01_HCM.events')
 ROOT=Path(__file__).resolve().parents[1]
+
+@pytest.mark.asyncio
+async def test_instance_enable_passes_asyncpg_arguments_individually(monkeypatch):
+    calls=[]
+    class Conn:
+        async def fetchrow(self, query, *args):
+            calls.append(args)
+            return {'instance_id': args[0]}
+        async def execute(self, *args):
+            calls.append(args)
+    class Acquire:
+        async def __aenter__(self): return Conn()
+        async def __aexit__(self, *args): pass
+    monkeypatch.setattr(instances_mod.db, 'acquire', lambda: Acquire())
+    await instances_mod.set_enabled('instance-1', True, 'admin')
+    assert calls[0] == ('instance-1', True, 'configuration_required')
 
 
 @pytest.fixture

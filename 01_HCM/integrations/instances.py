@@ -34,7 +34,7 @@ async def create(provider_id,name,config,*,credential_kind=None,credential=None,
 
 async def set_enabled(instance_id,enabled,actor):
     async with db.acquire() as conn:
-        row=await conn.fetchrow('UPDATE integration_instances SET enabled=$2,status=$3,updated_at=now() WHERE instance_id=$1 RETURNING instance_id',(instance_id,enabled,'configuration_required' if enabled else 'disabled'))
+        row=await conn.fetchrow('UPDATE integration_instances SET enabled=$2,status=$3,updated_at=now() WHERE instance_id=$1 RETURNING instance_id',instance_id,enabled,'configuration_required' if enabled else 'disabled')
         if not row: raise LookupError('Integration instance not found')
         if not enabled:
             await conn.execute("UPDATE logical_devices SET availability='unavailable' WHERE instance_id=$1",instance_id)
