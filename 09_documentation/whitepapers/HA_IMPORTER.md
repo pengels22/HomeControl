@@ -130,3 +130,30 @@ blocked or intentionally unsupported. V1 adds only safe filter-chain
 normalization and `none` tests; control blocks, random selection, collection
 queries, and arbitrary Jinja remain deferred. Reports redact source values and
 are not committed.
+
+### Semantic service completion V1
+
+The authoritative pre-pass analyzer totals are 0 `READY`, 1
+`READY_WITH_TRANSLATIONS`, 81 `BLOCKED_MAPPING`, 23 `BLOCKED_SERVICE`, and 31
+`BLOCKED_UNSUPPORTED`. The unique service inventory is measured from the real
+source (counts are occurrences): notifications (51), automation controls (39),
+lighting (28), climate set/mode/off/on (29), media controls (38), helper
+services (29), alarm controls (10), scene/script services (10), timers (5),
+system/homeassistant lifecycle (5), update (2), shell command (2), todo (1),
+and weather forecast reads (1). Source arguments and target forms are retained
+only in the disposable sanitized report.
+
+This pass adds the provider-neutral `weather.get_forecast` service and maps HA
+`weather.get_forecasts` to it. NWS and OpenWeatherMap register the same bounded
+read operation; responses contain at most 48 normalized forecast records and
+use the normal `response_variable` path. Provider/backend unavailability is
+reported without fabricated data.
+
+`number.set_value` and `select.select_option` remain deferred because the real
+targets are provider-owned and no generic writable-number/select capability is
+currently registered. `climate.turn_on` remains deferred: the current HVAC
+state has no persisted last non-off/default mode, so inventing one would be
+unsafe. Alarm and lock mutation is safety/security-sensitive; shell commands,
+system/update control, todo/list operations, and dynamic `scene.create` remain
+separate subsystem or intentionally unsupported work. No HA-specific runtime
+service or arbitrary process execution was added.

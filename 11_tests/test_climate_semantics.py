@@ -75,3 +75,4 @@ def test_ha_climate_services_have_semantic_mappings_but_turn_on_remains_unavaila
     assert importer.SERVICE_MAPPINGS['climate.set_hvac_mode']['service'] == 'set_hvac_mode'
     assert importer.SERVICE_MAPPINGS['climate.turn_off']['service'] == 'turn_off'
     assert 'climate.turn_on' not in importer.SERVICE_MAPPINGS
+    assert importer.SERVICE_MAPPINGS['weather.get_forecasts']['service'] == 'get_forecast'

@@ -3,13 +3,17 @@ import asyncio
 from .provider import Provider,ProviderInfo,Diagnostics
 from .factory import provider_factory
 from .http import ProviderHTTP
-from .weather import WeatherState,ForecastEntry,normalize_condition,record_poll
+from .weather import WeatherState,ForecastEntry,ForecastRequest,normalize_condition,record_poll,forecast_response
 
 class NWSProvider(Provider):
     info=ProviderInfo('nws','National Weather Service',capabilities={'weather':True,'alerts':True},description='US National Weather Service forecasts and alerts',setup_type='simple',supports_multiple=True,config_schema={'type':'object','properties':{'latitude':{'type':'number'},'longitude':{'type':'number'},'interval':{'type':'integer','minimum':60}},'required':['latitude','longitude'],'additionalProperties':False},config_flow={'type':'simple','fields':[{'name':'latitude','type':'number','required':True},{'name':'longitude','type':'number','required':True},{'name':'interval','type':'duration'}]})
     def __init__(self,client=None): self.context=None; self.client=client or ProviderHTTP(); self.task=None; self.points=None; self.last=None; self.updates=0; self.alert_ids={}; self.fail=False
     async def setup(self,context):
         self.context=context; self.device=await context.device('weather','Weather',available=False); self.entity=await context.entity('current','weather.current',self.device,'Weather'); self.temperature=await context.entity('temperature','temperature.outdoor',self.device,'Outdoor Temperature',unit='F'); self.alert_count=await context.entity('alert_count','sensor.weather_alert_count',self.device,'Active Weather Alerts'); self.alert_active=await context.entity('alert_active','binary_sensor.weather_alert_active',self.device,'Weather Alert Active')
+        await context.service('weather','get_forecast',ForecastRequest,self._get_forecast,target_required=True,target_domains=('weather',))
+    async def _get_forecast(self,args,target):
+        if self.last is None: return {'status':'backend_unavailable'}
+        return forecast_response(self.last,args.type)
     async def poll(self):
         lat=self.context.config.get('latitude'); lon=self.context.config.get('longitude')
         if lat is None or lon is None: raise ValueError('Latitude and longitude are required')

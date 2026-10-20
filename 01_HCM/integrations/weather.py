@@ -1,6 +1,11 @@
 """Provider-neutral weather values used by NWS and OpenWeatherMap."""
 from dataclasses import dataclass,asdict
 from .. import db
+from pydantic import BaseModel, ConfigDict, Field
+
+class ForecastRequest(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    type: str = Field(default='daily', pattern='^(daily|hourly|twice_daily)$')
 
 async def record_poll(context,success,error=None):
     if not context.instance_id: return
@@ -40,3 +45,17 @@ class ForecastEntry:
     wind_speed: float|None=None; wind_direction: str|None=None; precipitation_probability: float|None=None
     precipitation: float|None=None; cloud_coverage: float|None=None
     def as_dict(self): return asdict(self)
+
+def forecast_response(state, forecast_type='daily'):
+    """Return a bounded provider-neutral response for response_variable."""
+    allowed={'start','end','condition','temperature','apparent_temperature','humidity','pressure','wind_speed','wind_direction','precipitation_probability','precipitation','cloud_coverage'}
+    records=[]
+    for raw in list((state.forecast or [])[:48]):
+        if not isinstance(raw,dict): continue
+        record={}
+        for key in allowed:
+            if key not in raw or raw[key] is None: continue
+            value=raw[key]
+            record[key]=value[:256] if isinstance(value,str) else value
+        records.append(record)
+    return {'forecast': records, 'type': forecast_type}

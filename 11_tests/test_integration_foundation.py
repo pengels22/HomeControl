@@ -381,6 +381,14 @@ def test_weather_and_openai_normalization_contracts():
     assert args.prompt=='hello' and args.max_tokens==10
 
 
+@pytest.mark.asyncio
+async def test_weather_forecast_service_returns_bounded_normalized_response():
+    weather=import_module('01_HCM.integrations.weather'); nws=import_module('01_HCM.integrations.nws')
+    provider=nws.NWSProvider(); provider.last=weather.WeatherState(forecast=[{'start':str(i)} for i in range(60)])
+    result=await provider._get_forecast(weather.ForecastRequest(type='daily'), 1)
+    assert result['type']=='daily' and len(result['forecast'])==48
+
+
 async def test_nws_alert_deduplication_and_forecast(database):
     nws=import_module('01_HCM.integrations.nws'); calls=[]
     class Client:

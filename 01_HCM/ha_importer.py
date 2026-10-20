@@ -63,6 +63,7 @@ SERVICE_MAPPINGS: dict[str, dict[str, Any]] = {
     "climate.set_temperature": {"status": TRANSLATED, "domain": "climate", "service": "set_temperature"},
     "climate.set_hvac_mode": {"status": TRANSLATED, "domain": "climate", "service": "set_hvac_mode"},
     "climate.turn_off": {"status": TRANSLATED, "domain": "climate", "service": "turn_off"},
+    "weather.get_forecasts": {"status": TRANSLATED, "domain": "weather", "service": "get_forecast"},
     "automation.trigger": {"status": TRANSLATED, "domain": "automation", "service": "trigger"},
     "automation.turn_on": {"status": TRANSLATED, "domain": "automation", "service": "turn_on"},
     "automation.turn_off": {"status": TRANSLATED, "domain": "automation", "service": "turn_off"},

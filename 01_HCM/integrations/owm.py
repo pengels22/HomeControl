@@ -3,12 +3,17 @@ import asyncio
 from .provider import Provider,ProviderInfo,Diagnostics
 from .factory import provider_factory
 from .http import ProviderHTTP
-from .weather import WeatherState,ForecastEntry,normalize_condition,record_poll
+from .weather import WeatherState,ForecastEntry,ForecastRequest,normalize_condition,record_poll,forecast_response
 
 class OWMProvider(Provider):
     info=ProviderInfo('openweathermap','OpenWeatherMap',capabilities={'weather':True},description='OpenWeatherMap current weather and forecast',setup_type='api_key',supports_multiple=True,config_schema={'type':'object','properties':{'latitude':{'type':'number'},'longitude':{'type':'number'},'units':{'type':'string','enum':['standard','metric','imperial']},'interval':{'type':'integer','minimum':60}},'required':['latitude','longitude'],'additionalProperties':False},config_flow={'type':'api_key','credential_kinds':['api_key'],'fields':[{'name':'latitude','type':'number','required':True},{'name':'longitude','type':'number','required':True},{'name':'units','type':'select','options':['metric','imperial']}]})
     def __init__(self,client=None): self.context=None; self.client=client or ProviderHTTP(); self.device=None; self.entity=None; self.last=None; self.updates=0; self.task=None
-    async def setup(self,context): self.context=context; self.device=await context.device('weather','Weather',available=False); self.entity=await context.entity('weather','weather.current',self.device,'Weather')
+    async def setup(self,context):
+        self.context=context; self.device=await context.device('weather','Weather',available=False); self.entity=await context.entity('weather','weather.current',self.device,'Weather')
+        await context.service('weather','get_forecast',ForecastRequest,self._get_forecast,target_required=True,target_domains=('weather',))
+    async def _get_forecast(self,args,target):
+        if self.last is None: return {'status':'backend_unavailable'}
+        return forecast_response(self.last,args.type)
     async def poll(self):
         key=await self.context.credential(); cfg=self.context.config; params={'lat':cfg['latitude'],'lon':cfg['longitude'],'appid':key,'units':cfg.get('units','imperial')}; data,_=await self.client.json('GET','https://api.openweathermap.org/data/2.5/weather',params=params); forecast_data,_=await self.client.json('GET','https://api.openweathermap.org/data/2.5/forecast',params=params)
         main=data.get('main',{}); wind=data.get('wind',{}); forecast=[]
