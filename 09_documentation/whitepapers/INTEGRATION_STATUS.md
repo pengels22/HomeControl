@@ -184,8 +184,7 @@ The integration layer now exposes the generic substrate Automation needs:
 immutable database entity IDs, collision-safe entity IDs, instance-aware service
 bindings and target routing, sanitized durable event cursors, current state,
 availability, and provider events. Automation can consume these interfaces
-without provider-specific knowledge. Durable event cursor ownership and
-automation trigger policy remain future Automation responsibilities.
+without provider-specific knowledge. Durable event cursor ownership is now implemented by the Automation Engine V1; see [Automation Engine V1](AUTOMATION_ENGINE.md). Provider-specific automation policy remains outside the integration layer.
 
 ## Deferred scope
 

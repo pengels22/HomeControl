@@ -29,6 +29,7 @@ class Runtime:
         self.locks={}
         self.instances={}
         self.instance_contexts={}
+        self.automation_engine=None
 
     def attach(self,provider,*,enabled=False,configured=True):
         key=provider.info.provider_id

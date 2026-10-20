@@ -185,13 +185,15 @@ class Context:
         attrs=json.dumps(attributes or {},allow_nan=False)
         async with db.acquire() as conn:
             async with conn.transaction():
+                before = await conn.fetchrow('SELECT state FROM entities WHERE id=$1 AND provider_id=$2 AND enabled FOR UPDATE', entity_id, self.provider_id)
+                if not before:
+                    raise OwnershipError('Entity absent, disabled or owned by another provider')
+                previous_state = before['state']
                 row=await conn.fetchrow('''UPDATE entities SET
                     last_changed=CASE WHEN last_updated IS NULL OR state IS DISTINCT FROM $3::jsonb THEN now() ELSE last_changed END,
                     state=$3::jsonb,attributes=$4::jsonb,available=$5,last_updated=now()
                     WHERE id=$1 AND provider_id=$2 AND enabled RETURNING *, (last_changed=last_updated) AS state_changed''',entity_id,self.provider_id,payload,attrs,available)
-                if not row:
-                    raise OwnershipError('Entity absent, disabled or owned by another provider')
-        payload={'state':value,'attributes':attributes or {},'available':available}; kwargs={'entity_id':entity_id,'device_id':row['device_id'],'correlation_id':correlation_id}
+        payload={'state':value,'previous_state':previous_state,'attributes':attributes or {},'available':available}; kwargs={'entity_id':entity_id,'device_id':row['device_id'],'correlation_id':correlation_id}
         if row['state_changed']: await self._publish_durable('entity.state_changed',payload,durability='DURABLE',**kwargs)
         else: self._publish('entity.state_changed',payload,**kwargs)
 

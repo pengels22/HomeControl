@@ -44,6 +44,7 @@ async def database(monkeypatch):
         await conn.execute((ROOT/'08_database/014_provider_poll_state.sql').read_text())
         await conn.execute((ROOT/'08_database/015_google_sync_state.sql').read_text())
         await conn.execute((ROOT/'08_database/016_integration_core_hardening.sql').read_text())
+        await conn.execute((ROOT/'08_database/017_automation_engine.sql').read_text())
         after=dict(await conn.fetchrow('SELECT * FROM logical_devices WHERE id=$1',native))
         assert {key:after[key] for key in before}==before
         @asynccontextmanager
@@ -474,3 +475,27 @@ async def test_bluetooth_callback_tasks_are_tracked_and_stopped():
     bt=import_module('01_HCM.bluetooth'); finished=asyncio.Event()
     async def callback(advertisement): await asyncio.sleep(0); finished.set()
     scanner=bt.BluetoothScanner(); scanner.subscribe(callback); scanner.observe(bt.Advertisement('hci0','AA')); await asyncio.wait_for(finished.wait(),1); await asyncio.sleep(0); assert not scanner.tasks; await scanner.stop(); assert not scanner.pending
+
+async def test_automation_state_event_routes_service_and_advances_cursor(database, running, monkeypatch):
+    automation_mod=import_module('01_HCM.automation')
+    host, mock, _ = running
+    monkeypatch.setattr(automation_mod.db, 'acquire', registry_mod.db.acquire)
+    context=host.registry.context('internal_mock')
+    entity=(await host.registry.inspect('entities'))[0]
+    await context.state(entity['id'], 71.0)
+    definition={'name':'Foundation automation','triggers':[{'type':'state','entity_ref':entity['id'],'from':70.0,'to':71.0}],
+                'conditions':{'type':'state','entity_ref':entity['id'],'state':71.0},
+                'actions':[{'type':'service','provider_id':'internal_mock','domain':'internal_mock','service':'ping','service_data':{}}]}
+    store=automation_mod.AutomationStore(); automation=await store.create(definition)
+    engine=automation_mod.AutomationEngine(host.registry,store=store); engine.cursor=0
+    await engine.drain_once(); await asyncio.sleep(0.05)
+    runs=await engine.list_runs(automation['automation_id'])
+    assert runs and runs[0]['status']=='success' and runs[0]['trigger_source']=='event'
+    assert engine.cursor >= 1
+    await engine.stop()
+
+async def test_automation_validation_rejects_unknown_keys(database, monkeypatch):
+    automation_mod=import_module('01_HCM.automation')
+    monkeypatch.setattr(automation_mod.db, 'acquire', registry_mod.db.acquire)
+    with pytest.raises(automation_mod.AutomationValidationError):
+        await automation_mod.AutomationStore().validate({'name':'bad','triggers':[{'type':'event','event_type':'x'}],'actions':[],'unsupported':True})

@@ -29,6 +29,7 @@ These papers distinguish among:
 - [First real integration providers](FIRST_REAL_PROVIDERS.md)
 - [Google Calendar and Gmail providers](GOOGLE_INTEGRATIONS.md)
 - [Integration status and reconciliation](INTEGRATION_STATUS.md)
+- [Automation Engine V1](AUTOMATION_ENGINE.md)
 - [Channel metadata, rooms, HVAC semantics and bridges](CHANNEL_METADATA_AND_BRIDGES.md)
 
 - [System Architecture](HOMECONTROL_SYSTEM_WHITE_PAPER.md)
