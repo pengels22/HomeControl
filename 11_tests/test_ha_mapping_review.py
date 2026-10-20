@@ -23,6 +23,16 @@ def test_queue_keeps_sensitive_mapping_categories_separate():
     assert "message" not in str(item)
 
 
+def test_entity_candidates_are_filtered_to_source_domain():
+    plan = importer.analyze_home_assistant({"automations": [{"id": "climate", "triggers": [{"trigger": "state", "entity_id": "climate.room"}], "actions": []}]})
+    queue = review.build_mapping_queue(plan, candidates=[
+        {"target_kind": "entity", "target_ref": 1, "entity_id": "media_player.living", "domain": "media_player", "provider_id": "heos"},
+        {"target_kind": "entity", "target_ref": 2, "entity_id": "climate.hcm", "domain": "climate", "provider_id": "hcm_native"},
+    ])
+    candidates = queue["items"][0]["candidates"]
+    assert [row["target"]["entity_id"] for row in candidates] == ["climate.hcm"]
+
+
 def test_preview_is_nonpersistent_and_reports_newly_ready():
     source = {"automations": [{"id": "a", "triggers": [{"trigger": "state", "entity_id": "sensor.room"}], "actions": []}]}
     plan = importer.analyze_home_assistant(source)

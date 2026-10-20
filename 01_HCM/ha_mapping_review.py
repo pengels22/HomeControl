@@ -107,6 +107,12 @@ def build_mapping_queue(plan: dict, *, mappings: dict[str, Any] | None = None,
         elif kind == "security_credential": allowed_kinds = {"security_credential"}
         for candidate in pool:
             if candidate.get("target_kind") not in allowed_kinds: continue
+            # Entity candidates must stay within the source domain.  Without
+            # this guard, an unrelated provider entity (for example a HEOS
+            # media player) appears as a zero-score candidate for every
+            # climate, sensor, or device-tracker identity.
+            if kind == "entity" and domain and candidate.get("domain") and candidate.get("domain") != domain:
+                continue
             score, reasons = _candidate_score(source, candidate, required)
             scored.append({"target": {k: candidate.get(k) for k in ("target_kind", "target_ref", "entity_id", "device_id", "name", "provider_id") if candidate.get(k) is not None},
                            "score": score, "reasons": reasons, "compatible": not any(x.startswith("missing_capability:") for x in reasons)})
