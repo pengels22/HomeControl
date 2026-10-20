@@ -68,6 +68,17 @@ services and still require an explicit entity mapping. `climate.turn_on` and
 other HVAC-specific services remain unavailable until their semantics are
 measured and approved.
 
+HA device constructs are migration-only input. The analyzer resolves supported
+device forms into ordinary HCM state triggers, state conditions, and Service
+Registry calls; no device automation blob is retained in the native preview.
+Opaque HA entity and device IDs remain unresolved until an exact mapping is
+provided. Optional read-only entity/device/area registry exports may be supplied
+as JSON data to normalize opaque entity IDs; paths, auth storage, and live HA
+connections are not accepted. Suggested or ambiguous mappings remain blocked,
+and deleted targets are not retargeted by name. Tracker zone enters/leaves,
+ZHA button events, alarm/lock controls, and other security-sensitive semantics
+remain deferred to dedicated passes.
+
 Endpoints:
 
 - `POST /api/v1/import/home-assistant/analyze` (ADMIN): YAML fields or structured

@@ -77,6 +77,55 @@ def test_modern_ha_trigger_key_uses_trigger_family_not_event_type():
     assert nested[0][0]["status"] == m.NEEDS_MAPPING
 
 
+def test_device_motion_trigger_translates_to_native_state_trigger_with_exact_mapping():
+    plan = m.analyze_home_assistant({"automations": [{"id": "motion", "triggers": [{
+        "trigger": "device", "type": "motion", "device_id": "d", "entity_id": "e", "domain": "binary_sensor"
+    }], "actions": []}]}, mappings={"e": 42})
+    trigger = plan["items"][0]["preview"]["triggers"][0]
+    assert plan["items"][0]["compatibility"] == m.TRANSLATED
+    assert trigger == {"type": "state", "entity_ref": 42, "to": "on"}
+
+
+def test_device_action_translates_to_service_call_and_unresolved_is_mapping():
+    source = {"automations": [{"id": "switch", "actions": [{
+        "type": "turn_on", "device_id": "d", "entity_id": "e", "domain": "switch"
+    }]}]}
+    unresolved = m.analyze_home_assistant(source)
+    assert unresolved["items"][0]["compatibility"] == m.NEEDS_MAPPING
+    resolved = m.analyze_home_assistant(source, mappings={"e": 9})
+    action = resolved["items"][0]["preview"]["actions"][0]
+    assert resolved["items"][0]["compatibility"] == m.TRANSLATED
+    assert action["domain"] == "switch" and action["service"] == "turn_on" and action["target_entity_ref"] == 9
+
+
+def test_suggested_or_ambiguous_mapping_never_becomes_authoritative():
+    source = {"automations": [{"id": "motion", "triggers": [{
+        "trigger": "device", "type": "motion", "device_id": "d", "entity_id": "e", "domain": "binary_sensor"
+    }], "actions": []}]}
+    for confidence in ("SUGGESTED", "AMBIGUOUS"):
+        plan = m.analyze_home_assistant(source, mappings={"e": {"entity_ref": 9, "confidence": confidence}})
+        assert plan["items"][0]["compatibility"] == m.NEEDS_MAPPING
+
+
+def test_device_tracker_zone_is_separate_from_presence_state():
+    source = {"automations": [{"id": "zone", "triggers": [{
+        "trigger": "device", "type": "enters", "device_id": "d", "entity_id": "e", "domain": "device_tracker", "zone": "zone.home"
+    }], "actions": []}]}
+    item = m.analyze_home_assistant(source, mappings={"e": 9})["items"][0]
+    assert item["compatibility"] == m.UNSUPPORTED
+    assert "zone" in item["nested"][0][0]["reason"]
+
+
+def test_registry_export_normalizes_opaque_entity_ids_without_reading_paths():
+    registry = m.parse_registry_exports({"data": [{"id": "opaque", "entity_id": "binary_sensor.motion", "device_id": "dev"}]})
+    plan = m.analyze_home_assistant({"automations": [{"id": "motion", "triggers": [{
+        "trigger": "device", "type": "motion", "device_id": "dev", "entity_id": "opaque", "domain": "binary_sensor"
+    }], "actions": []}]}, mappings={"binary_sensor.motion": 12}, registry=registry)
+    assert plan["items"][0]["preview"]["triggers"][0]["entity_ref"] == 12
+    with pytest.raises(m.HAImportError):
+        m.parse_registry_exports("{}" * 2_000_000)
+
+
 def test_duration_mapping_accepts_home_assistant_string_values():
     plan = m.analyze_home_assistant({"automations": [{"id": "delay", "actions": [{"delay": {"hours": "0", "minutes": "1", "seconds": "2"}}]}]})
     action = plan["items"][0]["preview"]["actions"][0]

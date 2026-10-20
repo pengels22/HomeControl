@@ -173,25 +173,132 @@ def _source_fingerprint(source_type: str, source: Any) -> str:
 
 class HACompatibilityAnalyzer:
     def __init__(self, *, mappings: dict[str, Any] | None = None, service_mappings: dict[str, dict[str, Any]] | None = None,
-                 expression_engine: ExpressionEngine | None = None):
+                 expression_engine: ExpressionEngine | None = None, registry: dict[str, Any] | None = None):
         self.mappings = mappings or {}
         self.service_mappings = {**SERVICE_MAPPINGS, **(service_mappings or {})}
         self.expressions = expression_engine or ExpressionEngine()
+        self.registry = registry or {}
         self._entity_refs: set[str] = set()
         self._services: set[str] = set()
 
     def _map_entity(self, value: Any) -> tuple[str, Any, str]:
         entity = str(value)
         self._entity_refs.add(entity)
-        mapped = self.mappings.get(entity)
+        canonical = self.registry.get("entity_ids", {}).get(entity, entity)
+        mapped = self.mappings.get(entity, self.mappings.get(canonical))
         if isinstance(mapped, dict):
             target = mapped.get("target_entity_ref", mapped.get("entity_ref"))
-            status = mapped.get("status", "EXACT" if target is not None else "UNRESOLVED")
+            confidence = str(mapped.get("confidence", mapped.get("status", "EXACT"))).upper()
+            status = confidence
         else:
             target, status = mapped, ("EXACT" if mapped is not None else "UNRESOLVED")
-        if target is not None:
+        if target is not None and status == "EXACT":
             return entity, target, COMPATIBLE
-        return entity, None, NEEDS_MAPPING
+        return canonical, None, NEEDS_MAPPING
+
+    def _map_device_entity(self, raw: dict[str, Any]) -> tuple[Any, str, list[str]]:
+        """Resolve an HA device construct to an immutable HCM entity ref."""
+        source = raw.get("entity_id")
+        if source is not None:
+            _, target, status = self._map_entity(source)
+            return target, status, [str(source)]
+        device = raw.get("device_id")
+        if device is None:
+            return None, NEEDS_MAPPING, []
+        self._entity_refs.add(f"device:{device}")
+        candidates = [x for x in self.registry.get("entities_by_device", {}).get(str(device), [])
+                      if not raw.get("domain") or x.get("domain") == raw.get("domain")]
+        if len(candidates) == 1:
+            canonical = candidates[0].get("entity_id")
+            _, target, status = self._map_entity(canonical)
+            return target, status, [f"device:{device}", canonical]
+        mapped = self.mappings.get(f"device:{device}", self.mappings.get(str(device)))
+        if isinstance(mapped, dict):
+            target = mapped.get("target_entity_ref", mapped.get("entity_ref"))
+            confidence = str(mapped.get("confidence", mapped.get("status", "EXACT"))).upper()
+        else:
+            target, confidence = mapped, "EXACT" if mapped is not None else "UNRESOLVED"
+        if target is not None and confidence == "EXACT":
+            return target, COMPATIBLE, [f"device:{device}"]
+        return None, NEEDS_MAPPING, [f"device:{device}"]
+
+    def _device_semantic(self, raw: dict[str, Any], *, kind: str) -> dict[str, Any]:
+        domain = str(raw.get("domain", "")).lower()
+        typ = str(raw.get("type", "")).lower()
+        target, target_status, mappings = self._map_device_entity(raw)
+        if not domain:
+            return {"type": "device", "semantic_kind": kind, "status": NEEDS_MAPPING,
+                    "source": _safe(raw), "native": None, "target_mappings": mappings,
+                    "reason": "Device domain is required to resolve semantic meaning"}
+        native: dict[str, Any] | None = None
+        reason = None
+        if kind == "trigger":
+            state_map = {
+                ("binary_sensor", "opened"): "on", ("binary_sensor", "closed"): "off",
+                ("binary_sensor", "motion"): "on", ("binary_sensor", "no_motion"): "off",
+                ("binary_sensor", "occupied"): "on", ("binary_sensor", "not_occupied"): "off",
+                ("switch", "turned_on"): "on", ("switch", "turned_off"): "off",
+                ("light", "turned_on"): "on", ("light", "turned_off"): "off",
+                ("media_player", "turned_on"): "on", ("media_player", "turned_off"): "off",
+                ("device_tracker", "is_home"): "home", ("device_tracker", "is_not_home"): "not_home",
+            }
+            if (domain, typ) in state_map:
+                native = {"type": "state", "entity_ref": target, "to": state_map[(domain, typ)]}
+                if raw.get("for") is not None: native["for"] = _duration_seconds(raw.get("for"))
+            elif domain == "device_tracker" and typ in {"enters", "leaves"}:
+                reason = "Device tracker zone semantics require the native zone capability"
+            elif domain == "zha" and typ.startswith("remote_button_"):
+                reason = "ZHA button events require a normalized durable event source"
+            else:
+                reason = f"Unsupported device trigger semantic: {domain}.{typ}"
+        elif kind == "condition":
+            state_map = {
+                ("device_tracker", "is_home"): "home", ("device_tracker", "is_not_home"): "not_home",
+                ("binary_sensor", "opened"): "on", ("binary_sensor", "closed"): "off",
+                ("binary_sensor", "motion"): "on", ("binary_sensor", "no_motion"): "off",
+                ("binary_sensor", "occupied"): "on", ("binary_sensor", "not_occupied"): "off",
+                ("switch", "is_on"): "on", ("switch", "is_off"): "off",
+            }
+            if (domain, typ) in state_map:
+                native = {"type": "state", "entity_ref": target, "state": state_map[(domain, typ)]}
+            elif domain == "device_tracker" and typ in {"enters", "leaves"}:
+                reason = "Device tracker zone semantics require the native zone capability"
+            else:
+                reason = f"Unsupported device condition semantic: {domain}.{typ}"
+        else:
+            service_map = {
+                ("switch", "turn_on"): ("switch", "turn_on"), ("switch", "turn_off"): ("switch", "turn_off"),
+                ("switch", "toggle"): ("switch", "toggle"), ("light", "turn_on"): ("light", "turn_on"),
+                ("light", "turn_off"): ("light", "turn_off"), ("light", "toggle"): ("light", "toggle"),
+                ("media_player", "turn_on"): ("media_player", "turn_on"), ("media_player", "turn_off"): ("media_player", "turn_off"),
+            }
+            if (domain, typ) in service_map:
+                native_domain, service = service_map[(domain, typ)]
+                data = {}
+                unsupported = []
+                if domain == "light" and "brightness_pct" in raw:
+                    native_domain, service = "light", "set_level"
+                    data["level"] = raw["brightness_pct"]
+                for key in raw:
+                    if key not in {"type", "device_id", "entity_id", "domain", "brightness_pct"}:
+                        unsupported.append(key)
+                native = {"type": "service", "domain": native_domain, "service": service,
+                          "target_entity_ref": target, "service_data": data}
+                if unsupported:
+                    reason = "Unsupported device action fields: " + ", ".join(sorted(unsupported))
+                    native = None
+            else:
+                reason = f"Unsupported device action semantic: {domain}.{typ}"
+        if native is not None and target_status == COMPATIBLE:
+            status = TRANSLATED
+        elif native is not None and target_status == NEEDS_MAPPING:
+            status = NEEDS_MAPPING
+        else:
+            status = UNSUPPORTED
+        # Preserve the public construct type for compatibility while exposing
+        # the normalized native preview separately.
+        return {"type": "device", "semantic_kind": kind, "status": status, "source": _safe(raw),
+                "native": native, "target_mappings": mappings, "reason": reason}
 
     def _template(self, value: Any) -> tuple[Any, str, list[str], list[str]]:
         if not isinstance(value, str) or "{{" not in value and "{%" not in value:
@@ -223,8 +330,10 @@ class HACompatibilityAnalyzer:
                     if target_ref is not None: resolved.append(target_ref)
                 elif key == "device_id":
                     mapping = self.mappings.get(str(value))
-                    statuses.append(COMPATIBLE if mapping is not None else NEEDS_MAPPING)
-                    if mapping is not None: resolved.append(mapping)
+                    target_ref = mapping.get("target_entity_ref", mapping.get("entity_ref")) if isinstance(mapping, dict) else mapping
+                    confidence = str(mapping.get("confidence", mapping.get("status", "EXACT"))).upper() if isinstance(mapping, dict) else ("EXACT" if mapping is not None else "UNRESOLVED")
+                    statuses.append(COMPATIBLE if target_ref is not None and confidence == "EXACT" else NEEDS_MAPPING)
+                    if target_ref is not None and confidence == "EXACT": resolved.append(target_ref)
                     else: mappings.append(str(value))
                 else:
                     mapping = self.mappings.get(f"area:{value}")
@@ -325,6 +434,8 @@ class HACompatibilityAnalyzer:
         if isinstance(raw, str) or (isinstance(raw, dict) and ("service" in raw or "action" in raw)):
             return self._service_action(raw)
         if not isinstance(raw, dict): return {"status": UNSUPPORTED, "source": _safe(raw), "reason": "action must be a mapping"}
+        if raw.get("device_id") is not None and raw.get("type") and raw.get("domain"):
+            return self._device_semantic(raw, kind="action")
         if "delay" in raw:
             value = raw["delay"]
             return {"type": "delay", "status": TRANSLATED, "source": _safe(raw), "native": {"type": "delay", "seconds": _duration_seconds(value)}}
@@ -394,6 +505,8 @@ class HACompatibilityAnalyzer:
             return {"type": "and", "status": _combine([x["status"] for x in children]), "children": children, "native": {"type": "and"}}
         if not isinstance(raw, dict): return {"status": UNSUPPORTED, "source": _safe(raw), "reason": "condition must be a mapping"}
         typ = str(raw.get("condition", raw.get("type", ""))).lower()
+        if raw.get("device_id") is not None and raw.get("domain"):
+            return self._device_semantic(raw, kind="condition")
         if typ in ("and", "or"):
             children = [self._condition(x) for x in raw.get("conditions", [])]
             return {"type": typ, "status": _combine([x["status"] for x in children]), "children": children, "native": {"type": typ, "conditions": [x.get('native',{}) for x in children]}}
@@ -419,6 +532,9 @@ class HACompatibilityAnalyzer:
         # older YAML uses ``platform: state``.  The device event ``type``
         # (opened, motion, enters, ...) is not itself the trigger family.
         typ = str(raw.get("platform") or raw.get("trigger") or raw.get("type", "")).lower()
+        if (raw.get("platform") == "device" or raw.get("trigger") == "device" or
+                raw.get("device_id") is not None and raw.get("domain")):
+            return self._device_semantic(raw, kind="trigger")
         if typ == "state":
             entities = raw.get("entity_id") or raw.get("entity")
             if isinstance(entities, list): entities = entities[0] if len(entities) == 1 else None
@@ -524,14 +640,42 @@ def _duration_seconds(value: Any) -> float | None:
     except ValueError: return None
 
 
-def analyze_home_assistant(sources: dict[str, Any], *, mappings: dict[str, Any] | None = None) -> dict[str, Any]:
+def parse_registry_exports(entity_registry: Any = None, device_registry: Any = None,
+                           area_registry: Any = None, *, max_bytes: int = 2_000_000) -> dict[str, Any]:
+    """Parse sanitized HA registry exports supplied as data, never as paths."""
+    def load(value):
+        if value is None: return []
+        if isinstance(value, (bytes, bytearray)):
+            if len(value) > max_bytes: raise HAImportError("HA registry export is too large")
+            value = value.decode("utf-8")
+        if isinstance(value, str):
+            if len(value.encode()) > max_bytes: raise HAImportError("HA registry export is too large")
+            try: value = json.loads(value)
+            except json.JSONDecodeError as exc: raise HAImportError("Invalid HA registry JSON") from exc
+        if not isinstance(value, (dict, list)): raise HAImportError("HA registry export must be JSON data")
+        rows = value.get("data", value) if isinstance(value, dict) else value
+        if not isinstance(rows, list): raise HAImportError("HA registry data must be a list")
+        return [row for row in rows if isinstance(row, dict)]
+    entities, devices, areas = load(entity_registry), load(device_registry), load(area_registry)
+    entity_ids = {str(row["id"]): str(row["entity_id"]) for row in entities if row.get("id") and row.get("entity_id")}
+    by_device: dict[str, list[dict[str, Any]]] = {}
+    for row in entities:
+        if row.get("device_id") and row.get("entity_id"):
+            by_device.setdefault(str(row["device_id"]), []).append({"entity_id": str(row["entity_id"]), "domain": str(row["entity_id"]).split(".", 1)[0]})
+    return {"entity_ids": entity_ids, "entities_by_device": by_device,
+            "device_ids": {str(row["id"]): {"name": str(row.get("name_by_user") or row.get("name") or "")} for row in devices if row.get("id")},
+            "area_ids": {str(row["id"]): str(row.get("name") or row.get("name_by_user") or "") for row in areas if row.get("id")} }
+
+
+def analyze_home_assistant(sources: dict[str, Any], *, mappings: dict[str, Any] | None = None,
+                           registry: dict[str, Any] | None = None) -> dict[str, Any]:
     """Analyze structured YAML objects without mutating HCM."""
-    return HACompatibilityAnalyzer(mappings=mappings).analyze(sources)
+    return HACompatibilityAnalyzer(mappings=mappings, registry=registry).analyze(sources)
 
 
 def analyze_yaml(*, automations: str | bytes | None = None, scripts: str | bytes | None = None, scenes: str | bytes | None = None,
-                 mappings: dict[str, Any] | None = None) -> dict[str, Any]:
+                 mappings: dict[str, Any] | None = None, registry: dict[str, Any] | None = None) -> dict[str, Any]:
     payload = {}
     for name, source in (("automations", automations), ("scripts", scripts), ("scenes", scenes)):
         if source is not None: payload[name] = safe_load_yaml(source)
-    return analyze_home_assistant(payload, mappings=mappings)
+    return analyze_home_assistant(payload, mappings=mappings, registry=registry)

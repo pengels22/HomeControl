@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from .auth import require_user
 from .ha_importer import (
     BLOCKED_MAPPING, BLOCKED_SERVICE, BLOCKED_UNSUPPORTED, HAImportError,
-    analyze_home_assistant, analyze_yaml,
+    analyze_home_assistant, analyze_yaml, parse_registry_exports,
 )
 from .integrations.runtime import runtime as integrations
 
@@ -28,10 +28,11 @@ async def analyze(body: dict, user=Depends(require_user)):
     _admin(user)
     try:
         mappings = body.get("mappings") or {}
+        registry = parse_registry_exports(body.get("ha_entity_registry"), body.get("ha_device_registry"), body.get("ha_area_registry")) if any(key in body for key in ("ha_entity_registry", "ha_device_registry", "ha_area_registry")) else None
         if any(k in body for k in ("automations_yaml", "scripts_yaml", "scenes_yaml")):
-            return analyze_yaml(automations=body.get("automations_yaml"), scripts=body.get("scripts_yaml"), scenes=body.get("scenes_yaml"), mappings=mappings)
+            return analyze_yaml(automations=body.get("automations_yaml"), scripts=body.get("scripts_yaml"), scenes=body.get("scenes_yaml"), mappings=mappings, registry=registry)
         sources = body.get("sources", body.get("source", body))
-        return analyze_home_assistant(sources, mappings=mappings)
+        return analyze_home_assistant(sources, mappings=mappings, registry=registry)
     except HAImportError as exc:
         raise HTTPException(400, str(exc)) from None
     except (TypeError, ValueError) as exc:
