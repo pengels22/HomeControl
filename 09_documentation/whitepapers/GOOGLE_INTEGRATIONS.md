@@ -28,7 +28,11 @@ resources unavailable when polling fails, and use the existing credential
 accessor for bearer tokens. OAuth start/callback/state validation is shared with
 the generic integration OAuth routes. Tests use mocked transports only.
 
-Write operations, Gmail sending, push/watch subscriptions, and full Gmail history
-API replay remain future work. Users must supply OAuth client settings and
+Write operations, Gmail sending, and push/watch subscriptions remain future work.
+The Gmail adapter uses `history.list` cursors with a durable baseline and bounded
+de-duplication set; expired cursors trigger a fresh baseline without replaying
+the mailbox. Calendar instances schedule start/end transitions from each event
+occurrence ID, cancel and reschedule changed events, and reconstruct pending
+transitions after restart. Users must supply OAuth client settings and
 credentials through the HCM configuration flow; this repository contains no live
 Google credentials.

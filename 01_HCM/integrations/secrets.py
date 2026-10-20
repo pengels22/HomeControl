@@ -33,5 +33,18 @@ async def get(ref):
         except json.JSONDecodeError: return value
     except (InvalidToken, ValueError, UnicodeDecodeError) as exc: raise RuntimeError('Credential unavailable') from exc
 
+async def get_record(ref):
+    async with db.acquire() as conn:
+        row=await conn.fetchrow('SELECT ciphertext,metadata,kind,provider_id FROM integration_credentials WHERE credential_ref=$1 AND revoked_at IS NULL',ref)
+    if not row: raise LookupError('Credential unavailable')
+    try:
+        value=_fernet().decrypt(bytes(row['ciphertext'])).decode()
+        try: value=json.loads(value)
+        except json.JSONDecodeError: pass
+        metadata=row['metadata'] or {}
+        if isinstance(metadata,str): metadata=json.loads(metadata)
+        return {'value':value,'metadata':metadata,'kind':row['kind'],'provider_id':row['provider_id']}
+    except (InvalidToken, ValueError, UnicodeDecodeError) as exc: raise RuntimeError('Credential unavailable') from exc
+
 async def revoke(ref):
     async with db.acquire() as conn: await conn.execute('UPDATE integration_credentials SET revoked_at=now(),updated_at=now() WHERE credential_ref=$1',ref)

@@ -48,7 +48,7 @@ class Runtime:
 
     async def restore_instances(self):
         async with db.acquire() as conn:
-            rows=await conn.fetch('SELECT instance_id,provider_id,display_name,enabled,configured,config,credential_ref FROM integration_instances ORDER BY created_at')
+            rows=await conn.fetch('SELECT instance_id,provider_id,display_name,enabled,configured,config,credential_ref,account_ref FROM integration_instances ORDER BY created_at')
         for row in rows:
             key=str(row['instance_id'])
             if row['provider_id'] not in provider_factory.types:
@@ -57,7 +57,7 @@ class Runtime:
             try:
                 config=row['config'] or {}
                 if isinstance(config,str): config=json.loads(config)
-                context=self.registry.context(row['provider_id'],key,config=config,credential_ref=row['credential_ref'],display_name=row['display_name'])
+                context=self.registry.context(row['provider_id'],key,config=config,credential_ref=row['credential_ref'],account_ref=row['account_ref'],display_name=row['display_name'])
                 self.attach_instance(key,row['provider_id'],context,enabled=row['enabled'],configured=row['configured'])
                 if row['enabled'] and row['configured']: await self.start_instance(key)
                 else:

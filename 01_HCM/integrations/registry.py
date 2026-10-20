@@ -88,23 +88,29 @@ class Registry:
         async with db.acquire() as conn:
             return [wire(row) for row in await conn.fetch(sql,*([provider_id] if provider_id is not None else []))]
 
-    def context(self,provider_id,instance_id=None,*,config=None,credential_ref=None,display_name=None):
-        return Context(self,identifier(provider_id),instance_id,config=config,credential_ref=credential_ref,display_name=display_name)
+    def context(self,provider_id,instance_id=None,*,config=None,credential_ref=None,account_ref=None,display_name=None):
+        return Context(self,identifier(provider_id),instance_id,config=config,credential_ref=credential_ref,account_ref=account_ref,display_name=display_name)
 
 
 class Context:
-    def __init__(self,registry,provider_id,instance_id=None,*,config=None,credential_ref=None,display_name=None):
+    def __init__(self,registry,provider_id,instance_id=None,*,config=None,credential_ref=None,account_ref=None,display_name=None):
         self.registry = registry
         self.provider_id = provider_id
         self.instance_id = instance_id
         self.config = config or {}
         self.credential_ref = credential_ref
+        self.account_ref = account_ref
         self.display_name = display_name
 
     async def credential(self):
         if not self.credential_ref: raise LookupError('Credential unavailable')
         from .secrets import get
         return await get(self.credential_ref)
+
+    async def account_credential(self):
+        if not self.account_ref: raise LookupError('Account credential unavailable')
+        from .secrets import get
+        return await get(self.account_ref)
 
     async def sync_state(self):
         if not self.instance_id: return {}

@@ -1640,7 +1640,11 @@ document.addEventListener("click", async (event) => {
     for (const [key,value] of formData.entries()) if (key !== "display_name" && key !== "credential") config[key]=(value === "" ? value : (/^\d+$/.test(value) ? Number(value) : value));
     const credential=formData.get("credential");
     const credentialKind=integrationForm.dataset.credentialKind || "api_key";
-    await api("/integrations/instances",{method:"POST",body:JSON.stringify({config:{...config,provider_id:integrationForm.dataset.provider,display_name:formData.get("display_name")},...(credential?{credential_kind:credentialKind,credential}:{})})});
+    const created=await api("/integrations/instances",{method:"POST",body:JSON.stringify({config:{...config,provider_id:integrationForm.dataset.provider,display_name:formData.get("display_name")},...(credential?{credential_kind:credentialKind,credential}:{})})});
+    if (credentialKind === "client_secret" && created?.instance_id && config.client_id && config.redirect_uri) {
+      const endpoint=integrationForm.dataset.provider === "gmail" || integrationForm.dataset.provider === "google_calendar" ? "https://accounts.google.com/o/oauth2/v2/auth" : "";
+      if (endpoint) { const started=await api(`/integrations/instances/${encodeURIComponent(created.instance_id)}/oauth/start?authorize_endpoint=${encodeURIComponent(endpoint)}&client_id=${encodeURIComponent(config.client_id)}&redirect_uri=${encodeURIComponent(config.redirect_uri)}`); if (started.authorization_url) { window.location.href=started.authorization_url; return; } }
+    }
     await renderIntegrations(); return;
   }
   const integrationConfig = event.target.closest("[data-integration-config]");

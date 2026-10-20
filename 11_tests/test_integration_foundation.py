@@ -401,3 +401,21 @@ def test_google_calendar_and_gmail_normalization():
     event=calendar.normalize_event({'id':'evt','summary':'Meeting','start':{'date':'2026-01-01'},'end':{'date':'2026-01-02'},'status':'confirmed'})
     assert event['event_id']=='evt' and event['all_day'] and event['start']=='2026-01-01'
     assert google.GoogleCalendarProvider.info.setup_type=='oauth' and google.GmailProvider.info.capabilities['mail']
+
+
+async def test_gmail_history_cursor_baseline_and_dedup():
+    google=import_module('01_HCM.integrations.google')
+    class Context:
+        config={}; entity='entity'; instance_id=None
+        def __init__(self): self.saved={}; self.events=[]
+        async def sync_state(self): return dict(self.saved)
+        async def save_sync_state(self,value): self.saved=dict(value)
+        async def state(self,*args,**kwargs): pass
+        async def device(self,*args,**kwargs): pass
+        async def emit(self,kind,payload): self.events.append((kind,payload))
+    context=Context(); provider=google.GmailProvider(); provider.context=context; provider.entity='entity'
+    responses=[{'messages':[{'id':'old','threadId':'t'}],'historyId':'10'}, {'messages':[{'id':'old'}],'historyId':'11'}, {'historyId':'12','history':[{'messagesAdded':[{'message':{'id':'new','threadId':'t2'}}]}]}, {'payload':{'headers':[{'name':'Subject','value':'Hello'}]}}]
+    async def fake(url,**kwargs): return responses.pop(0)
+    provider.google_json=fake
+    await provider.poll(); await provider.poll()
+    assert context.saved['history_id']=='12' and [event[1]['message_id'] for event in context.events]==['new']

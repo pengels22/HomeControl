@@ -11,6 +11,7 @@ from .. import db
 from . import oauth
 from . import secrets as secret_store
 from .factory import provider_factory
+from .http import ProviderHTTP
 
 router=APIRouter(prefix='/api/v1/integrations',dependencies=[Depends(require_user)])
 class ConfigRequest(BaseModel):
@@ -75,17 +76,35 @@ async def oauth_start(instance_id:str, authorize_endpoint:str, client_id:str, re
     async with db.acquire() as conn:
         provider=await conn.fetchval('SELECT provider_id FROM integration_instances WHERE instance_id=$1',instance_id)
     if not provider: raise HTTPException(404,'Integration instance not found')
-    return {'authorization_url':await oauth.authorization_url(provider,authorize_endpoint,client_id,redirect_uri,instance_id=instance_id)}
+    info=provider_factory.types.get(provider).info
+    scopes=(info.config_flow or {}).get('scopes',())
+    return {'authorization_url':await oauth.authorization_url(provider,authorize_endpoint,client_id,redirect_uri,scopes=scopes,instance_id=instance_id)}
 
 @router.get('/oauth/callback')
 async def oauth_callback(provider_id:str, instance_id:str, state:str, redirect_uri:str, code:str|None=None, user=Depends(require_user)):
     await oauth.consume_state(provider_id,state,redirect_uri,instance_id)
     if code:
-        entry=runtime.entries.get(provider_id)
-        if entry and hasattr(entry.provider,'oauth_exchange'):
-            result=await entry.provider.oauth_exchange(code)
-            ref=await secret_store.put(provider_id,'oauth_access_token',result['access_token'])
-            await oauth.associate_access_credential(instance_id,ref)
+        async with db.acquire() as conn:
+            row=await conn.fetchrow('SELECT provider_id,config,credential_ref FROM integration_instances WHERE instance_id=$1',instance_id)
+        if not row or row['provider_id']!=provider_id: raise HTTPException(404,'Integration instance not found')
+        config=row['config'] or {}
+        if isinstance(config,str): config=__import__('json').loads(config)
+        client_id=config.get('client_id'); client_secret=await secret_store.get(row['credential_ref']) if row['credential_ref'] else None
+        info=provider_factory.types.get(provider_id).info
+        metadata=oauth.OAuthMetadata('https://accounts.google.com/o/oauth2/v2/auth','https://oauth2.googleapis.com/token',tuple((info.config_flow or {}).get('scopes',())))
+        http=ProviderHTTP(timeout=15)
+        async def request(url,data,auth_style):
+            return (await http.json('POST',url,form_body=data,headers={'Accept':'application/json'}))[0]
+        try:
+            token=await oauth.OAuthHTTPClient(request).exchange(metadata,code,client_id,client_secret,redirect_uri)
+        finally: await http.close()
+        bundle={'access_token':token.access_token,'refresh_token':token.refresh_token,'token_type':token.token_type,'scopes':list(token.scopes)}
+        ref=await secret_store.put(provider_id,'oauth_access_token',bundle,metadata={'expires_at':token.expires_at})
+        async with db.acquire() as conn:
+            await conn.execute("UPDATE integration_instances SET account_ref=$2,configured=true,status='connected',last_error=NULL,last_success=now(),updated_at=now() WHERE instance_id=$1",instance_id,ref)
+        if instance_id in runtime.instance_contexts:
+            runtime.instance_contexts[instance_id].account_ref=ref
+            runtime.instance_contexts[instance_id].credential_ref=row['credential_ref']
     return RedirectResponse('/settings?integration='+instance_id+'&oauth=connected')
 @router.put('/{provider_id}/configuration')
 async def configure(provider_id:str, request:ConfigRequest, user=Depends(require_user)):
