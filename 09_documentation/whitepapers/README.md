@@ -30,6 +30,7 @@ These papers distinguish among:
 - [Google Calendar and Gmail providers](GOOGLE_INTEGRATIONS.md)
 - [Integration status and reconciliation](INTEGRATION_STATUS.md)
 - [Automation Engine V1](AUTOMATION_ENGINE.md)
+- [Automation Expressions and Templates](AUTOMATION_EXPRESSIONS.md)
 - [Channel metadata, rooms, HVAC semantics and bridges](CHANNEL_METADATA_AND_BRIDGES.md)
 
 - [System Architecture](HOMECONTROL_SYSTEM_WHITE_PAPER.md)

@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 from . import db
+from .expressions import ExpressionEngine, ExpressionError, Snapshot, Undefined
 
 MODES = {'single','restart','queued','parallel'}
 STATUSES = {'running','success','failed','cancelled','skipped','HCM_RESTART'}
@@ -73,6 +74,16 @@ def _as_uuid(value):
     except (ValueError, TypeError, AttributeError): return value
 
 class AutomationStore:
+    def __init__(self, *, timezone_name='UTC'):
+        self.expressions=ExpressionEngine(timezone_name=timezone_name)
+    async def _validate_expression_values(self, value):
+        if isinstance(value,str) and ('{{' in value or value.strip()):
+            # Literal strings are retained; template/native syntax is compiled only when explicitly marked.
+            if '{{' in value: self.expressions.compile(value,syntax='jinja')
+        elif isinstance(value,dict):
+            for item in value.values(): await self._validate_expression_values(item)
+        elif isinstance(value,list):
+            for item in value: await self._validate_expression_values(item)
     async def _entity_ref(self, ref):
         if isinstance(ref, int) or (isinstance(ref,str) and ref.isdigit()): return int(ref)
         async with db.acquire() as conn:
@@ -143,6 +154,11 @@ class AutomationStore:
             if not isinstance(c.get('conditions'),list): raise AutomationValidationError('Boolean condition needs conditions')
             for child in c['conditions']: await self._validate_condition(child)
         elif typ=='not': await self._validate_condition(c.get('condition'))
+        elif typ=='template':
+            expression=c.get('expression')
+            if not isinstance(expression,str): raise AutomationValidationError('Template condition needs expression')
+            try: self.expressions.compile(expression,syntax='jinja' if '{{' in expression else 'native')
+            except ExpressionError as exc: raise AutomationValidationError(f'Expression {exc.category}: {exc}') from None
         elif typ=='state':
             c['entity_ref']=await self._entity_ref(c.get('entity_ref'))
             if 'state' not in c: raise AutomationValidationError('State condition needs state')
@@ -163,6 +179,13 @@ class AutomationStore:
         if typ=='service':
             if not isinstance(a.get('domain'),str) or not isinstance(a.get('service'),str): raise AutomationValidationError('Service action needs domain and service')
             if 'target_entity_ref' in a: a['target_entity_ref']=await self._entity_ref(a['target_entity_ref'])
+            await self._validate_expression_values(a.get('service_data',{}))
+            if a.get('response_variable') is not None and not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*',str(a['response_variable'])): raise AutomationValidationError('Invalid response variable')
+        elif typ=='variables':
+            if not isinstance(a.get('variables'),dict): raise AutomationValidationError('Variables action needs a mapping')
+            for name,value in a['variables'].items():
+                if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*',str(name)): raise AutomationValidationError('Invalid variable name')
+                await self._validate_expression_values(value)
         elif typ=='delay':
             if float(a.get('seconds',-1))<0 or float(a.get('seconds',0))>86400: raise AutomationValidationError('Delay must be 0..86400 seconds')
         elif typ=='condition': await self._validate_condition(a.get('condition'))
@@ -204,11 +227,14 @@ class RunContext:
     trace: list
     cancelled: asyncio.Event
     dry_run: bool=False
+    variables: dict=None
+    trigger: dict=None
 
 class AutomationEngine:
     def __init__(self, registry, *, timezone_name='UTC', latitude=None, longitude=None, store=None):
         self.registry=registry; self.store=store or AutomationStore(); self.timezone=ZoneInfo(timezone_name)
         self.sun=SunCalculator(latitude,longitude,timezone_name) if latitude is not None and longitude is not None else None
+        self.expressions=ExpressionEngine(timezone_name=timezone_name)
         self.active=defaultdict(dict); self.queues=defaultdict(deque); self.timers={}; self.tasks=set(); self.task=None; self.wake=asyncio.Event(); self.scheduler_started_at=None
 
     async def start(self):
@@ -382,8 +408,13 @@ class AutomationEngine:
             for ctx in active.values(): ctx.cancelled.set()
         if mode=='queued' and len(active)+len(self.queues[aid])>=int(automation['max_runs']): return None
         if mode=='parallel' and len(active)>=int(automation['max_runs']): return None
-        ctx=RunContext(automation,uuid4(),[],asyncio.Event(),dry_run)
-        if schedule: ctx.trace.append({'step':'schedule_trigger',**_safe(schedule)})
+        ctx=RunContext(automation,uuid4(),[],asyncio.Event(),dry_run,variables={},trigger={})
+        if schedule: ctx.trigger={'trigger_id':schedule.get('trigger_id'),'trigger_type':schedule.get('trigger_type'),'intended_time':schedule.get('intended_fire_at'),'catch_up':schedule.get('catch_up',False),'offset':schedule.get('offset')}; ctx.trace.append({'step':'schedule_trigger',**_safe(schedule)})
+        elif event:
+            payload=_safe(event.get('payload') or {})
+            ctx.trigger={'platform':'event','event_type':event.get('event_type'),'event_id':event.get('event_id'),'event':payload}
+            if event.get('event_type')=='entity.state_changed':
+                ctx.trigger.update({'platform':'state','entity_ref':event.get('entity_id'),'entity_id':event.get('entity_id'),'from_state':{'state':payload.get('previous_state')},'to_state':{'state':payload.get('state'),'attributes':payload.get('attributes',{}),'availability':payload.get('available',True)}})
         if mode=='queued' and active: self.queues[aid].append(ctx); return ctx.run_id
         active[str(ctx.run_id)]=ctx; task=asyncio.create_task(self._execute(ctx,source,event)); self.tasks.add(task); task.add_done_callback(self.tasks.discard); return ctx.run_id
 
@@ -391,7 +422,7 @@ class AutomationEngine:
         a=ctx.automation; started=datetime.now(timezone.utc); status='running'; result=None; category=None
         await self._persist_run(ctx,source,event,started,status)
         try:
-            if a.get('condition_definition') and not await self.evaluate_condition(self._json_field(a['condition_definition'])): status='skipped'; result='condition false'
+            if a.get('condition_definition') and not await self.evaluate_condition(self._json_field(a['condition_definition']),ctx): status='skipped'; result='condition false'
             else:
                 for action in self._json_field(a['action_sequence']):
                     await self._action(ctx,action)
@@ -428,7 +459,9 @@ class AutomationEngine:
                 except asyncio.TimeoutError:
                     pass
         elif typ=='condition':
-            if not await self.evaluate_condition(a['condition']): raise AutomationStopped('condition action false')
+            if not await self.evaluate_condition(a['condition'],ctx): raise AutomationStopped('condition action false')
+        elif typ=='variables':
+            for name,value in a['variables'].items(): ctx.variables[name]=await self._resolve_value(value,ctx)
         elif typ=='stop': raise AutomationStopped(a.get('reason','stopped'))
         elif typ=='service':
             provider_id=a.get('provider_id')
@@ -436,17 +469,37 @@ class AutomationEngine:
                 async with db.acquire() as conn: provider_id=await conn.fetchval('SELECT provider_id FROM entities WHERE id=$1',int(a['target_entity_ref']))
             declarations=await self.registry.services.inspect(provider_id)
             declaration=next((x for x in declarations if x['domain']==a['domain'] and x['service_name']==a['service']),{})
-            ctx.trace.append({'step':'service','domain':a['domain'],'service':a['service'],'target':a.get('target_entity_ref'),'arguments':_safe(a.get('service_data',{})),'physical_mutation':bool(declaration.get('mutates_physical_state',False))})
+            arguments=await self._resolve_value(a.get('service_data',{}),ctx)
+            ctx.trace.append({'step':'service','domain':a['domain'],'service':a['service'],'target':a.get('target_entity_ref'),'arguments':_safe(arguments),'physical_mutation':bool(declaration.get('mutates_physical_state',False))})
+            result=None
             if not ctx.dry_run:
                 if not provider_id: raise LookupError('Service provider unavailable')
-                await self.registry.services.invoke(provider_id,a['domain'],a['service'],a.get('service_data',{}),target_entity_id=a.get('target_entity_ref'),instance_id=a.get('instance_id'))
+                result=await self.registry.services.invoke(provider_id,a['domain'],a['service'],arguments,target_entity_id=a.get('target_entity_ref'),instance_id=a.get('instance_id'))
+            if a.get('response_variable'): ctx.variables[a['response_variable']]=result if result is not None else Undefined
         ctx.trace.append({'step':'action_end','type':typ,'at':datetime.now(timezone.utc).isoformat()})
 
-    async def evaluate_condition(self,c):
+    def _expression_context(self,ctx):
+        return {'trigger':ctx.trigger if ctx else {},'variables':ctx.variables if ctx else {},'run':{'id':str(ctx.run_id)} if ctx else {},'event':(ctx.trigger or {}).get('event',{}) if ctx else {}}
+
+    async def _resolve_value(self,value,ctx):
+        if isinstance(value,str) and '{{' in value:
+            started=datetime.now(timezone.utc)
+            result=await self.expressions.evaluate(value,context=self._expression_context(ctx),syntax='jinja')
+            ctx.trace.append({'step':'expression','source_id':hashlib.sha256(value.encode()).hexdigest()[:16],'result_type':type(result).__name__,'duration_ms':(datetime.now(timezone.utc)-started).total_seconds()*1000})
+            return result
+        if isinstance(value,dict): return {k:await self._resolve_value(v,ctx) for k,v in value.items()}
+        if isinstance(value,list): return [await self._resolve_value(v,ctx) for v in value]
+        return value
+
+    async def evaluate_condition(self,c,ctx=None):
         typ=c.get('type')
-        if typ=='and': return all([await self.evaluate_condition(x) for x in c['conditions']])
-        if typ=='or': return any([await self.evaluate_condition(x) for x in c['conditions']])
-        if typ=='not': return not await self.evaluate_condition(c['condition'])
+        if typ=='and': return all([await self.evaluate_condition(x,ctx) for x in c['conditions']])
+        if typ=='or': return any([await self.evaluate_condition(x,ctx) for x in c['conditions']])
+        if typ=='not': return not await self.evaluate_condition(c['condition'],ctx)
+        if typ=='template':
+            try: value=await self.expressions.evaluate(c['expression'],context=self._expression_context(ctx),syntax='jinja' if '{{' in c['expression'] else 'native')
+            except ExpressionError as exc: raise RuntimeError(f'Expression {exc.category}') from None
+            return self.expressions._bool(value)
         async with db.acquire() as conn:
             if typ=='state':
                 row=await conn.fetchrow('SELECT state,attributes FROM entities WHERE id=$1 AND enabled',int(c['entity_ref']))

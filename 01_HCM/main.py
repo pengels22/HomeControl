@@ -124,6 +124,8 @@ from .integrations.config_api import router as integration_config_router
 app.include_router(integration_config_router)
 from .automation_api import router as automation_router
 app.include_router(automation_router)
+from .expression_api import router as expression_router
+app.include_router(expression_router)
 from .integrations.smartthings import webhook_router as smartthings_webhook_router
 app.include_router(smartthings_webhook_router)
 from .bluetooth import bluetooth_router
