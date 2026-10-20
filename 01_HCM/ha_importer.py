@@ -336,7 +336,10 @@ class HACompatibilityAnalyzer:
 
     def _trigger(self, raw: Any) -> dict[str, Any]:
         if not isinstance(raw, dict): return {"status": UNSUPPORTED, "source": _safe(raw), "reason": "trigger must be a mapping"}
-        typ = str(raw.get("platform", raw.get("type", ""))).lower()
+        # HA's newer editor exports use ``trigger: state/device/...`` while
+        # older YAML uses ``platform: state``.  The device event ``type``
+        # (opened, motion, enters, ...) is not itself the trigger family.
+        typ = str(raw.get("platform") or raw.get("trigger") or raw.get("type", "")).lower()
         if typ == "state":
             entities = raw.get("entity_id") or raw.get("entity")
             if isinstance(entities, list): entities = entities[0] if len(entities) == 1 else None
@@ -422,7 +425,12 @@ class HACompatibilityAnalyzer:
 def _duration_seconds(value: Any) -> float | None:
     if value is None: return None
     if isinstance(value, (int, float)): return float(value)
-    if isinstance(value, dict): return float(value.get("seconds", 0) + value.get("minutes", 0) * 60 + value.get("hours", 0) * 3600 + value.get("days", 0) * 86400)
+    if isinstance(value, dict):
+        def number(key: str) -> float:
+            raw = value.get(key, 0)
+            try: return float(raw)
+            except (TypeError, ValueError): return 0.0
+        return number("seconds") + number("minutes") * 60 + number("hours") * 3600 + number("days") * 86400
     text = str(value)
     try:
         parts = [int(x) for x in text.split(":")]

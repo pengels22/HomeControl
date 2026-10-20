@@ -68,3 +68,16 @@ def test_optional_helper_fragments_are_planned():
     assert item["source_id"] == "input_boolean.guest_mode"
     assert item["preview"]["helper_type"] == "input_boolean"
     assert item["eligibility"] == m.READY
+
+
+def test_modern_ha_trigger_key_uses_trigger_family_not_event_type():
+    plan = m.analyze_home_assistant({"automations": [{"id": "door", "triggers": [{"trigger": "device", "type": "opened", "device_id": "opaque"}], "actions": []}]})
+    nested = plan["items"][0]["nested"]
+    assert nested[0][0]["type"] == "device"
+    assert nested[0][0]["status"] == m.NEEDS_MAPPING
+
+
+def test_duration_mapping_accepts_home_assistant_string_values():
+    plan = m.analyze_home_assistant({"automations": [{"id": "delay", "actions": [{"delay": {"hours": "0", "minutes": "1", "seconds": "2"}}]}]})
+    action = plan["items"][0]["preview"]["actions"][0]
+    assert action["seconds"] == 62.0
