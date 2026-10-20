@@ -21,7 +21,7 @@ async def list_automations(user=Depends(_user)):
 @router.post('')
 async def create_automation(body:dict,user=Depends(_user)):
     _role(user,True)
-    try: return await _engine().store.create(body)
+    try: return await _engine().create_automation(body)
     except (AutomationValidationError,ValueError) as exc: raise HTTPException(400,str(exc))
 
 @router.get('/{automation_id}')

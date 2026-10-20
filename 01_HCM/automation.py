@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, time as dt_time, timezone, date
 from typing import Any
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from . import db
 from .expressions import ExpressionEngine, ExpressionError, Snapshot, Undefined
@@ -31,8 +31,13 @@ class AutomationValidationError(ValueError): pass
 class AutomationStopped(Exception): pass
 class AutomationControlArgs(BaseModel):
     model_config=ConfigDict(extra='forbid')
-    automation_id: str
+    # UUID is the durable identity.  ``target`` is resolved by the service
+    # registry when callers use an Automation entity target.
+    automation_id: str | None = None
     evaluate_conditions: bool = True
+    caller_id: str | None = None
+    invocation_chain: list[str] = Field(default_factory=list)
+    invocation_depth: int = 0
 
 
 def trigger_id(trigger):
@@ -302,6 +307,9 @@ class RunContext:
     variables: dict=None
     trigger: dict=None
     kind: str='automation'
+    invocation_chain: tuple[str,...]=()
+    caller_id: str|None=None
+    evaluate_conditions: bool=True
 
 class AutomationEngine:
     def __init__(self, registry, *, timezone_name='UTC', latitude=None, longitude=None, store=None):
@@ -309,6 +317,8 @@ class AutomationEngine:
         self.sun=SunCalculator(latitude,longitude,timezone_name) if latitude is not None and longitude is not None else None
         self.expressions=ExpressionEngine(timezone_name=timezone_name)
         self.active=defaultdict(dict); self.queues=defaultdict(deque); self.timers={}; self.tasks=set(); self.task=None; self.wake=asyncio.Event(); self.scheduler_started_at=None; self.waiters=[]; self._services_registered=False
+        self.max_invocation_depth=10
+        self._automation_device_id=None
 
     async def start(self):
         await self._register_control_services()
@@ -318,7 +328,32 @@ class AutomationEngine:
             previous=await conn.fetchval("SELECT last_seen_at FROM automation_scheduler_state WHERE state_key='scheduler'")
         self.scheduler_started_at=datetime.now(timezone.utc); await self.reconstruct_schedules(previous,self.scheduler_started_at)
         async with db.acquire() as conn: await conn.execute("UPDATE automation_scheduler_state SET last_seen_at=$1,updated_at=now() WHERE state_key='scheduler'",self.scheduler_started_at)
+        await self._sync_automation_entities()
         if not self.task or self.task.done(): self.task=asyncio.create_task(self._loop())
+
+    async def _sync_automation_entities(self):
+        """Project durable automations into the normal entity target model."""
+        try:
+            context=self.registry.context('hcm_native')
+            self._automation_device_id=await context.device('automation-registry','Automations',available=True)
+            for automation in await self.store.list(): await self._sync_automation_entity(context,automation)
+        except Exception:
+            # Entity projection is additive; an unavailable database/provider must
+            # not prevent the scheduler from starting.
+            self._automation_device_id=None
+
+    async def _sync_automation_entity(self,context,automation):
+        if self._automation_device_id is None: return
+        aid=str(automation['automation_id']); entity_id=f'automation.{aid.replace("-","")}'
+        ref=await context.entity(aid,entity_id,self._automation_device_id,automation.get('name',aid))
+        await context.availability(ref,True)
+        await context.state(ref,'on' if automation.get('enabled') else 'off',attributes={'automation_id':aid,'mode':automation.get('mode','single'),'revision':automation.get('revision',0)},available=True)
+
+    async def create_automation(self,definition):
+        automation=await self.store.create(definition)
+        try: await self._sync_automation_entity(self.registry.context('hcm_native'),automation)
+        except Exception: pass
+        return automation
 
     async def stop(self):
         for runs in self.active.values():
@@ -342,12 +377,23 @@ class AutomationEngine:
         except Exception:
             self._services_registered=False
 
-    async def _service_turn_on(self,args,target): return await self.set_enabled(args.automation_id,True)
-    async def _service_turn_off(self,args,target): return await self.set_enabled(args.automation_id,False)
+    async def _automation_id_from_target(self,target,automation_id=None):
+        if automation_id: return automation_id
+        if target is None: raise ValueError('Automation target required')
+        async with db.acquire() as conn:
+            value=await conn.fetchval("SELECT attributes->>'automation_id' FROM entities WHERE id=$1 AND domain='automation'",int(target))
+        if not value: raise LookupError('Automation target unavailable')
+        return value
+
+    async def _service_turn_on(self,args,target): return await self.set_enabled(await self._automation_id_from_target(target,args.automation_id),True)
+    async def _service_turn_off(self,args,target): return await self.set_enabled(await self._automation_id_from_target(target,args.automation_id),False)
     async def _service_trigger(self,args,target):
-        automation=await self.store.get(args.automation_id)
-        run_id=await self.trigger(automation,source='automation_service')
-        return {'run_id':str(run_id) if run_id else None}
+        automation=await self.store.get(await self._automation_id_from_target(target,args.automation_id))
+        if not automation.get('enabled'):
+            return {'run_id':None,'status':'disabled_target'}
+        run_id=await self.trigger(automation,source='automation_service',caller_id=args.caller_id,
+                                  invocation_chain=args.invocation_chain,evaluate_conditions=args.evaluate_conditions)
+        return {'run_id':str(run_id) if run_id else None,'status':'blocked' if run_id is None else 'started'}
 
     def notify(self): self.wake.set()
     async def cancel_automation(self, automation_id):
@@ -360,15 +406,26 @@ class AutomationEngine:
 
     async def update_automation(self, automation_id, definition):
         await self.cancel_automation(automation_id)
-        return await self.store.update(automation_id,definition)
+        automation=await self.store.update(automation_id,definition)
+        try: await self._sync_automation_entity(self.registry.context('hcm_native'),automation)
+        except Exception: pass
+        return automation
 
     async def set_enabled(self, automation_id, enabled):
         if not enabled: await self.cancel_automation(automation_id)
-        return await self.store.set_enabled(automation_id,enabled)
+        automation=await self.store.set_enabled(automation_id,enabled)
+        try: await self._sync_automation_entity(self.registry.context('hcm_native'),automation)
+        except Exception: pass
+        return automation
 
     async def delete_automation(self, automation_id):
         await self.cancel_automation(automation_id)
-        return await self.store.delete(automation_id)
+        deleted=await self.store.delete(automation_id)
+        if deleted:
+            try:
+                async with db.acquire() as conn: await conn.execute("DELETE FROM entities WHERE provider_id='hcm_native' AND domain='automation' AND external_entity_id=$1",str(automation_id))
+            except Exception: pass
+        return deleted
 
 
     async def _loop(self):
@@ -528,14 +585,18 @@ class AutomationEngine:
         now=now or datetime.now(self.timezone)
         await self.reconstruct_schedules(since,now)
 
-    async def trigger(self,automation,*,source='manual',event=None,dry_run=False,schedule=None,kind='automation',variables=None):
+    async def trigger(self,automation,*,source='manual',event=None,dry_run=False,schedule=None,kind='automation',variables=None,invocation_chain=None,caller_id=None,evaluate_conditions=True):
         aid=str(automation['automation_id']); mode=automation['mode']; active=self.active[aid]
+        identity=f'{kind}:{aid}'
+        chain=tuple(str(x) for x in (invocation_chain or ()))
+        if identity in chain or len(chain)>=self.max_invocation_depth:
+            return None
         if mode=='single' and active: return None
         if mode=='restart' and active:
             for ctx in active.values(): ctx.cancelled.set()
         if mode=='queued' and len(active)+len(self.queues[aid])>=int(automation['max_runs']): return None
         if mode=='parallel' and len(active)>=int(automation['max_runs']): return None
-        ctx=RunContext(automation,uuid4(),[],asyncio.Event(),dry_run,variables=dict(variables or {}),trigger={},kind=kind)
+        ctx=RunContext(automation,uuid4(),[],asyncio.Event(),dry_run,variables=dict(variables or {}),trigger={},kind=kind,invocation_chain=chain+(identity,),caller_id=caller_id,evaluate_conditions=evaluate_conditions)
         if schedule: ctx.trigger={'trigger_id':schedule.get('trigger_id'),'trigger_type':schedule.get('trigger_type'),'intended_time':schedule.get('intended_fire_at'),'catch_up':schedule.get('catch_up',False),'offset':schedule.get('offset')}; ctx.trace.append({'step':'schedule_trigger',**_safe(schedule)})
         elif event:
             payload=_safe(event.get('payload') or {})
@@ -549,7 +610,7 @@ class AutomationEngine:
         a=ctx.automation; started=datetime.now(timezone.utc); status='running'; result=None; category=None
         await self._persist_run(ctx,source,event,started,status)
         try:
-            if a.get('condition_definition') and not await self.evaluate_condition(self._json_field(a['condition_definition']),ctx): status='skipped'; result='condition false'
+            if ctx.evaluate_conditions and a.get('condition_definition') and not await self.evaluate_condition(self._json_field(a['condition_definition']),ctx): status='skipped'; result='condition false'
             else:
                 for action in self._json_field(a['action_sequence']):
                     await self._action(ctx,action)
@@ -625,6 +686,12 @@ class AutomationEngine:
             declarations=await self.registry.services.inspect(provider_id)
             declaration=next((x for x in declarations if x['domain']==a['domain'] and x['service_name']==a['service']),{})
             arguments=await self._resolve_value(a.get('service_data',{}),ctx)
+            if a['domain']=='automation' and a['service']=='trigger':
+                arguments.update({'caller_id':f'{ctx.kind}:{ctx.automation.get("automation_id")}', 'invocation_chain':list(ctx.invocation_chain), 'invocation_depth':len(ctx.invocation_chain)})
+            elif a['domain']=='script' and a['service']=='run':
+                inputs=dict(arguments.get('inputs') or {})
+                inputs.update({'_hcm_caller_id':f'{ctx.kind}:{ctx.automation.get("automation_id")}', '_hcm_invocation_chain':list(ctx.invocation_chain)})
+                arguments['inputs']=inputs
             ctx.trace.append({'step':'service','domain':a['domain'],'service':a['service'],'target':a.get('target_entity_ref'),'arguments':_safe(arguments),'physical_mutation':bool(declaration.get('mutates_physical_state',False))})
             result=None
             if not ctx.dry_run:
@@ -684,7 +751,7 @@ class AutomationEngine:
     async def _parallel(self,ctx,a,depth):
         branches=a.get('branches',a.get('parallel',[]))
         async def run_branch(index,sequence):
-            child=RunContext(ctx.automation,ctx.run_id,ctx.trace,ctx.cancelled,ctx.dry_run,variables=dict(ctx.variables),trigger=ctx.trigger,kind=ctx.kind)
+            child=RunContext(ctx.automation,ctx.run_id,ctx.trace,ctx.cancelled,ctx.dry_run,variables=dict(ctx.variables),trigger=ctx.trigger,kind=ctx.kind,invocation_chain=ctx.invocation_chain,caller_id=ctx.caller_id,evaluate_conditions=ctx.evaluate_conditions)
             child.trace=[]
             try:
                 for action in sequence: await self._action(child,action,depth+1)

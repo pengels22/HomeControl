@@ -202,7 +202,12 @@ class NativePrimitives:
             if rule.get('options') and values[name] not in rule['options']: raise ValueError(f'Invalid script input option: {name}')
         if not self.engine: raise LookupError('Automation Engine unavailable')
         definition={'automation_id':row['script_id'],'name':row['name'],'mode':row['mode'],'max_runs':row['max_runs'],'enabled':row['enabled'],'action_sequence':row['action_sequence'],'condition_definition':None}
-        run_id=await self.engine.trigger(definition,source='script',kind='script',variables={k:v for k,v in values.items() if k!='_hcm_depth'})
+        raw_inputs=dict(values)
+        chain=tuple(str(x) for x in raw_inputs.pop('_hcm_invocation_chain',[]) or [])
+        caller_id=raw_inputs.pop('_hcm_caller_id',None)
+        run_id=await self.engine.trigger(definition,source='script',kind='script',
+                                         variables={k:v for k,v in raw_inputs.items() if not k.startswith('_hcm_')},
+                                         invocation_chain=chain,caller_id=caller_id)
         return {'run_id':str(run_id),'script_id':str(row['script_id'])}
     async def _scene_turn_on(self,a,t):
         return await self.activate_scene(int(t),dry_run=False)

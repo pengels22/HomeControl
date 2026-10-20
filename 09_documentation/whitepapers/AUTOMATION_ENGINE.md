@@ -49,7 +49,19 @@ matching crossings; `above` and `below` use strict boundaries.
 
 Native `automation.turn_on`, `automation.turn_off`, and `automation.trigger`
 services use the Service Registry and identify service-triggered runs with
-`trigger_source=automation_service`.
+`trigger_source=automation_service`. Their durable target is the automation
+UUID (or an Automation entity whose immutable `automation_id` attribute is
+resolved by the registry); display names are never used for dispatch. A
+disabled target returns `disabled_target` without creating a run. `trigger`
+can skip top-level conditions only when its explicit `evaluate_conditions`
+argument is false.
+
+Automation and script calls carry an internal invocation chain. A repeated
+`automation:<uuid>` or `script:<uuid>` identity, or a chain at the depth limit,
+is rejected before a run is created. This protects direct self-calls and
+cross-automation/script cycles while preserving independent manual runs.
+Cancellation sets the run event, cancels event waiters and pending timers, and
+cleans waiter registrations even when a wait is interrupted.
 
 Traces are bounded JSON data on each run. They include trigger source, action
 steps, targets, sanitized arguments, results, and error classification. Secrets

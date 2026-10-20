@@ -92,7 +92,7 @@ async def apply(body: dict, user=Depends(require_user)):
                 row = await native.create_helper(preview["helper_type"], preview["name"], preview.get("config", {}), entity_id=preview["entity_id"])
             else:
                 definition = {"name": preview.get("name", source_id), "description": preview.get("description"), "enabled": False, "mode": preview.get("mode", "single"), "max_runs": min(int(preview.get("max_runs", 10)), 10), "triggers": preview.get("triggers") or [], "conditions": preview.get("conditions"), "actions": preview.get("actions") or []}
-                row = await engine.store.create(definition)
+                row = await engine.create_automation(definition)
             report["imported"].append({"source_id": source_id, "native_id": str(row.get("script_id", row.get("scene_id", row.get("automation_id", ""))))})
             report["provenance"].append({"source_system": "home_assistant", "source_type": source_type, "source_id": source_id, "source_fingerprint": item.get("source_fingerprint")})
         except Exception as exc:

@@ -47,3 +47,11 @@ def test_numeric_state_trigger_crossing_semantics():
     assert engine._trigger_matches(trigger,event(69,71))
     assert not engine._trigger_matches(trigger,event(71,72))
     assert engine._trigger_matches(trigger,event(69,71))
+
+@pytest.mark.asyncio
+async def test_invocation_chain_blocks_cycles_and_depth_without_creating_runs():
+    engine=m.AutomationEngine(object())
+    automation={'automation_id':'a','mode':'single','max_runs':1}
+    assert await engine.trigger(automation, invocation_chain=('automation:a',)) is None
+    engine.max_invocation_depth=1
+    assert await engine.trigger(automation, invocation_chain=('automation:caller',)) is None
