@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, time as dt_time, timezone, date
 from typing import Any
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
+from pydantic import BaseModel, ConfigDict
 
 from . import db
 from .expressions import ExpressionEngine, ExpressionError, Snapshot, Undefined
@@ -20,9 +21,18 @@ STATUSES = {'running','success','failed','cancelled','skipped','HCM_RESTART'}
 ERRORS = {'validation error','missing entity','unavailable target','service unavailable','service failure','timeout','cancelled','internal error'}
 MAX_TRACE_STEPS = 200
 MAX_TRACE_BYTES = 64_000
+MAX_ACTION_DEPTH = 10
+MAX_REPEAT_ITERATIONS = 100
+MAX_FOREACH_ITEMS = 100
+MAX_PARALLEL_BRANCHES = 10
+MIN_WAIT_INTERVAL = 0.1
 
 class AutomationValidationError(ValueError): pass
 class AutomationStopped(Exception): pass
+class AutomationControlArgs(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    automation_id: str
+    evaluate_conditions: bool = True
 
 
 def trigger_id(trigger):
@@ -72,6 +82,12 @@ def _safe(value):
 def _as_uuid(value):
     try: return UUID(str(value))
     except (ValueError, TypeError, AttributeError): return value
+
+def _validate_timeout(value):
+    if value is None: return
+    try: seconds=float(value)
+    except (TypeError,ValueError): raise AutomationValidationError('Invalid timeout')
+    if seconds<0 or seconds>86400: raise AutomationValidationError('Timeout must be 0..86400 seconds')
 
 class AutomationStore:
     def __init__(self, *, timezone_name='UTC'):
@@ -126,7 +142,7 @@ class AutomationStore:
         return sign*(nums[0]*3600+nums[1]*60+nums[2])
 
     async def _validate_trigger(self,t):
-        if not isinstance(t,dict) or set(t)-{'type','entity_ref','from','to','attribute','for','event_type','provider_id','instance_id','device_ref','payload','times','time','every_minutes','every_hours','minute','hour','sun','offset'}: raise AutomationValidationError('Invalid trigger definition')
+        if not isinstance(t,dict) or set(t)-{'type','entity_ref','from','to','attribute','for','event_type','provider_id','instance_id','device_ref','payload','times','time','every_minutes','every_hours','minute','hour','sun','offset','above','below'}: raise AutomationValidationError('Invalid trigger definition')
         typ=t.get('type')
         if typ=='state':
             if 'entity_ref' not in t: raise AutomationValidationError('State trigger needs entity_ref')
@@ -134,6 +150,15 @@ class AutomationStore:
             if 'for' in t and (not isinstance(t['for'],(int,float)) or t['for']<0): raise AutomationValidationError('for must be non-negative seconds')
         elif typ=='event':
             if not isinstance(t.get('event_type'),str) or not t['event_type']: raise AutomationValidationError('Event trigger needs event_type')
+        elif typ=='numeric_state':
+            if 'entity_ref' not in t: raise AutomationValidationError('Numeric state trigger needs entity_ref')
+            if t.get('above') is None and t.get('below') is None: raise AutomationValidationError('Numeric state trigger needs above or below')
+            if t.get('for') is not None and (not isinstance(t['for'],(int,float)) or t['for']<0): raise AutomationValidationError('for must be non-negative seconds')
+            for key in ('above','below'):
+                if t.get(key) is not None:
+                    try: float(t[key])
+                    except (TypeError,ValueError): raise AutomationValidationError(f'{key} must be numeric')
+            t=dict(t); t['entity_ref']=await self._entity_ref(t['entity_ref']); t['trigger_id']=trigger_id(t)
         elif typ=='time':
             times=t.get('times', [t.get('time')] if t.get('time') else [])
             if not times or any(not re.fullmatch(r'\d{2}:\d{2}(:\d{2})?',str(v)) for v in times): raise AutomationValidationError('Time trigger needs HH:MM times')
@@ -148,6 +173,9 @@ class AutomationStore:
         return t
 
     async def _validate_condition(self,c):
+        if isinstance(c,list):
+            for child in c: await self._validate_condition(child)
+            return
         if not isinstance(c,dict): raise AutomationValidationError('Condition must be an object')
         typ=c.get('type')
         if typ in ('and','or'):
@@ -173,8 +201,9 @@ class AutomationStore:
             if not c.get('after') and not c.get('before'): raise AutomationValidationError('Time condition needs after or before')
         else: raise AutomationValidationError('Unsupported condition type')
 
-    async def _validate_action(self,a):
+    async def _validate_action(self,a,depth=0):
         if not isinstance(a,dict): raise AutomationValidationError('Action must be an object')
+        if depth>MAX_ACTION_DEPTH: raise AutomationValidationError('Action nesting exceeds limit')
         typ=a.get('type')
         if typ=='service':
             if not isinstance(a.get('domain'),str) or not isinstance(a.get('service'),str): raise AutomationValidationError('Service action needs domain and service')
@@ -189,6 +218,49 @@ class AutomationStore:
         elif typ=='delay':
             if float(a.get('seconds',-1))<0 or float(a.get('seconds',0))>86400: raise AutomationValidationError('Delay must be 0..86400 seconds')
         elif typ=='condition': await self._validate_condition(a.get('condition'))
+        elif typ=='if':
+            if not isinstance(a.get('conditions'),(dict,list)) or not isinstance(a.get('then'),list) or (a.get('else') is not None and not isinstance(a.get('else'),list)): raise AutomationValidationError('if needs conditions and then sequence')
+            await self._validate_condition(a['conditions'])
+            for child in a['then'] + (a.get('else') or []): await self._validate_action(child,depth+1)
+        elif typ=='choose':
+            choices=a.get('choices',a.get('choose'))
+            if not isinstance(choices,list): raise AutomationValidationError('choose needs choices')
+            for choice in choices:
+                if not isinstance(choice,dict) or not isinstance(choice.get('conditions'),(dict,list)) or not isinstance(choice.get('sequence'),list): raise AutomationValidationError('Malformed choose entry')
+                await self._validate_condition(choice['conditions'])
+                for child in choice['sequence']: await self._validate_action(child,depth+1)
+            if a.get('default') is not None:
+                if not isinstance(a['default'],list): raise AutomationValidationError('choose default must be a sequence')
+                for child in a['default']: await self._validate_action(child,depth+1)
+        elif typ=='wait':
+            if not (a.get('condition') is not None or isinstance(a.get('expression'),str)): raise AutomationValidationError('wait needs condition or expression')
+            if a.get('condition') is not None: await self._validate_condition(a['condition'])
+            _validate_timeout(a.get('timeout'))
+        elif typ=='wait_for_trigger':
+            if not isinstance(a.get('triggers'),list) or not a['triggers']: raise AutomationValidationError('wait_for_trigger needs triggers')
+            for trigger in a['triggers']: await self._validate_trigger(trigger)
+            _validate_timeout(a.get('timeout'))
+        elif typ=='repeat':
+            sequence=a.get('sequence')
+            if not isinstance(sequence,list) or not sequence: raise AutomationValidationError('repeat needs a sequence')
+            modes=sum(a.get(k) is not None for k in ('count','while','until','for_each'))
+            if modes!=1: raise AutomationValidationError('repeat needs exactly one mode')
+            if a.get('count') is not None:
+                if isinstance(a['count'],str) and ('{{' in a['count'] or a['count'].strip()):
+                    await self._validate_expression_values(a['count'])
+                else:
+                    try:
+                        if int(a['count'])<0 or int(a['count'])>MAX_REPEAT_ITERATIONS: raise ValueError
+                    except (TypeError,ValueError): raise AutomationValidationError('repeat count exceeds limit or is invalid')
+            if a.get('while') is not None: await self._validate_condition(a['while'])
+            if a.get('until') is not None: await self._validate_condition(a['until'])
+            for child in sequence: await self._validate_action(child,depth+1)
+        elif typ=='parallel':
+            branches=a.get('branches',a.get('parallel'))
+            if not isinstance(branches,list) or not branches or len(branches)>MAX_PARALLEL_BRANCHES: raise AutomationValidationError('parallel branch limit exceeded')
+            for branch in branches:
+                if not isinstance(branch,list): raise AutomationValidationError('parallel branch must be a sequence')
+                for child in branch: await self._validate_action(child,depth+1)
         elif typ=='stop': pass
         else: raise AutomationValidationError('Unsupported action type')
 
@@ -236,9 +308,10 @@ class AutomationEngine:
         self.registry=registry; self.store=store or AutomationStore(); self.timezone=ZoneInfo(timezone_name)
         self.sun=SunCalculator(latitude,longitude,timezone_name) if latitude is not None and longitude is not None else None
         self.expressions=ExpressionEngine(timezone_name=timezone_name)
-        self.active=defaultdict(dict); self.queues=defaultdict(deque); self.timers={}; self.tasks=set(); self.task=None; self.wake=asyncio.Event(); self.scheduler_started_at=None
+        self.active=defaultdict(dict); self.queues=defaultdict(deque); self.timers={}; self.tasks=set(); self.task=None; self.wake=asyncio.Event(); self.scheduler_started_at=None; self.waiters=[]; self._services_registered=False
 
     async def start(self):
+        await self._register_control_services()
         async with db.acquire() as conn:
             await conn.execute("UPDATE automation_runs SET status='HCM_RESTART',ended_at=now(),result='HCM restart',error_category='cancelled' WHERE status='running'")
             self.cursor=int(await conn.fetchval("SELECT last_event_id FROM automation_engine_state WHERE state_key='integration_events'") or 0)
@@ -255,6 +328,26 @@ class AutomationEngine:
         for task in list(self.tasks): task.cancel()
         if self.tasks: await asyncio.gather(*self.tasks,return_exceptions=True)
         self.timers.clear(); self.tasks.clear()
+        for waiter in list(self.waiters): waiter['future'].cancel()
+        self.waiters.clear()
+
+    async def _register_control_services(self):
+        if self._services_registered: return
+        try:
+            context=self.registry.context('hcm_native')
+            await context.service('automation','turn_on',AutomationControlArgs,self._service_turn_on)
+            await context.service('automation','turn_off',AutomationControlArgs,self._service_turn_off)
+            await context.service('automation','trigger',AutomationControlArgs,self._service_trigger)
+            self._services_registered=True
+        except Exception:
+            self._services_registered=False
+
+    async def _service_turn_on(self,args,target): return await self.set_enabled(args.automation_id,True)
+    async def _service_turn_off(self,args,target): return await self.set_enabled(args.automation_id,False)
+    async def _service_trigger(self,args,target):
+        automation=await self.store.get(args.automation_id)
+        run_id=await self.trigger(automation,source='automation_service')
+        return {'run_id':str(run_id) if run_id else None}
 
     def notify(self): self.wake.set()
     async def cancel_automation(self, automation_id):
@@ -289,6 +382,7 @@ class AutomationEngine:
         events=await self.registry.events_after(self.cursor,limit=100)
         for event in events:
             event_id=int(event['event_id']); automations=await self.store.list()
+            self._notify_waiters(event)
             for automation in automations:
                 if automation['enabled'] and any(self._trigger_matches(t,event,automation_id=str(automation['automation_id'])) for t in self._json_field(automation['trigger_definitions'])):
                     await self.trigger(automation,source='event',event=event)
@@ -297,6 +391,33 @@ class AutomationEngine:
         return len(events)
 
     def _json_field(self,v): return json.loads(v) if isinstance(v,str) else (v or [])
+    def _numeric_value(self,t,payload):
+        value=(payload.get('attributes') or {}).get(t.get('attribute')) if t.get('attribute') else payload.get('state')
+        if isinstance(value,bool): return None
+        try: return float(value)
+        except (TypeError,ValueError): return None
+    def _numeric_matches(self,t,e,automation_id=None):
+        current=self._numeric_value(t,e.get('payload') or {})
+        previous_payload={'state':(e.get('payload') or {}).get('previous_state'),'attributes':(e.get('payload') or {}).get('previous_attributes',{})}
+        previous=self._numeric_value(t,previous_payload)
+        if current is None: return False
+        matches=(t.get('above') is None or current>float(t['above'])) and (t.get('below') is None or current<float(t['below']))
+        was=(previous is not None and (t.get('above') is None or previous>float(t['above'])) and (t.get('below') is None or previous<float(t['below'])))
+        if not matches or was: return False
+        if t.get('for'):
+            key=('numeric',str(automation_id or ''),t.get('trigger_id') or trigger_id(t),str(t.get('entity_ref')))
+            self._start_timer(key,t,e,current); return False
+        return True
+    def _trigger_matches_wait(self,t,e):
+        if t.get('type')=='numeric_state': return self._numeric_matches(t,e)
+        return self._trigger_matches(t,e)
+    def _notify_waiters(self,event):
+        for waiter in list(self.waiters):
+            if waiter['future'].done(): continue
+            for trigger in waiter['triggers']:
+                if self._trigger_matches_wait(trigger,event):
+                    waiter['future'].set_result({'trigger':trigger,'event':_safe(event)})
+                    break
     def _trigger_matches(self,t,e,automation_id=None):
         typ=t.get('type'); payload=e.get('payload') or {}
         if typ=='event':
@@ -316,6 +437,8 @@ class AutomationEngine:
                 key=(str(automation_id or ''),t.get('trigger_id') or trigger_id(t),str(t.get('entity_ref'))); self._start_timer(key,t,e,current)
                 return False
             return True
+        if typ=='numeric_state':
+            return self._numeric_matches(t,e,automation_id)
         return False
 
     def _start_timer(self,key,t,event,current):
@@ -327,7 +450,10 @@ class AutomationEngine:
                     row=await conn.fetchrow('SELECT state,attributes FROM entities WHERE id=$1 AND enabled',int(t['entity_ref']))
                 if row:
                     current=(row['attributes'] or {}).get(t['attribute']) if t.get('attribute') else row['state']
-                    still_matches=t.get('to') is None or current==t.get('to')
+                    if t.get('type')=='numeric_state':
+                        try: numeric=float(current); still_matches=(t.get('above') is None or numeric>float(t['above'])) and (t.get('below') is None or numeric<float(t['below']))
+                        except (TypeError,ValueError): still_matches=False
+                    else: still_matches=t.get('to') is None or current==t.get('to')
                     for automation in await self.store.list():
                         if still_matches and automation['enabled'] and t in self._json_field(automation['trigger_definitions']): await self.trigger(automation,source='event',event=event)
             except asyncio.CancelledError: pass
@@ -452,8 +578,9 @@ class AutomationEngine:
             if ctx.kind=='automation':
                 await conn.execute('UPDATE automations SET last_triggered_at=CASE WHEN $2 IN (\'success\',\'failed\',\'skipped\') THEN now() ELSE last_triggered_at END,last_run_status=$2 WHERE automation_id=$1',_as_uuid(ctx.automation['automation_id']),status)
 
-    async def _action(self,ctx,a):
+    async def _action(self,ctx,a,depth=0):
         if ctx.cancelled.is_set(): raise asyncio.CancelledError
+        if depth>MAX_ACTION_DEPTH: raise AutomationValidationError('Action nesting exceeds limit')
         typ=a['type']; begin=datetime.now(timezone.utc); ctx.trace.append({'step':'action_start','type':typ,'at':begin.isoformat()})
         if typ=='delay':
             if not ctx.dry_run:
@@ -464,6 +591,30 @@ class AutomationEngine:
                     pass
         elif typ=='condition':
             if not await self.evaluate_condition(a['condition'],ctx): raise AutomationStopped('condition action false')
+        elif typ=='if':
+            result=await self.evaluate_condition(a['conditions'],ctx); branch='then' if result else 'else'; skipped='else' if result else 'then'
+            ctx.trace.append({'step':'if','condition_result':result,'selected_branch':branch,'skipped_branch':skipped})
+            for child in a.get(branch,[]): await self._action(ctx,child,depth+1)
+        elif typ=='choose':
+            choices=a.get('choices',a.get('choose',[])); selected=None
+            for index,choice in enumerate(choices):
+                result=await self.evaluate_condition(choice['conditions'],ctx); ctx.trace.append({'step':'choose_evaluate','choice':index,'result':result})
+                if result:
+                    selected=index
+                    for child in choice.get('sequence',[]): await self._action(ctx,child,depth+1)
+                    break
+            if selected is None:
+                ctx.trace.append({'step':'choose_default','selected':bool(a.get('default'))})
+                for child in a.get('default',[]): await self._action(ctx,child,depth+1)
+            else: ctx.trace.append({'step':'choose_selected','choice':selected})
+        elif typ=='wait':
+            await self._wait_condition(ctx,a)
+        elif typ=='wait_for_trigger':
+            await self._wait_for_trigger(ctx,a)
+        elif typ=='repeat':
+            await self._repeat(ctx,a,depth)
+        elif typ=='parallel':
+            await self._parallel(ctx,a,depth)
         elif typ=='variables':
             for name,value in a['variables'].items(): ctx.variables[name]=await self._resolve_value(value,ctx)
         elif typ=='stop': raise AutomationStopped(a.get('reason','stopped'))
@@ -482,6 +633,68 @@ class AutomationEngine:
             if a.get('response_variable'): ctx.variables[a['response_variable']]=result if result is not None else Undefined
         ctx.trace.append({'step':'action_end','type':typ,'at':datetime.now(timezone.utc).isoformat()})
 
+    async def _wait_condition(self,ctx,a):
+        started=datetime.now(timezone.utc); timeout=float(a.get('timeout',86400)); deadline=asyncio.get_running_loop().time()+timeout if timeout is not None else None
+        while True:
+            if ctx.cancelled.is_set(): raise asyncio.CancelledError
+            result=await self.evaluate_condition(a['condition'],ctx) if a.get('condition') is not None else self.expressions._bool(await self.expressions.evaluate(a['expression'],context=self._expression_context(ctx),syntax='jinja' if '{{' in a['expression'] else 'native'))
+            if result:
+                ctx.variables['wait']={'completed':True,'timed_out':False}; ctx.trace.append({'step':'wait','result':'matched','duration_ms':(datetime.now(timezone.utc)-started).total_seconds()*1000}); return
+            if deadline is not None and asyncio.get_running_loop().time()>=deadline: break
+            try: await asyncio.wait_for(ctx.cancelled.wait(),timeout=MIN_WAIT_INTERVAL)
+            except asyncio.TimeoutError: pass
+        ctx.variables['wait']={'completed':False,'timed_out':True}; ctx.trace.append({'step':'wait','result':'timeout'})
+        if not a.get('continue_on_timeout',True): raise AutomationStopped('wait timeout')
+
+    async def _wait_for_trigger(self,ctx,a):
+        future=asyncio.get_running_loop().create_future(); waiter={'future':future,'triggers':a['triggers']}; self.waiters.append(waiter); started=datetime.now(timezone.utc); cancel_task=asyncio.create_task(ctx.cancelled.wait())
+        timeout=a.get('timeout');
+        try:
+            done,_=await asyncio.wait({future,cancel_task},timeout=float(timeout) if timeout is not None else None,return_when=asyncio.FIRST_COMPLETED)
+            if cancel_task in done: raise asyncio.CancelledError
+            if not done: raise asyncio.TimeoutError
+            matched=future.result()
+            ctx.variables['wait']={'trigger':matched['trigger'],'event':matched['event'],'timed_out':False}; ctx.trace.append({'step':'wait_for_trigger','result':'matched','duration_ms':(datetime.now(timezone.utc)-started).total_seconds()*1000})
+        except asyncio.TimeoutError:
+            ctx.variables['wait']={'trigger':None,'event':None,'timed_out':True}; ctx.trace.append({'step':'wait_for_trigger','result':'timeout'})
+            if not a.get('continue_on_timeout',True): raise AutomationStopped('wait_for_trigger timeout')
+        finally:
+            cancel_task.cancel()
+            if waiter in self.waiters: self.waiters.remove(waiter)
+
+    async def _repeat(self,ctx,a,depth):
+        sequence=a['sequence']; limit=MAX_REPEAT_ITERATIONS; count=a.get('count'); mode='count'
+        if count is not None:
+            value=await self._resolve_value(count,ctx); iterations=int(value)
+            if iterations<0 or iterations>limit: raise AutomationValidationError('repeat count exceeds limit')
+            values=[None]*iterations
+        elif a.get('for_each') is not None:
+            mode='for_each'; values=await self._resolve_value(a['for_each'],ctx)
+            if not isinstance(values,list) or len(values)>MAX_FOREACH_ITEMS: raise AutomationValidationError('for_each exceeds limit')
+        else:
+            mode='while' if a.get('while') is not None else 'until'; values=[None]*limit
+        for index,item in enumerate(values):
+            if mode=='while' and not await self.evaluate_condition(a['while'],ctx): break
+            ctx.variables['repeat']={'index':index,'first':index==0,'last':index==len(values)-1,'item':item}
+            ctx.trace.append({'step':'repeat','iteration':index,'context':_safe(ctx.variables['repeat'])})
+            for child in sequence: await self._action(ctx,child,depth+1)
+            if mode=='until' and await self.evaluate_condition(a['until'],ctx): break
+        ctx.variables.pop('repeat',None)
+
+    async def _parallel(self,ctx,a,depth):
+        branches=a.get('branches',a.get('parallel',[]))
+        async def run_branch(index,sequence):
+            child=RunContext(ctx.automation,ctx.run_id,ctx.trace,ctx.cancelled,ctx.dry_run,variables=dict(ctx.variables),trigger=ctx.trigger,kind=ctx.kind)
+            child.trace=[]
+            try:
+                for action in sequence: await self._action(child,action,depth+1)
+                return {'branch':index,'status':'success','trace':child.trace}
+            except asyncio.CancelledError: return {'branch':index,'status':'cancelled','trace':child.trace}
+            except Exception as exc: return {'branch':index,'status':'failed','error':type(exc).__name__,'trace':child.trace}
+        results=await asyncio.gather(*(run_branch(i,b) for i,b in enumerate(branches)))
+        ctx.trace.append({'step':'parallel','branches':_safe(results),'result':'success' if all(x['status']=='success' for x in results) else 'partial_failure'})
+        if any(x['status']=='failed' for x in results): raise RuntimeError('parallel branch failed')
+
     def _expression_context(self,ctx):
         return {'trigger':ctx.trigger if ctx else {},'variables':ctx.variables if ctx else {},'run':{'id':str(ctx.run_id)} if ctx else {},'event':(ctx.trigger or {}).get('event',{}) if ctx else {}}
 
@@ -496,6 +709,8 @@ class AutomationEngine:
         return value
 
     async def evaluate_condition(self,c,ctx=None):
+        if isinstance(c,list):
+            return all([await self.evaluate_condition(x,ctx) for x in c])
         typ=c.get('type')
         if typ=='and': return all([await self.evaluate_condition(x,ctx) for x in c['conditions']])
         if typ=='or': return any([await self.evaluate_condition(x,ctx) for x in c['conditions']])

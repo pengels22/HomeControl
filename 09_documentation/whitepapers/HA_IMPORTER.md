@@ -36,6 +36,13 @@ repeats, arbitrary shell/python execution, and unresolved device triggers are
 reported rather than fabricated. Templates are compiled by the bounded HCM
 Expression Engine; Jinja control blocks remain unsupported.
 
+The native runtime provides translated targets for `if`, `choose`, bounded
+`repeat`, bounded `parallel`, `wait_template`, `wait_for_trigger`, numeric-state
+triggers, and `automation.turn_on`/`turn_off`/`trigger`. These mappings do not
+override remaining entity, climate, notification, zone, conversation, or
+security-service blockers; an item remains blocked until every nested requirement
+is eligible.
+
 Endpoints:
 
 - `POST /api/v1/import/home-assistant/analyze` (ADMIN): YAML fields or structured

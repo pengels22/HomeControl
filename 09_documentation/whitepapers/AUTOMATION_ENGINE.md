@@ -30,9 +30,26 @@ windows), AND, OR, and NOT. Actions are service calls through the Service
 Registry, bounded cancellable delays, condition-as-action, and stop.
 
 Modes are `single`, `restart`, `queued`, and `parallel`; queue/concurrency is
-bounded to ten. Service calls retain target ownership and provider/instance
-resolution and therefore continue through normal HCM authorization and safety
-paths. Dry-run resolves and traces actions without invoking services.
+bounded to ten. Native actions also include `if`, first-match `choose`, bounded
+`repeat`, bounded `parallel`, wait-until conditions, and `wait_for_trigger`.
+Action nesting is capped at ten levels, repeats at 100 iterations (or 100
+`for_each` values), and parallel containers at ten branches. Parallel branches
+receive copied variable scopes and branch mutations do not merge automatically.
+Service calls retain target ownership and provider/instance resolution and
+therefore continue through normal HCM authorization and safety paths. Dry-run
+resolves and traces actions without invoking services.
+
+Waits are in-memory and cancellable. `wait` reevaluates at a bounded interval;
+`wait_for_trigger` uses the existing event path for state, numeric-state, and
+event triggers. A matched result is exposed as `variables.wait` with `trigger`,
+`event`, and `timed_out`. Timeouts set `timed_out`; `continue_on_timeout=false`
+stops the run. Waits, repeat progress, and pending numeric `for` timers do not
+resume after HCM restart. Numeric-state triggers fire only on non-matching to
+matching crossings; `above` and `below` use strict boundaries.
+
+Native `automation.turn_on`, `automation.turn_off`, and `automation.trigger`
+services use the Service Registry and identify service-triggered runs with
+`trigger_source=automation_service`.
 
 Traces are bounded JSON data on each run. They include trigger source, action
 steps, targets, sanitized arguments, results, and error classification. Secrets

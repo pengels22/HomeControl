@@ -61,8 +61,9 @@ SERVICE_MAPPINGS: dict[str, dict[str, Any]] = {
     "script.turn_on": {"status": TRANSLATED, "domain": "script", "service": "run"},
     "scene.turn_on": {"status": TRANSLATED, "domain": "scene", "service": "turn_on"},
     "automation.trigger": {"status": TRANSLATED, "domain": "automation", "service": "trigger"},
-    "automation.turn_on": {"status": UNAVAILABLE_SERVICE},
-    "automation.turn_off": {"status": UNAVAILABLE_SERVICE},
+    "automation.turn_on": {"status": TRANSLATED, "domain": "automation", "service": "turn_on"},
+    "automation.turn_off": {"status": TRANSLATED, "domain": "automation", "service": "turn_off"},
+    "automation.trigger": {"status": TRANSLATED, "domain": "automation", "service": "trigger"},
 }
 
 _READ_ONLY_TRIGGER_TYPES = {"zone": UNSUPPORTED, "conversation": UNSUPPORTED, "device": NEEDS_MAPPING, "manual": COMPATIBLE}
@@ -279,24 +280,40 @@ class HACompatibilityAnalyzer:
         if "stop" in raw: return {"type": "stop", "status": COMPATIBLE, "source": _safe(raw), "native": {"type": "stop"}}
         if "if" in raw:
             spec = raw["if"] if isinstance(raw["if"], dict) else {}
-            condition = self._condition(spec.get("conditions", spec.get("condition", {})))
-            then = self._actions(spec.get("then", [])); otherwise = self._actions(spec.get("else", []))
-            return {"type": "if", "status": _combine([condition["status"], then["status"], otherwise["status"]]), "source": _safe(raw), "children": [condition, then, otherwise], "native": {"type": "if"}}
+            condition_source = spec.get("conditions", spec.get("condition", raw["if"] if not isinstance(raw["if"], dict) else {}))
+            condition = self._condition(condition_source)
+            then = self._actions(raw.get("then", spec.get("then", []))); otherwise = self._actions(raw.get("else", spec.get("else", [])))
+            return {"type": "if", "status": _combine([condition["status"], then["status"], otherwise["status"]]), "source": _safe(raw), "children": [condition, then, otherwise], "native": {"type": "if", "conditions": condition.get("native", {}), "then": then.get("native", []), "else": otherwise.get("native", [])}}
         if "choose" in raw:
             choices = [self._choice(choice) for choice in (raw.get("choose") or [])]; default = self._actions(raw.get("default", []))
             statuses = [default["status"]] + [x["status"] for x in choices]
-            return {"type": "choose", "status": _combine(statuses), "source": _safe(raw), "children": choices + [default], "native": {"type": "choose"}}
+            native_choices=[]
+            for choice in choices:
+                native_choices.append({'conditions': choice['children'][0].get('native',{}), 'sequence': choice['children'][1].get('native',[])})
+            return {"type": "choose", "status": _combine(statuses), "source": _safe(raw), "children": choices + [default], "native": {"type": "choose", "choices": native_choices, "default": default.get('native',[])}}
         if "repeat" in raw:
             spec = raw["repeat"] if isinstance(raw["repeat"], dict) else {}
             bounded = spec.get("count") is not None or spec.get("for_each") is not None
             child = self._actions(spec.get("sequence", []))
             status = TRANSLATED if bounded else UNSUPPORTED
-            return {"type": "repeat", "status": _combine([status, child["status"]]), "source": _safe(raw), "children": [child], "native": {"type": "repeat", "bounded": bounded}}
+            native_repeat={'type':'repeat','sequence':child.get('native',[])}
+            for key in ('count','while','until','for_each'):
+                if key in spec: native_repeat[key]=spec[key]
+            return {"type": "repeat", "status": _combine([status, child["status"]]), "source": _safe(raw), "children": [child], "native": native_repeat}
         if "parallel" in raw:
             branches = [self._actions(x) for x in (raw.get("parallel") or [])]
-            return {"type": "parallel", "status": _combine([TRANSLATED] + [x["status"] for x in branches]), "source": _safe(raw), "children": branches, "native": {"type": "parallel"}}
-        if "wait_template" in raw or "wait_for_trigger" in raw or "wait" in raw:
-            return {"type": "wait", "status": UNSUPPORTED, "source": _safe(raw), "reason": "HCM V1 has no cancellable durable wait primitive"}
+            return {"type": "parallel", "status": _combine([TRANSLATED] + [x["status"] for x in branches]), "source": _safe(raw), "children": branches, "native": {"type": "parallel", "branches": [x.get('native',[]) for x in branches]}}
+        if "wait_for_trigger" in raw:
+            triggers = [self._trigger(x) for x in (raw.get('wait_for_trigger') or [])]
+            status = _combine([x['status'] for x in triggers])
+            wait={'type':'wait_for_trigger','triggers':[x.get('native') for x in triggers if x.get('native')], 'continue_on_timeout':raw.get('continue_on_timeout',True)}
+            if raw.get('timeout') is not None: wait['timeout']=_duration_seconds(raw['timeout'])
+            return {"type":"wait_for_trigger","status":status,"source":_safe(raw),"children":triggers,"native":wait}
+        if "wait_template" in raw or "wait" in raw:
+            wait={'type':'wait','continue_on_timeout':raw.get('continue_on_timeout',True)}
+            if 'wait_template' in raw: wait['expression']=raw['wait_template']
+            if 'timeout' in raw: wait['timeout']=_duration_seconds(raw['timeout'])
+            return {"type": "wait", "status": TRANSLATED, "source": _safe(raw), "native": wait}
         return {"status": UNSUPPORTED, "source": _safe(raw), "reason": "Unknown Home Assistant action"}
 
     def _choice(self, choice: Any) -> dict[str, Any]:
@@ -310,6 +327,9 @@ class HACompatibilityAnalyzer:
         return {"status": _combine([x["status"] for x in children]), "children": children, "native": [x.get("native") for x in children if x.get("native") is not None]}
 
     def _condition(self, raw: Any) -> dict[str, Any]:
+        if isinstance(raw,str):
+            _, status, deps, _ = self._template(raw)
+            return {"type":"template","status":status,"source":raw,"native":{"type":"template","expression":raw},"expression_references":deps}
         if isinstance(raw, list):
             children = [self._condition(x) for x in raw]
             return {"type": "and", "status": _combine([x["status"] for x in children]), "children": children, "native": {"type": "and"}}
@@ -317,12 +337,12 @@ class HACompatibilityAnalyzer:
         typ = str(raw.get("condition", raw.get("type", ""))).lower()
         if typ in ("and", "or"):
             children = [self._condition(x) for x in raw.get("conditions", [])]
-            return {"type": typ, "status": _combine([x["status"] for x in children]), "children": children, "native": {"type": typ}}
+            return {"type": typ, "status": _combine([x["status"] for x in children]), "children": children, "native": {"type": typ, "conditions": [x.get('native',{}) for x in children]}}
         if typ == "not":
             values = raw.get("conditions", [])
             if not isinstance(values, list): values = [values]
             children = [self._condition(x) for x in values]
-            return {"type": typ, "status": _combine([x["status"] for x in children]), "children": children, "native": {"type": "not"}}
+            return {"type": typ, "status": _combine([x["status"] for x in children]), "children": children, "native": {"type": "not", "condition": children[0].get('native',{}) if children else {}}}
         if typ in ("state", "numeric_state"):
             source = raw.get("entity_id") or raw.get("entity")
             _, target, status = self._map_entity(source) if source else ("", None, NEEDS_MAPPING)
@@ -345,6 +365,11 @@ class HACompatibilityAnalyzer:
             if isinstance(entities, list): entities = entities[0] if len(entities) == 1 else None
             _, target, status = self._map_entity(entities) if entities else ("", None, NEEDS_MAPPING)
             return {"type": typ, "status": status, "source": _safe(raw), "native": {"type": "state", "entity_ref": target, "from": raw.get("from"), "to": raw.get("to"), "attribute": raw.get("attribute"), "for": _duration_seconds(raw.get("for"))} if target is not None else None}
+        if typ == "numeric_state":
+            entity = raw.get("entity_id") or raw.get("entity")
+            _, target, status = self._map_entity(entity) if entity else ("", None, NEEDS_MAPPING)
+            if target is not None: status = TRANSLATED if status == COMPATIBLE else status
+            return {"type": typ, "status": status, "source": _safe(raw), "native": {"type": "numeric_state", "entity_ref": target, "attribute": raw.get("attribute"), "above": raw.get("above"), "below": raw.get("below"), "for": _duration_seconds(raw.get("for"))} if target is not None else None}
         if typ in ("time", "time_pattern"):
             return {"type": typ, "status": TRANSLATED, "source": _safe(raw), "native": {"type": typ, **{k: v for k, v in raw.items() if k != "platform"}}}
         if typ == "sun": return {"type": typ, "status": TRANSLATED, "source": _safe(raw), "native": {"type": "sun", "sun": raw.get("event"), "offset": raw.get("offset", 0)}}
