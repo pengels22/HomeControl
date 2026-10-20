@@ -257,7 +257,7 @@ class NativePrimitives:
                 continue
 
     async def _restore_timers(self):
-        async with db.acquire() as conn: rows=await conn.fetch("SELECT h.*,e.state,e.attributes FROM native_helpers h JOIN entities e ON e.id=h.entity_ref WHERE h.helper_type='timer' AND h.enabled AND e.state='active'")
+        async with db.acquire() as conn: rows=await conn.fetch("SELECT h.*,e.state,e.attributes FROM native_helpers h JOIN entities e ON e.id=h.entity_ref WHERE h.helper_type='timer' AND h.enabled AND e.state='\"active\"'::jsonb")
         for row in rows:
             expected=(row['attributes'] or {}).get('expected_finish')
             try: seconds=max(0,(datetime.fromisoformat(expected)-datetime.now(timezone.utc)).total_seconds())

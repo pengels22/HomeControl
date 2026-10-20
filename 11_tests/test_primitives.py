@@ -41,3 +41,17 @@ async def test_scene_translation_reports_supported_and_unsupported_attributes(mo
     plan=await m.NativePrimitives(Registry())._scene_plan_target({'entity_ref':1,'state':'on','attributes':{'brightness':55,'color_temp':3000}})
     assert [x['service'] for x in plan['operations']]==['turn_on','set_level']
     assert plan['unsupported_attributes']==['color_temp']
+
+@pytest.mark.asyncio
+async def test_restore_timers_uses_json_state_literal(monkeypatch):
+    captured=[]
+    class Conn:
+        async def fetch(self,query,*args):
+            captured.append(query)
+            return []
+    class Acquire:
+        async def __aenter__(self): return Conn()
+        async def __aexit__(self,*args): pass
+    monkeypatch.setattr(m.db,'acquire',lambda:Acquire())
+    await m.NativePrimitives(None)._restore_timers()
+    assert 'e.state=\'"active"\'::jsonb' in captured[0]
