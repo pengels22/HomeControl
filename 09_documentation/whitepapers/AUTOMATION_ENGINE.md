@@ -52,3 +52,23 @@ follow-up; this V1 core provides the durable schema and trigger contracts but
 has not invented a sun calculation or replayed non-schedule integration events.
 Expression evaluation, Home Assistant import, scripts/scenes/helpers, and the
 visual editor are future phases.
+
+## Scheduler completion
+
+Schedule triggers receive a deterministic `trigger_id` derived from their
+normalized definition. Migration 018 extends the occurrence ledger with that
+identity, actual fire time, catch-up flag, and reason, and adds scheduler
+checkpoint state. At startup HCM closes interrupted runs, checkpoints the
+scheduler, reconstructs enabled schedules, executes at most the most recent
+missed occurrence per trigger when it is no older than 24 hours, and records
+older occurrences as skipped. Repeating patterns never replay every missed
+interval. Disabled or edited automations cancel owned timers and future
+scheduling; manual runs do not touch the ledger.
+
+Exact local times and patterns are evaluated in the configured HCM timezone.
+Nonexistent spring-forward wall times are skipped and repeated fall-back times
+execute once using the first occurrence. Native sunrise/sunset calculation uses
+configured latitude/longitude and timezone without network access; offsets are
+stored as normalized seconds. A missing or impossible solar event is treated as
+unavailable and does not stop the engine. Pending state `for:` timers remain
+non-durable and are discarded on restart.

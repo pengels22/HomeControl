@@ -26,28 +26,28 @@ async def create_automation(body:dict,user=Depends(_user)):
 
 @router.get('/{automation_id}')
 async def get_automation(automation_id:str,user=Depends(_user)):
-    try: return await _engine().store.get(automation_id)
+    try: return await _engine().inspect_automation(automation_id)
     except LookupError as exc: raise HTTPException(404,str(exc))
 
 @router.put('/{automation_id}')
 async def update_automation(automation_id:str,body:dict,user=Depends(_user)):
     _role(user,True)
-    try: return await _engine().store.update(automation_id,body)
+    try: return await _engine().update_automation(automation_id,body)
     except LookupError as exc: raise HTTPException(404,str(exc))
     except (AutomationValidationError,ValueError) as exc: raise HTTPException(400,str(exc))
 
 @router.post('/{automation_id}/enable')
 async def enable(automation_id:str,user=Depends(_user)):
-    _role(user,True); return await _engine().store.set_enabled(automation_id,True)
+    _role(user,True); return await _engine().set_enabled(automation_id,True)
 
 @router.post('/{automation_id}/disable')
 async def disable(automation_id:str,user=Depends(_user)):
-    _role(user,True); return await _engine().store.set_enabled(automation_id,False)
+    _role(user,True); return await _engine().set_enabled(automation_id,False)
 
 @router.delete('/{automation_id}')
 async def delete(automation_id:str,user=Depends(_user)):
     _role(user,True)
-    if not await _engine().store.delete(automation_id): raise HTTPException(404,'Automation not found')
+    if not await _engine().delete_automation(automation_id): raise HTTPException(404,'Automation not found')
     return {'deleted':True}
 
 @router.get('/{automation_id}/runs')

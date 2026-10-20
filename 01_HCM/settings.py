@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     api_host: str = '0.0.0.0'
     api_port: int = hcm_globals.API_HCM_Port
     timezone: str = 'UTC'
+    latitude: float | None = None
+    longitude: float | None = None
     module_host: str = '0.0.0.0'
     module_port: int = hcm_globals.API_Module_Port
     update_port: int = hcm_globals.API_Update_Port

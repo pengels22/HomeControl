@@ -80,7 +80,7 @@ async def lifespan(app: FastAPI):
     await integrations.restore_instances()
     await integrations.start()
     from .automation import AutomationEngine
-    integrations.automation_engine = AutomationEngine(integrations.registry, timezone_name=settings.timezone)
+    integrations.automation_engine = AutomationEngine(integrations.registry, timezone_name=settings.timezone, latitude=settings.latitude, longitude=settings.longitude)
     await integrations.automation_engine.start()
     storage.git_sync_manager.start()
     rule_task = asyncio.create_task(rules.run())
