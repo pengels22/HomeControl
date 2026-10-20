@@ -1201,7 +1201,8 @@ async function configureIntegration(providerId) {
   const provider=(data.providers||[]).find((item)=>item.provider_id===providerId);
   const panel=$("integration-settings"); if (!provider) return;
   const fields=(provider.config_flow?.fields||[]).map((field)=>`<label>${esc(field.label||field.name)}${field.required?" *":""}<input name="${esc(field.name)}" type="${field.type === "password" || field.type === "api_key" ? "password" : field.type === "integer" || field.type === "number" ? "number" : "text"}" placeholder="${esc(field.placeholder||"")}" ${field.required?"required":""}></label>`).join("");
-  panel.innerHTML=`<section class="panel"><div class="panel-head"><h3>Configure ${esc(provider.display_name)}</h3><button type="button" data-cancel-integration>Cancel</button></div><form data-integration-form data-provider="${esc(providerId)}"><label>Instance name *<input name="display_name" required value="${esc(provider.display_name)}"></label>${fields}<label>Replace API key<input name="credential" type="password" autocomplete="new-password"></label><button type="submit">Validate &amp; Save</button><p class="muted">Secret fields are write-only.</p></form></section>`;
+  const credentialKind=provider.config_flow?.credential_kinds?.[0] || "api_key";
+  panel.innerHTML=`<section class="panel"><div class="panel-head"><h3>Configure ${esc(provider.display_name)}</h3><button type="button" data-cancel-integration>Cancel</button></div><form data-integration-form data-provider="${esc(providerId)}" data-credential-kind="${esc(credentialKind)}"><label>Instance name *<input name="display_name" required value="${esc(provider.display_name)}"></label>${fields}<label>${credentialKind === "client_secret" ? "OAuth client secret" : "Credential"}<input name="credential" type="password" autocomplete="new-password"></label><button type="submit">Validate &amp; Save</button><p class="muted">Secret fields are write-only.</p></form></section>`;
 }
 
 async function showIntegrationChooser() {
@@ -1638,7 +1639,8 @@ document.addEventListener("click", async (event) => {
     const formData=new FormData(integrationForm), config={};
     for (const [key,value] of formData.entries()) if (key !== "display_name" && key !== "credential") config[key]=(value === "" ? value : (/^\d+$/.test(value) ? Number(value) : value));
     const credential=formData.get("credential");
-    await api("/integrations/instances",{method:"POST",body:JSON.stringify({config:{...config,provider_id:integrationForm.dataset.provider,display_name:formData.get("display_name")},...(credential?{credential_kind:"api_key",credential}:{})})});
+    const credentialKind=integrationForm.dataset.credentialKind || "api_key";
+    await api("/integrations/instances",{method:"POST",body:JSON.stringify({config:{...config,provider_id:integrationForm.dataset.provider,display_name:formData.get("display_name")},...(credential?{credential_kind:credentialKind,credential}:{})})});
     await renderIntegrations(); return;
   }
   const integrationConfig = event.target.closest("[data-integration-config]");

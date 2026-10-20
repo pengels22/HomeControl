@@ -106,6 +106,16 @@ class Context:
         from .secrets import get
         return await get(self.credential_ref)
 
+    async def sync_state(self):
+        if not self.instance_id: return {}
+        async with db.acquire() as conn: value=await conn.fetchval('SELECT sync_state FROM integration_instances WHERE instance_id=$1',self.instance_id)
+        if isinstance(value,str): return json.loads(value)
+        return value or {}
+
+    async def save_sync_state(self,state):
+        if self.instance_id:
+            async with db.acquire() as conn: await conn.execute('UPDATE integration_instances SET sync_state=$2::jsonb WHERE instance_id=$1',self.instance_id,json.dumps(state,allow_nan=False))
+
     async def device(self,external_id,display_name,*,room_id=_UNSET,available=False):
         if not isinstance(external_id,str) or not external_id or len(external_id)>256:
             raise ValueError('External device ID required (max 256 characters)')

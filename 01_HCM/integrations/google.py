@@ -18,7 +18,7 @@ class GoogleProvider(Provider):
     async def diagnostics(self): return Diagnostics(counters={'updates':self.updates},checks={'account_connected':bool(self.context and self.context.credential_ref)})
 
 class GoogleCalendarProvider(GoogleProvider):
-    info=ProviderInfo('google_calendar','Google Calendar',capabilities={'calendar':True,'events':True},description='Google Calendar events and upcoming schedule',setup_type='oauth',supports_multiple=True,config_schema={'type':'object','properties':{'calendar_ids':{'type':'array','items':{'type':'string'}},'interval':{'type':'integer','minimum':60}},'additionalProperties':False},config_flow={'type':'oauth','fields':[{'name':'calendar_ids','type':'multi-select'},{'name':'interval','type':'duration'}]})
+    info=ProviderInfo('google_calendar','Google Calendar',capabilities={'calendar':True,'events':True},description='Google Calendar events and upcoming schedule',setup_type='oauth',supports_multiple=True,config_schema={'type':'object','properties':{'client_id':{'type':'string'},'redirect_uri':{'type':'string'},'calendar_ids':{'type':'array','items':{'type':'string'}},'interval':{'type':'integer','minimum':60}},'additionalProperties':False},config_flow={'type':'oauth','credential_kinds':['client_secret'],'scopes':['https://www.googleapis.com/auth/calendar.readonly'],'fields':[{'name':'client_id','type':'text','required':True},{'name':'redirect_uri','type':'text'},{'name':'calendar_ids','type':'multi-select'},{'name':'interval','type':'duration'}]})
     async def setup(self,context):
         self.context=context; self.device=await context.device('calendar','Google Calendar',available=False); self.entity=await context.entity('calendar','calendar.events',self.device,'Google Calendar')
     def normalize_event(self,item):
@@ -27,7 +27,11 @@ class GoogleCalendarProvider(GoogleProvider):
         cfg=self.context.config; ids=cfg.get('calendar_ids') or ['primary']; events=[]
         for calendar_id in ids:
             data=await self.google_json(f'https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events',params={'singleEvents':'true','maxResults':'50','orderBy':'startTime','timeMin':'1970-01-01T00:00:00Z'}); events.extend(self.normalize_event(x) for x in data.get('items',[]) if x.get('status')!='cancelled')
-        await self.context.state(self.entity,{'events':events[:50],'next_event':events[0] if events else None},attributes={'provider':'google_calendar'}); await self.context.device('calendar','Google Calendar',available=True); self.last=events; self.updates+=1; await record_poll(self.context,True)
+        prior=await self.context.sync_state(); old=prior.get('events',{}); current={e.get('event_id'):e for e in events if e.get('event_id')}
+        for event_id,event in current.items():
+            if event_id not in old or old[event_id]!=event: await self.context.emit('google_calendar.event_updated',event)
+        for event_id in set(old)-set(current): await self.context.emit('google_calendar.event_cancelled',{'event_id':event_id})
+        await self.context.save_sync_state({'events':current}); await self.context.state(self.entity,{'events':events[:50],'next_event':events[0] if events else None},attributes={'provider':'google_calendar'}); await self.context.device('calendar','Google Calendar',available=True); self.last=events; self.updates+=1; await record_poll(self.context,True)
     async def start(self): await self.poll(); self.task=asyncio.create_task(self._run())
     async def _run(self):
         while True:
@@ -37,14 +41,15 @@ class GoogleCalendarProvider(GoogleProvider):
     async def reload(self): await self.stop(); self.client=ProviderHTTP(timeout=15); await self.start()
 
 class GmailProvider(GoogleProvider):
-    info=ProviderInfo('gmail','Gmail',capabilities={'mail':True,'events':True},description='Gmail unread state and new-message events',setup_type='oauth',supports_multiple=True,config_schema={'type':'object','properties':{'interval':{'type':'integer','minimum':60}},'additionalProperties':False},config_flow={'type':'oauth','fields':[{'name':'interval','type':'duration'}]})
+    info=ProviderInfo('gmail','Gmail',capabilities={'mail':True,'events':True},description='Gmail unread state and new-message events',setup_type='oauth',supports_multiple=True,config_schema={'type':'object','properties':{'client_id':{'type':'string'},'redirect_uri':{'type':'string'},'interval':{'type':'integer','minimum':60}},'additionalProperties':False},config_flow={'type':'oauth','credential_kinds':['client_secret'],'scopes':['https://www.googleapis.com/auth/gmail.metadata'],'fields':[{'name':'client_id','type':'text','required':True},{'name':'redirect_uri','type':'text'},{'name':'interval','type':'duration'}]})
     async def setup(self,context):
         self.context=context; self.device=await context.device('mailbox','Gmail',available=False); self.entity=await context.entity('mail','sensor.unread_count',self.device,'Unread Mail')
     async def poll(self):
-        data=await self.google_json('https://gmail.googleapis.com/gmail/v1/users/me/messages',params={'q':'is:unread','maxResults':'50'}); messages=data.get('messages',[]); await self.context.state(self.entity,len(messages),attributes={'provider':'gmail','sync_count':len(messages)}); await self.context.device('mailbox','Gmail',available=True)
-        previous=set(self.context.config.get('_seen_ids',[])); current={m.get('id') for m in messages if m.get('id')}
+        sync=await self.context.sync_state(); data=await self.google_json('https://gmail.googleapis.com/gmail/v1/users/me/messages',params={'q':'is:unread','maxResults':'50'}); messages=data.get('messages',[]); await self.context.state(self.entity,len(messages),attributes={'provider':'gmail','sync_count':len(messages)}); await self.context.device('mailbox','Gmail',available=True)
+        previous=set(sync.get('seen_ids',[])); current={m.get('id') for m in messages if m.get('id')}
+        if not sync.get('baseline'): previous=current; sync['baseline']=True
         for message_id in current-previous: await self.context.emit('gmail.message_received',{'message_id':message_id,'thread_id':next((m.get('threadId') for m in messages if m.get('id')==message_id),None)})
-        self.context.config['_seen_ids']=list(current); self.last=len(messages); self.updates+=1; await record_poll(self.context,True)
+        sync.update({'seen_ids':list(current),'history_id':data.get('historyId')}); await self.context.save_sync_state(sync); self.last=len(messages); self.updates+=1; await record_poll(self.context,True)
     async def start(self): await self.poll(); self.task=asyncio.create_task(self._run())
     async def _run(self):
         while True:
