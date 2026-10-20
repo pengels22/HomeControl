@@ -196,6 +196,16 @@ class HACompatibilityAnalyzer:
             return entity, target, COMPATIBLE
         return canonical, None, NEEDS_MAPPING
 
+    def _map_zone(self, value: Any) -> tuple[str, Any, str]:
+        source = str(value)
+        mapped = self.mappings.get(source, self.mappings.get(f"zone:{source}"))
+        if isinstance(mapped, dict):
+            target = mapped.get("target_zone_ref", mapped.get("zone_ref", mapped.get("target_ref")))
+            confidence = str(mapped.get("confidence", mapped.get("status", "EXACT"))).upper()
+        else:
+            target, confidence = mapped, "EXACT" if mapped is not None else "UNRESOLVED"
+        return source, target, COMPATIBLE if target is not None and confidence == "EXACT" else NEEDS_MAPPING
+
     def _map_device_entity(self, raw: dict[str, Any]) -> tuple[Any, str, list[str]]:
         """Resolve an HA device construct to an immutable HCM entity ref."""
         source = raw.get("entity_id")
@@ -515,6 +525,14 @@ class HACompatibilityAnalyzer:
             if not isinstance(values, list): values = [values]
             children = [self._condition(x) for x in values]
             return {"type": typ, "status": _combine([x["status"] for x in children]), "children": children, "native": {"type": "not", "condition": children[0].get('native',{}) if children else {}}}
+        if typ == "zone":
+            tracker = raw.get("entity_id") or raw.get("entity")
+            zone = raw.get("zone")
+            _, tracker_ref, tracker_status = self._map_entity(tracker) if tracker else ("", None, NEEDS_MAPPING)
+            _, zone_ref, zone_status = self._map_zone(zone) if zone else ("", None, NEEDS_MAPPING)
+            status = _combine([tracker_status, zone_status])
+            native = {"type": "zone", "tracker_ref": tracker_ref, "zone_ref": zone_ref} if tracker_ref is not None and zone_ref is not None else None
+            return {"type": typ, "status": status, "source": _safe(raw), "native": native}
         if typ in ("state", "numeric_state"):
             source = raw.get("entity_id") or raw.get("entity")
             _, target, status = self._map_entity(source) if source else ("", None, NEEDS_MAPPING)
@@ -532,8 +550,17 @@ class HACompatibilityAnalyzer:
         # older YAML uses ``platform: state``.  The device event ``type``
         # (opened, motion, enters, ...) is not itself the trigger family.
         typ = str(raw.get("platform") or raw.get("trigger") or raw.get("type", "")).lower()
+        if typ in {"zone", "zone.entered"}:
+            if typ == "zone.entered":
+                options = raw.get("options") or {}
+                target = raw.get("target") or {}
+                entity = target.get("entity_id") if isinstance(target, dict) else None
+                raw = {**raw, "entity_id": entity, "zone": options.get("zone"), "event": "enter"}
+            return self._zone_trigger(raw)
         if (raw.get("platform") == "device" or raw.get("trigger") == "device" or
                 raw.get("device_id") is not None and raw.get("domain")):
+            if raw.get("domain") == "device_tracker" and raw.get("type") in {"enters", "leaves"} and raw.get("zone"):
+                return self._zone_trigger({**raw, "event": "enter" if raw.get("type") == "enters" else "leave"})
             return self._device_semantic(raw, kind="trigger")
         if typ == "state":
             entities = raw.get("entity_id") or raw.get("entity")
@@ -551,6 +578,18 @@ class HACompatibilityAnalyzer:
         if typ == "event": return {"type": typ, "status": TRANSLATED, "source": _safe(raw), "native": {"type": "event", "event_type": raw.get("event_type"), "payload": raw.get("event_data", {})}}
         if typ in _READ_ONLY_TRIGGER_TYPES: return {"type": typ, "status": _READ_ONLY_TRIGGER_TYPES[typ], "source": _safe(raw), "reason": "No equivalent native trigger semantics"}
         return {"type": typ or "unknown", "status": UNSUPPORTED, "source": _safe(raw), "reason": "Unknown trigger type"}
+
+    def _zone_trigger(self, raw: dict[str, Any]) -> dict[str, Any]:
+        tracker = raw.get("entity_id") or raw.get("entity")
+        zone = raw.get("zone")
+        _, tracker_ref, tracker_status = self._map_entity(tracker) if tracker else ("", None, NEEDS_MAPPING)
+        _, zone_ref, zone_status = self._map_zone(zone) if zone else ("", None, NEEDS_MAPPING)
+        event = str(raw.get("event", "")).lower()
+        event_status = TRANSLATED if event in {"enter", "leave"} else UNSUPPORTED
+        status = _combine([tracker_status, zone_status, event_status])
+        native = {"type": "zone", "tracker_ref": tracker_ref, "zone_ref": zone_ref, "event": event} if tracker_ref is not None and zone_ref is not None else None
+        return {"type": "zone", "status": status, "source": _safe(raw), "native": native,
+                "required_mappings": [x for x in (tracker, zone) if x]}
 
     def _automation(self, source_id: str, obj: dict[str, Any], source_type: str, index: int) -> dict[str, Any]:
         triggers = obj.get("triggers", obj.get("trigger", [])); triggers = triggers if isinstance(triggers, list) else ([triggers] if triggers else [])

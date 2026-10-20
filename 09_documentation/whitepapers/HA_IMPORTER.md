@@ -87,9 +87,20 @@ Opaque HA entity and device IDs remain unresolved until an exact mapping is
 provided. Optional read-only entity/device/area registry exports may be supplied
 as JSON data to normalize opaque entity IDs; paths, auth storage, and live HA
 connections are not accepted. Suggested or ambiguous mappings remain blocked,
-and deleted targets are not retargeted by name. Tracker zone enters/leaves,
-ZHA button events, alarm/lock controls, and other security-sensitive semantics
-remain deferred to dedicated passes.
+and deleted targets are not retargeted by name. ZHA button events, alarm/lock
+controls, and other security-sensitive semantics remain deferred to dedicated
+passes.
+
+Zone/geofence constructs translate to the native trigger shape
+`{type: "zone", tracker_ref, zone_ref, event}`. HA `platform: zone` and
+device-form tracker `enters`/`leaves` use this same representation; tracker and
+zone references remain blocked until exact mappings are supplied. Zone
+conditions use `{type: "zone", tracker_ref, zone_ref}` and share native
+membership state. The real-source audit measured 16 platform zone triggers, 4
+device-form tracker enter/leave triggers, 3 zone conditions, 9 unique zones,
+and 5 tracker entity references. No real coordinates are included in previews,
+fixtures, or reports. Native zone definitions are stored by migration 022;
+tracker×zone membership remains transient and is rebuilt without startup events.
 
 Endpoints:
 

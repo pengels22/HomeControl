@@ -147,7 +147,7 @@ class AutomationStore:
         return sign*(nums[0]*3600+nums[1]*60+nums[2])
 
     async def _validate_trigger(self,t):
-        if not isinstance(t,dict) or set(t)-{'type','entity_ref','from','to','attribute','for','event_type','provider_id','instance_id','device_ref','payload','times','time','every_minutes','every_hours','minute','hour','sun','offset','above','below'}: raise AutomationValidationError('Invalid trigger definition')
+        if not isinstance(t,dict) or set(t)-{'type','entity_ref','from','to','attribute','for','event_type','provider_id','instance_id','device_ref','payload','times','time','every_minutes','every_hours','minute','hour','sun','offset','above','below','tracker_ref','zone_ref','event'}: raise AutomationValidationError('Invalid trigger definition')
         typ=t.get('type')
         if typ=='state':
             if 'entity_ref' not in t: raise AutomationValidationError('State trigger needs entity_ref')
@@ -164,6 +164,10 @@ class AutomationStore:
                     try: float(t[key])
                     except (TypeError,ValueError): raise AutomationValidationError(f'{key} must be numeric')
             t=dict(t); t['entity_ref']=await self._entity_ref(t['entity_ref']); t['trigger_id']=trigger_id(t)
+        elif typ=='zone':
+            if not t.get('tracker_ref') or not t.get('zone_ref') or t.get('event') not in ('enter','leave'):
+                raise AutomationValidationError('Zone trigger needs tracker_ref, zone_ref and enter/leave event')
+            t=dict(t); t['trigger_id']=trigger_id(t)
         elif typ=='time':
             times=t.get('times', [t.get('time')] if t.get('time') else [])
             if not times or any(not re.fullmatch(r'\d{2}:\d{2}(:\d{2})?',str(v)) for v in times): raise AutomationValidationError('Time trigger needs HH:MM times')
@@ -202,6 +206,9 @@ class AutomationStore:
                 if k in c and c[k] is not None:
                     try: float(c[k])
                     except (TypeError,ValueError): raise AutomationValidationError(f'{k} must be numeric')
+        elif typ=='zone':
+            if not c.get('tracker_ref') or not c.get('zone_ref'):
+                raise AutomationValidationError('Zone condition needs tracker_ref and zone_ref')
         elif typ=='time':
             if not c.get('after') and not c.get('before'): raise AutomationValidationError('Time condition needs after or before')
         else: raise AutomationValidationError('Unsupported condition type')
@@ -318,6 +325,7 @@ class AutomationEngine:
         self.expressions=ExpressionEngine(timezone_name=timezone_name)
         self.active=defaultdict(dict); self.queues=defaultdict(deque); self.timers={}; self.tasks=set(); self.task=None; self.wake=asyncio.Event(); self.scheduler_started_at=None; self.waiters=[]; self._services_registered=False
         self.max_invocation_depth=10
+        self.zone_evaluator = None
         self._automation_device_id=None
 
     async def start(self):
@@ -496,6 +504,9 @@ class AutomationEngine:
             return True
         if typ=='numeric_state':
             return self._numeric_matches(t,e,automation_id)
+        if typ=='zone':
+            payload = e.get('payload') or {}
+            return e.get('event_type') == f"hcm_native.zone.{t.get('event')}" and str(payload.get('tracker_ref')) == str(t.get('tracker_ref')) and str(payload.get('zone_ref')) == str(t.get('zone_ref'))
         return False
 
     def _start_timer(self,key,t,event,current):
@@ -786,6 +797,13 @@ class AutomationEngine:
         if typ=='and': return all([await self.evaluate_condition(x,ctx) for x in c['conditions']])
         if typ=='or': return any([await self.evaluate_condition(x,ctx) for x in c['conditions']])
         if typ=='not': return not await self.evaluate_condition(c['condition'],ctx)
+        if typ=='zone':
+            payload = ((ctx.trigger or {}).get('event') or {}) if ctx else {}
+            if str(payload.get('tracker_ref')) == str(c.get('tracker_ref')) and str(payload.get('zone_ref')) == str(c.get('zone_ref')):
+                return bool(payload.get('current_membership'))
+            if self.zone_evaluator is not None:
+                return bool(self.zone_evaluator.is_member(c.get('tracker_ref'), c.get('zone_ref')))
+            return False
         if typ=='template':
             try: value=await self.expressions.evaluate(c['expression'],context=self._expression_context(ctx),syntax='jinja' if '{{' in c['expression'] else 'native')
             except ExpressionError as exc: raise RuntimeError(f'Expression {exc.category}') from None

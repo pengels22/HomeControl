@@ -93,6 +93,7 @@ async def _target_exists(conn, target_kind, target_ref):
         "notification_destination_id": "SELECT enabled,configured AS available FROM notification_destinations WHERE destination_id=$1",
         "speech_backend_id": "SELECT enabled,configured AS available FROM speech_backends WHERE backend_id=$1",
         "room_id": "SELECT enabled,TRUE AS available FROM rooms WHERE id=$1",
+        "zone": "SELECT enabled,TRUE AS available FROM zones WHERE zone_id=$1",
     }
     query = queries.get(target_kind)
     if not query: return True, True

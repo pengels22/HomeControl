@@ -101,3 +101,19 @@ configured latitude/longitude and timezone without network access; offsets are
 stored as normalized seconds. A missing or impossible solar event is treated as
 unavailable and does not stop the engine. Pending state `for:` timers remain
 non-durable and are discarded on restart.
+
+## Native zone triggers
+
+The native zone subsystem consumes ordinary location-bearing tracker entity
+updates. A zone trigger stores immutable `tracker_ref` and `zone_ref` values and
+an `event` of `enter` or `leave`; the automation engine receives durable
+`hcm_native.zone.enter` and `hcm_native.zone.leave` events through the existing
+integration event cursor. Zone conditions read the same membership state.
+
+Membership is tracked in memory per tracker and zone. The first available
+location establishes membership without fabricating a crossing, and restart
+reconstruction therefore emits no catch-up event. Unavailable trackers do not
+imply a leave. V1 uses metres, the haversine distance, reported accuracy
+conservatively, and a fixed five-metre leave hysteresis to reduce boundary
+jitter. Coordinates are configuration and provider state; normal automation
+trace context contains references and transition metadata, not coordinates.

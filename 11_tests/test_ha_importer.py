@@ -112,8 +112,8 @@ def test_device_tracker_zone_is_separate_from_presence_state():
         "trigger": "device", "type": "enters", "device_id": "d", "entity_id": "e", "domain": "device_tracker", "zone": "zone.home"
     }], "actions": []}]}
     item = m.analyze_home_assistant(source, mappings={"e": 9})["items"][0]
-    assert item["compatibility"] == m.UNSUPPORTED
-    assert "zone" in item["nested"][0][0]["reason"]
+    assert item["compatibility"] == m.NEEDS_MAPPING
+    assert item["nested"][0][0]["type"] == "zone"
 
 
 def test_registry_export_normalizes_opaque_entity_ids_without_reading_paths():
@@ -151,3 +151,23 @@ def test_media_tts_and_notify_forms_normalize_to_generic_semantics():
     })["items"][0]["preview"]["actions"]
     assert mapped[1]["service_data"]["backend_id"].startswith("2222")
     assert mapped[2]["service_data"]["destination_id"].startswith("1111")
+
+
+def test_zone_platform_and_device_forms_share_native_trigger():
+    source = {"automations": [{"id": "zone", "triggers": [
+        {"trigger": "zone", "entity_id": "device_tracker.phone", "zone": "zone.home", "event": "enter"},
+        {"trigger": "device", "domain": "device_tracker", "entity_id": "device_tracker.phone", "zone": "zone.home", "type": "enters"},
+    ], "actions": []}]}
+    mappings = {"device_tracker.phone": 7, "zone.home": "00000000-0000-4000-8000-000000000001"}
+    item = m.analyze_home_assistant(source, mappings=mappings)["items"][0]
+    assert item["compatibility"] == m.TRANSLATED
+    assert item["preview"]["triggers"][0] == item["preview"]["triggers"][1]
+    assert item["preview"]["triggers"][0]["type"] == "zone"
+
+
+def test_zone_without_mapping_is_blocked_mapping():
+    source = {"automations": [{"id": "zone", "triggers": [
+        {"trigger": "zone", "entity_id": "device_tracker.phone", "zone": "zone.home", "event": "leave"},
+    ], "actions": []}]}
+    item = m.analyze_home_assistant(source)["items"][0]
+    assert item["eligibility"] == m.BLOCKED_MAPPING

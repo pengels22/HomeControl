@@ -83,8 +83,12 @@ async def lifespan(app: FastAPI):
     from .primitives import NativePrimitives
     integrations.native_primitives = NativePrimitives(integrations.registry, timezone_name=settings.timezone, hvac=hvac, safety=safety)
     await integrations.native_primitives.start()
+    from .zones import ZoneRuntime
+    integrations.zone_runtime = ZoneRuntime(integrations.registry)
+    await integrations.zone_runtime.start()
     from .automation import AutomationEngine
     integrations.automation_engine = AutomationEngine(integrations.registry, timezone_name=settings.timezone, latitude=settings.latitude, longitude=settings.longitude)
+    integrations.automation_engine.zone_evaluator = integrations.zone_runtime.evaluator
     integrations.native_primitives.engine = integrations.automation_engine
     await integrations.automation_engine.start()
     storage.git_sync_manager.start()
@@ -140,6 +144,8 @@ from .ha_import_api import router as ha_import_router
 app.include_router(ha_import_router)
 from .mapping_api import router as mapping_router
 app.include_router(mapping_router)
+from .zone_api import router as zone_router
+app.include_router(zone_router)
 from .integrations.smartthings import webhook_router as smartthings_webhook_router
 app.include_router(smartthings_webhook_router)
 from .bluetooth import bluetooth_router
