@@ -83,14 +83,22 @@ def test_duration_mapping_accepts_home_assistant_string_values():
     assert action["seconds"] == 62.0
 
 def test_media_tts_and_notify_forms_normalize_to_generic_semantics():
-    plan = m.analyze_home_assistant({"automations": [{"id": "media", "actions": [
+    source = {"automations": [{"id": "media", "actions": [
         {"action": "media_player.play_media", "target": {"entity_id": "media_player.room"}, "data": {"media": {"media_content_id": "1", "media_content_type": "favorite"}, "enqueue": "play"}},
         {"action": "tts.cloud_say", "data": {"entity_id": "media_player.room", "message": "Ready"}},
         {"action": "notify.mobile_app_iphone_16", "data": {"title": "Status", "message": "Ready"}},
-    ]}]})
+    ]}]}
+    plan = m.analyze_home_assistant(source)
     actions = plan["items"][0]["preview"]["actions"]
     assert actions[0]["service"] == "play_media"
     assert actions[0]["service_data"]["media_content_type"] == "favorite"
     assert actions[1]["domain"] == "announcement" and actions[1]["service"] == "speak"
     assert actions[2]["domain"] == "notify" and actions[2]["service"] == "send"
     assert plan["items"][0]["eligibility"] == m.BLOCKED_MAPPING
+    mapped = m.analyze_home_assistant(source, mappings={
+        "media_player.room": 7,
+        "notification_destination:notify.mobile_app_iphone_16": "11111111-1111-4111-8111-111111111111",
+        "speech_backend:tts.cloud_say": "22222222-2222-4222-8222-222222222222",
+    })["items"][0]["preview"]["actions"]
+    assert mapped[1]["service_data"]["backend_id"].startswith("2222")
+    assert mapped[2]["service_data"]["destination_id"].startswith("1111")

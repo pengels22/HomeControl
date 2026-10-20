@@ -54,6 +54,14 @@ destination/backend is configured. Unknown notification destinations are not
 wildcard-mapped. TTS target fields are normalized to explicit media-player target
 references and are never treated as durable HA identities.
 
+Analyzer mappings may explicitly supply
+`notification_destination:<source service>` and
+`speech_backend:<source service or TTS entity>` UUID values. Without them, the
+semantic service is recognized but remains `NEEDS_MAPPING`; with them, the
+runtime definition carries only the immutable native UUID. A configured
+destination/backend can still report an unavailable health state at runtime,
+which is distinct from missing import mapping.
+
 Endpoints:
 
 - `POST /api/v1/import/home-assistant/analyze` (ADMIN): YAML fields or structured

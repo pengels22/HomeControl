@@ -18,9 +18,12 @@ def test_native_service_models_reject_unknown_fields():
     assert m.AnnouncementArg(message='ok',volume_level=.5).volume_level==.5
 
 @pytest.mark.asyncio
-async def test_semantic_side_effect_services_are_explicitly_unconfigured():
+async def test_semantic_side_effect_services_are_explicitly_unconfigured(monkeypatch):
     manager=m.NativePrimitives(None)
-    assert (await manager._notify_send(m.NotificationArg(message='ok'),None))['status']=='destination_unconfigured'
+    async def no_destination(*args,**kwargs): return None
+    monkeypatch.setattr('01_HCM.notification_config.resolve_notification', no_destination)
+    assert (await manager._notify_send(m.NotificationArg(message='ok'),None))['status']=='target_unavailable'
+    monkeypatch.setattr('01_HCM.notification_config.resolve_backend', no_destination)
     assert (await manager._announcement_speak(m.AnnouncementArg(message='ok'),None))['status']=='backend_unavailable'
 
 @pytest.mark.asyncio

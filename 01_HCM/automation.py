@@ -692,7 +692,11 @@ class AutomationEngine:
                 inputs=dict(arguments.get('inputs') or {})
                 inputs.update({'_hcm_caller_id':f'{ctx.kind}:{ctx.automation.get("automation_id")}', '_hcm_invocation_chain':list(ctx.invocation_chain)})
                 arguments['inputs']=inputs
-            ctx.trace.append({'step':'service','domain':a['domain'],'service':a['service'],'target':a.get('target_entity_ref'),'arguments':_safe(arguments),'physical_mutation':bool(declaration.get('mutates_physical_state',False))})
+            trace_arguments=_safe(arguments)
+            if a['domain'] in {'notify','announcement'}:
+                trace_arguments={k:v for k,v in trace_arguments.items() if k not in {'message','data'}}
+                if isinstance(arguments.get('message'),str): trace_arguments['message_length']=len(arguments['message'])
+            ctx.trace.append({'step':'service','domain':a['domain'],'service':a['service'],'target':a.get('target_entity_ref'),'arguments':trace_arguments,'physical_mutation':bool(declaration.get('mutates_physical_state',False))})
             result=None
             if not ctx.dry_run:
                 if not provider_id: raise LookupError('Service provider unavailable')

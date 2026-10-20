@@ -261,6 +261,7 @@ class HACompatibilityAnalyzer:
             native = {"domain": mapping.get("domain", domain), "service": mapping.get("service", service)}
             if native["domain"] in {"notify", "announcement"}:
                 native["provider_id"] = "hcm_native"
+        statuses = [status]
         data = deepcopy(action.get("data", action.get("service_data", {})) or {})
         if not isinstance(data, dict):
             statuses.append(UNSUPPORTED); data = {}
@@ -277,8 +278,24 @@ class HACompatibilityAnalyzer:
             # a raw HA media_player ID as an HCM identity.
             if not action.get("target"):
                 action = dict(action); action["target"] = {"entity_id": data.pop("entity_id")}
+        mapping_key = None
+        if service_name.startswith('notify.'):
+            mapping_key=f'notification_destination:{service_name}'
+            destination=self.mappings.get(mapping_key)
+            if destination is not None:
+                data['destination_id']=destination; status=TRANSLATED; reason=None
+        elif service_name.startswith('tts.'):
+            source_engine=service_name
+            raw_engine=(action.get('target') or {}).get('entity_id') if isinstance(action.get('target'),dict) else None
+            if service_name == 'tts.speak' and raw_engine:
+                source_engine=str(raw_engine[0] if isinstance(raw_engine,list) else raw_engine)
+            mapping_key=f'speech_backend:{source_engine}'
+            backend=self.mappings.get(mapping_key)
+            if backend is not None:
+                data['backend_id']=backend; status=TRANSLATED; reason=None
+        statuses[0]=status
         target, target_status, target_refs = self._target(action)
-        statuses = [status, target_status]
+        statuses.append(target_status)
         expression_refs: list[str] = []
         for key, value in list(data.items()):
             rendered, template_status, deps, _ = self._template(value)
@@ -295,6 +312,7 @@ class HACompatibilityAnalyzer:
         result = {"type": "service", "status": _combine(statuses), "source": _safe(raw), "service": service_name,
                   "native": {**native, **native_target, "service_data": _safe(data)}, "target_mappings": target_refs,
                   "expression_references": sorted(set(expression_refs))}
+        if mapping_key: result['source_mapping_key']=mapping_key
         if reason: result["reason"] = reason
         if action.get("response_variable"):
             result["native"]["response_variable"] = str(action["response_variable"])

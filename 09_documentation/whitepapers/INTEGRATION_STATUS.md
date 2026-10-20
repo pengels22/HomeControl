@@ -87,6 +87,14 @@ generate speech, or contact an external service by themselves. HA mobile notify
 targets and TTS media targets therefore remain explicit mapping work in the
 compatibility analyzer.
 
+Migration 020 adds generic `notification_destinations`, `speech_backends`, and
+source mapping tables. Their UUIDs are the durable identities; names and HA
+service/entity strings are presentation or import-plan inputs only. Authenticated
+configuration endpoints under `/api/v1/notification-config` expose non-secret
+health/configuration to READONLY users and ADMIN-only mutations. Credential
+references point to the encrypted integration credential store and are never
+returned by inspection.
+
 ## Event inventory
 
 Generic events include `entity.state_changed` and

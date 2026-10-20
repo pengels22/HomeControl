@@ -29,6 +29,7 @@ class NotificationArg(BaseModel):
     destination: str|None = Field(default=None, max_length=128)
     data: dict = Field(default_factory=dict)
     severity: str = Field(default='normal', pattern='^(normal|important|critical)$')
+    destination_id: str|None = None
 class AnnouncementArg(BaseModel):
     model_config=ConfigDict(extra='forbid')
     message: str = Field(min_length=1, max_length=4096)
@@ -37,6 +38,7 @@ class AnnouncementArg(BaseModel):
     language: str|None = Field(default=None, max_length=32)
     voice: str|None = Field(default=None, max_length=64)
     cache: bool|None = None
+    backend_id: str|None = None
 
 INFO=ProviderInfo('hcm_native','HCM Native Primitives',capabilities={'helpers':True,'scripts':True,'scenes':True,'states':True,'events':True,'services':True},internal=True)
 HELPER_TYPES={'input_boolean','input_button','input_number','input_text','input_select','input_datetime','counter','timer','schedule'}
@@ -77,14 +79,34 @@ class NativePrimitives:
         await c.service('announcement','speak',AnnouncementArg,self._announcement_speak)
 
     async def _notify_send(self,a,t):
-        # Delivery destinations are deliberately configured separately; this
-        # foundation service never pretends to send a push notification.
-        return {'status':'destination_unconfigured','destination':a.destination}
+        from .notification_config import resolve_notification
+        destination=await resolve_notification(a.destination or '',a.destination_id)
+        if not destination: return {'status':'target_unavailable'}
+        if not destination['enabled'] or not destination['configured']:
+            return {'status':'destination_unconfigured','destination_id':str(destination['destination_id'])}
+        if destination['destination_type']!='mock':
+            return {'status':'backend_unavailable','destination_id':str(destination['destination_id'])}
+        return {'status':'success','destination_id':str(destination['destination_id']),'severity':a.severity,'message_length':len(a.message)}
 
     async def _announcement_speak(self,a,t):
-        # Speech generation/playback backends are optional and absent until a
-        # configured provider claims the semantic service.
-        return {'status':'backend_unavailable','target_entity_ref':a.target_entity_ref}
+        from .notification_config import resolve_backend
+        backend=await resolve_backend(backend_id=a.backend_id)
+        if not backend or not backend['enabled'] or not backend['configured']:
+            return {'status':'backend_unavailable','backend_id':str(backend['backend_id']) if backend else None}
+        if backend['backend_type']!='mock':
+            return {'status':'backend_unavailable','backend_id':str(backend['backend_id'])}
+        targets=a.target_entity_ref if isinstance(a.target_entity_ref,list) else [a.target_entity_ref]
+        if not targets or any(x is None for x in targets): return {'status':'target_unavailable','backend_id':str(backend['backend_id'])}
+        results=[]
+        for target in targets:
+            async with db.acquire() as conn: row=await conn.fetchrow('SELECT provider_id,available FROM entities WHERE id=$1 AND enabled',int(target))
+            if not row or not row['available']: return {'status':'playback_failed','backend_id':str(backend['backend_id']),'target_entity_ref':int(target)}
+            try:
+                result=await self.registry.services.invoke(row['provider_id'],'media_player','play_media',{'media_content_id':f'hcm://speech/mock/{backend["backend_id"]}','media_content_type':'audio/mpeg'},target_entity_id=int(target))
+                results.append(result)
+            except Exception:
+                return {'status':'playback_failed','backend_id':str(backend['backend_id']),'target_entity_ref':int(target)}
+        return {'status':'success','backend_id':str(backend['backend_id']),'target_entity_refs':[int(x) for x in targets],'message_length':len(a.message),'playback':results}
     async def _helper(self,entity_ref,kind=None):
         async with db.acquire() as conn:
             row=await conn.fetchrow('SELECT h.*,e.state,e.attributes FROM native_helpers h JOIN entities e ON e.id=h.entity_ref WHERE h.entity_ref=$1 AND ($2::text IS NULL OR h.helper_type=$2)',int(entity_ref),kind)
