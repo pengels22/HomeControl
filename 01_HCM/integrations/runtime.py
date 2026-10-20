@@ -1,9 +1,11 @@
 """Failure-isolated provider lifecycle; independent of output and safety loops."""
 import asyncio
+import json
 from dataclasses import dataclass
 from .registry import Registry
 from .provider import Diagnostics
 from .factory import provider_factory
+from .oauth import refresh_scheduler
 from .. import db
 
 
@@ -25,6 +27,7 @@ class Runtime:
         self.task=None
         self.locks={}
         self.instances={}
+        self.instance_contexts={}
 
     def attach(self,provider,*,enabled=False,configured=True):
         key=provider.info.provider_id
@@ -39,14 +42,35 @@ class Runtime:
         if instance_id in self.instances: raise ValueError('Instance already attached')
         provider=provider_factory.create(provider_id,context)
         self.instances[instance_id]=Entry(provider,enabled,configured)
+        self.instance_contexts[instance_id]=context
         self.locks[instance_id]=asyncio.Lock()
+
+    async def restore_instances(self):
+        async with db.acquire() as conn:
+            rows=await conn.fetch('SELECT instance_id,provider_id,display_name,enabled,configured,config,credential_ref FROM integration_instances ORDER BY created_at')
+        for row in rows:
+            key=str(row['instance_id'])
+            if row['provider_id'] not in provider_factory.types:
+                async with db.acquire() as conn: await conn.execute("UPDATE integration_instances SET status='provider_missing',last_error='Provider implementation unavailable',updated_at=now() WHERE instance_id=$1",row['instance_id'])
+                continue
+            try:
+                config=row['config'] or {}
+                if isinstance(config,str): config=json.loads(config)
+                context=self.registry.context(row['provider_id'],key,config=config,credential_ref=row['credential_ref'],display_name=row['display_name'])
+                self.attach_instance(key,row['provider_id'],context,enabled=row['enabled'],configured=row['configured'])
+                if row['enabled'] and row['configured']: await self.start_instance(key)
+                else:
+                    status='disabled' if not row['enabled'] else 'configuration_required'
+                    async with db.acquire() as conn: await conn.execute('UPDATE integration_instances SET status=$2,updated_at=now() WHERE instance_id=$1',row['instance_id'],status)
+            except Exception as exc:
+                async with db.acquire() as conn: await conn.execute("UPDATE integration_instances SET status='error',last_error=$2,updated_at=now() WHERE instance_id=$1",row['instance_id'],f'startup failed ({type(exc).__name__})')
 
     async def start_instance(self,instance_id):
         async with self.locks[instance_id]:
             entry=self.instances[instance_id]
             if not entry.enabled or not entry.configured:
                 entry.status='disabled' if not entry.enabled else 'configuration_required'; return
-            ok,_=await self._operation_instance(instance_id,'setup',self.registry.context(entry.provider.info.provider_id,instance_id))
+            ok,_=await self._operation_instance(instance_id,'setup',self.instance_contexts[instance_id])
             if ok: ok,_=await self._operation_instance(instance_id,'start')
             if ok: await self._operation_instance(instance_id,'health_check')
             else: entry.status='error'
@@ -68,6 +92,7 @@ class Runtime:
 
     async def stop_instance(self,instance_id):
         if instance_id in self.instances:
+            refresh_scheduler.cancel(instance_id)
             await self._operation_instance(instance_id,'stop'); self.instances[instance_id].status='disabled'
 
     async def reload_instance(self,instance_id):

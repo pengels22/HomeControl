@@ -6,4 +6,4 @@ def test_migration_runner_is_numbered_and_ordered():
     versions = [int(path.name[:3]) for path in migrations.MIGRATIONS]
 
     assert versions == sorted(versions)
-    assert versions == list(range(1, 13))
+    assert versions == list(range(1, 14))

@@ -40,6 +40,7 @@ async def database(monkeypatch):
         await conn.execute((ROOT/'08_database/010_integration_configuration.sql').read_text())
         await conn.execute((ROOT/'08_database/011_integration_instances.sql').read_text())
         await conn.execute((ROOT/'08_database/012_instance_runtime.sql').read_text())
+        await conn.execute((ROOT/'08_database/013_integration_runtime_status.sql').read_text())
         after=dict(await conn.fetchrow('SELECT * FROM logical_devices WHERE id=$1',native))
         assert {key:after[key] for key in before}==before
         @asynccontextmanager
@@ -343,3 +344,25 @@ async def test_mock_oauth_state_exchange_and_replay(database,monkeypatch):
     token=await mock.oauth_exchange('mock-code'); ref=await import_module('01_HCM.integrations.secrets').put('internal_mock','oauth_access_token',token['access_token']); await oauth.associate_access_credential(iid,ref)
     assert await database.fetchval('SELECT credential_ref IS NOT NULL FROM integration_instances WHERE instance_id=$1',iid)
     await host.stop()
+
+
+async def test_startup_reconstructs_instances_and_marks_missing_provider(database):
+    await database.execute("INSERT INTO integration_providers(provider_id,display_name,version,enabled,configured) VALUES('internal_mock','Internal','1',true,true)")
+    await database.execute("INSERT INTO integration_instances(provider_id,display_name,enabled,configured) VALUES('internal_mock','Restored',true,true)")
+    await database.execute("INSERT INTO integration_instances(provider_id,display_name,enabled,configured) VALUES('internal_mock','Disabled',false,true)")
+    await database.execute("INSERT INTO integration_providers(provider_id,display_name,version,enabled,configured) VALUES('missing_type','Missing','1',true,true)")
+    await database.execute("INSERT INTO integration_instances(provider_id,display_name,enabled,configured) VALUES('missing_type','Missing',true,true)")
+    host=runtime_mod.Runtime(registry_mod.Registry()); await host.restore_instances()
+    assert len(host.instances)==2
+    rows=await database.fetch("SELECT display_name,status FROM integration_instances ORDER BY display_name")
+    assert ('Disabled','disabled') in [(r['display_name'],r['status']) for r in rows]
+    assert ('Missing','provider_missing') in [(r['display_name'],r['status']) for r in rows]
+    await host.stop()
+
+
+async def test_generic_oauth_client_normalizes_and_scheduler_cancels():
+    oauth=import_module('01_HCM.integrations.oauth'); calls=[]
+    async def request(endpoint,data,style): calls.append((endpoint,data,style)); return {'access_token':'a','refresh_token':'r','expires_in':'60','scope':'one two'}
+    client=oauth.OAuthHTTPClient(request); token=await client.exchange(oauth.OAuthMetadata('a','t',('one',)),'code','id','secret','cb')
+    assert token.access_token=='a' and token.refresh_token=='r' and token.scopes==('one','two') and calls[0][1]['code']=='code'
+    fired=[]; oauth.refresh_scheduler.schedule('instance',lambda: fired.append(True),60); oauth.refresh_scheduler.cancel('instance'); assert 'instance' not in oauth.refresh_scheduler.tasks

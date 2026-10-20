@@ -71,6 +71,7 @@ async def lifespan(app: FastAPI):
     from .integrations.mock import MockProvider
     if 'internal_mock' not in integrations.entries:
         integrations.attach(MockProvider(), enabled=settings.integration_mock_enabled)
+    await integrations.restore_instances()
     await integrations.start()
     storage.git_sync_manager.start()
     rule_task = asyncio.create_task(rules.run())
