@@ -25,3 +25,15 @@ valid YAML is parsed and validated before persistence.
 trigger and stop action. Saving validates the definition and registers the
 native automation normally. The UI does not create helpers or import staged
 Home Assistant records. Import remains a separately gated operation.
+
+The list is a responsive full-width row layout. Desktop rows show name, source,
+migration, state, runtime, and actions; narrow screens collapse secondary metadata
+below the name. Raw compatibility/provenance enums are converted to human-readable
+labels in the primary UI. Row identity and navigation use the staged UUID or native
+automation reference, never the alias.
+
+View routes are `/automations/staged/<staged_id>` and
+`/automations/native/<automation_id>`. Their edit routes append `/edit`. Detail is
+read-only until Edit is selected. Staged detail keeps Home Assistant source YAML
+separate from HCM YAML and keeps the native preview read-only; native detail edits
+the HCM definition in visual or YAML mode. Back returns to the automation list.

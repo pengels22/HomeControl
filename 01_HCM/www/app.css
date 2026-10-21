@@ -1262,3 +1262,105 @@ th {
 .metadata-card label { display: block; }
 .metadata-card input:not([type=checkbox]), .metadata-card select { width: 100%; }
 .metadata-card [hidden] { display: none; }
+
+/* Automation management uses full-width rows, not summary cards. */
+.automation-list {
+  display: grid;
+  gap: 0;
+  width: 100%;
+}
+.automation-list-header,
+.automation-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 2fr) minmax(120px, auto) minmax(170px, 1fr) minmax(130px, auto) minmax(120px, auto) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+}
+.automation-list-header {
+  padding: 9px 12px;
+  color: #98a5ad;
+  font-size: .76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  border-bottom: 1px solid #344049;
+}
+.automation-row {
+  min-height: 70px;
+  padding: 12px;
+  border-bottom: 1px solid #2b343b;
+}
+.automation-row:hover,
+.automation-row:focus-within {
+  background: #151e22;
+}
+.automation-name {
+  min-width: 0;
+  color: #eaf4ef;
+  font-weight: 750;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.automation-name small {
+  display: block;
+  margin-top: 4px;
+  color: #98a5ad;
+  font-weight: 500;
+}
+.automation-status {
+  min-width: 0;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.status-pill,
+.compatibility-badge {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  max-width: 100%;
+  padding: 3px 7px;
+  border: 1px solid #3c5550;
+  border-radius: 999px;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+  line-height: 1.2;
+  font-size: .72rem;
+}
+.automation-row .detail-fields { display: contents; }
+.automation-row .detail-field { min-width: 0; }
+.automation-row .detail-field strong { overflow-wrap: normal; word-break: normal; }
+.link-button {
+  display: block;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font-weight: inherit;
+}
+.link-button:hover { color: #9defd6; text-decoration: underline; }
+.editor-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+.editor-visual { display: grid; gap: 8px; }
+.editor-visual h4 { margin: 8px 0 0; color: #9defd6; }
+.editor-visual pre { margin: 0; max-height: 220px; overflow: auto; padding: 10px; background: #101519; border: 1px solid #2b343b; border-radius: 6px; white-space: pre-wrap; word-break: normal; }
+textarea[data-automation-yaml], textarea[data-new-automation-yaml] { width: 100%; min-height: 320px; resize: vertical; font-family: "SFMono-Regular", Consolas, monospace; line-height: 1.4; padding: 10px; color: #e7ece9; background: #101519; border: 1px solid #46515a; border-radius: 6px; }
+@media (max-width: 900px) {
+  .automation-list-header { display: none; }
+  .automation-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
+  .automation-row .automation-name { grid-column: 1 / 2; }
+  .automation-row .automation-status { grid-column: 1 / 2; }
+  .automation-row .detail-fields { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .automation-row .modal-actions { grid-column: 2; grid-row: 1 / span 2; }
+}
+@media (max-width: 560px) {
+  .automation-row .detail-fields { grid-template-columns: 1fr; }
+}
+.detail-page { display: grid; gap: 16px; }
+.automation-section { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid #2b343b; }
+.automation-section h3 { color: #9defd6; font-size: .95rem; }
+.automation-step { display: grid; grid-template-columns: minmax(130px, .4fr) minmax(0, 1fr); gap: 10px; padding: 10px 12px; background: #12171b; border: 1px solid #2b343b; border-radius: 6px; }
+.automation-step span { min-width: 0; overflow-wrap: break-word; }
+.automation-code { max-height: 420px; overflow: auto; padding: 12px; background: #101519; border: 1px solid #2b343b; border-radius: 6px; white-space: pre-wrap; word-break: normal; }
+@media (max-width: 900px) { .automation-list-header { display: none; } .automation-row { grid-template-columns: minmax(0, 1fr) auto; } .automation-row .detail-fields { display: grid; grid-column: 1 / -1; } }
