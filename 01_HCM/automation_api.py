@@ -41,8 +41,13 @@ async def update_automation(automation_id:str,body:dict,user=Depends(_user)):
 def _definition(body: dict) -> dict:
     if not isinstance(body, dict): raise ValueError("Automation definition must be an object")
     if "yaml" not in body: return body
-    parsed = yaml.safe_load(body["yaml"])
+    try:
+        parsed = yaml.safe_load(body["yaml"])
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Invalid HCM YAML: {exc}") from None
     if not isinstance(parsed, dict): raise ValueError("HCM YAML must contain an automation object")
+    for key in ("name", "description", "enabled", "mode"):
+        if key in body: parsed[key] = body[key]
     return parsed
 
 @router.post('/{automation_id}/enable')
