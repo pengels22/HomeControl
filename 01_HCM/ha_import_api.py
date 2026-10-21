@@ -209,13 +209,19 @@ async def apply(body: dict, user=Depends(require_user)):
     blocked = [item for item in plan["items"] if str(item.get("source_id")) in selected and item.get("eligibility") not in ("READY", "READY_WITH_TRANSLATIONS")]
     if blocked:
         raise HTTPException(409, {"message": "Selected items are not eligible", "items": [{"source_id": x.get("source_id"), "eligibility": x.get("eligibility")} for x in blocked]})
-    if body.get("dry_run", True):
-        return {"dry_run": True, "selected": sorted(selected), "imported": [], "blocked": [], "failed": []}
     native = getattr(integrations, "native_primitives", None)
     engine = getattr(integrations, "automation_engine", None)
+    if body.get("dry_run", True) and engine is None:
+        raise HTTPException(503, "Native automation validator unavailable")
+    if body.get("dry_run", True):
+        report = {"dry_run": True, "selected": sorted(selected), "imported": [], "blocked": [], "failed": [], "dependencies": []}
+    else:
+        report = None
     if native is None or engine is None:
-        raise HTTPException(503, "Native automation services unavailable")
-    report = {"dry_run": False, "imported": [], "failed": [], "blocked": [], "already_imported": [], "provenance": []}
+        if not body.get("dry_run", True):
+            raise HTTPException(503, "Native automation services unavailable")
+    if report is None:
+        report = {"dry_run": False, "imported": [], "failed": [], "blocked": [], "already_imported": [], "provenance": []}
     # Re-analyze source objects with the caller's mapping before mutation.  This
     # prevents a hand-edited preview from bypassing compatibility checks.
     for item in plan["items"]:
@@ -237,7 +243,16 @@ async def apply(body: dict, user=Depends(require_user)):
                 report["blocked"].append({"source_id": source_id, "reason": current.get("eligibility")}); continue
             preview = current.get("preview") or {}
             if body.get("dry_run", False):
-                report["imported"].append({"source_id": source_id, "status": "validated"}); continue
+                definition = {"name": preview.get("name", source_id), "description": preview.get("description"),
+                              "enabled": False, "mode": preview.get("mode", "single"),
+                              "max_runs": min(int(preview.get("max_runs", 10)), 10),
+                              "triggers": preview.get("triggers") or [], "conditions": preview.get("conditions"),
+                              "actions": preview.get("actions") or []}
+                normalized = await engine.store.validate(definition, allow_planned=True)
+                helpers = current.get("planned_native_helpers") or preview.get("native_objects_to_create", []) + preview.get("native_objects_to_reuse", [])
+                report["dependencies"].append({"source_id": source_id, "helpers": [h.get("source_identity") for h in helpers], "helper_order": [h.get("source_identity") for h in helpers]})
+                report["imported"].append({"source_id": source_id, "status": "validated", "enabled": normalized["enabled"], "helper_count": len(helpers)})
+                continue
             if source_type == "scripts":
                 row = await native.create_script(preview.get("name", source_id), preview.get("actions", []), description=preview.get("description"), mode=preview.get("mode", "single"), max_runs=min(int(preview.get("max_runs", 10)), 10), entity_id=f"script.{_slug(source_id)}")
             elif source_type == "scenes":

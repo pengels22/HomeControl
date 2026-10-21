@@ -426,7 +426,10 @@ class HACompatibilityAnalyzer:
                     statuses.append(COMPATIBLE if mapping is not None else NEEDS_MAPPING)
                     if mapping is not None: resolved.append(mapping)
                     else: mappings.append(f"area:{value}")
-            if resolved: target["target_entity_refs" if key == "entity_id" else key] = resolved
+            # Native service actions address HCM entities.  HA device and area
+            # targets therefore use the same normalized entity-reference field
+            # as explicit entity targets after authoritative mapping.
+            if resolved: target["target_entity_refs"] = resolved
         return target, _combine(statuses), mappings
 
     def _service_action(self, raw: Any) -> dict[str, Any]:
@@ -456,7 +459,7 @@ class HACompatibilityAnalyzer:
         else:
             status = mapping.get("status", UNSUPPORTED)
             reason = mapping.get("reason")
-            native = {"domain": mapping.get("domain", domain), "service": mapping.get("service", service)}
+            native = {"type": "service", "domain": mapping.get("domain", domain), "service": mapping.get("service", service)}
             if native["domain"] in {"notify", "announcement"}:
                 native["provider_id"] = "hcm_native"
         statuses = [status]
@@ -691,14 +694,28 @@ class HACompatibilityAnalyzer:
             entities = raw.get("entity_id") or raw.get("entity")
             if isinstance(entities, list): entities = entities[0] if len(entities) == 1 else None
             _, target, status = self._map_entity(entities) if entities else ("", None, NEEDS_MAPPING)
-            return {"type": typ, "status": status, "source": _safe(raw), "native": {"type": "state", "entity_ref": target, "from": raw.get("from"), "to": raw.get("to"), "attribute": raw.get("attribute"), "for": _duration_seconds(raw.get("for"))} if target is not None else None}
+            native = {"type": "state", "entity_ref": target}
+            for key in ("from", "to", "attribute"):
+                if raw.get(key) is not None: native[key] = raw[key]
+            if raw.get("for") is not None: native["for"] = _duration_seconds(raw.get("for"))
+            return {"type": typ, "status": status, "source": _safe(raw), "native": native if target is not None else None}
         if typ == "numeric_state":
             entity = raw.get("entity_id") or raw.get("entity")
             _, target, status = self._map_entity(entity) if entity else ("", None, NEEDS_MAPPING)
             if target is not None: status = TRANSLATED if status == COMPATIBLE else status
-            return {"type": typ, "status": status, "source": _safe(raw), "native": {"type": "numeric_state", "entity_ref": target, "attribute": raw.get("attribute"), "above": raw.get("above"), "below": raw.get("below"), "for": _duration_seconds(raw.get("for"))} if target is not None else None}
+            native = {"type": "numeric_state", "entity_ref": target}
+            for key in ("attribute", "above", "below"):
+                if raw.get(key) is not None: native[key] = raw[key]
+            if raw.get("for") is not None: native["for"] = _duration_seconds(raw.get("for"))
+            return {"type": typ, "status": status, "source": _safe(raw), "native": native if target is not None else None}
         if typ in ("time", "time_pattern"):
-            return {"type": typ, "status": TRANSLATED, "source": _safe(raw), "native": {"type": typ, **{k: v for k, v in raw.items() if k != "platform"}}}
+            native = {"type": typ}
+            if typ == "time":
+                at = raw.get("at", raw.get("time"))
+                native["time"] = at if isinstance(at, str) else at[0] if isinstance(at, list) and at else None
+            else:
+                native.update({k: v for k, v in raw.items() if k in {"every_minutes", "every_hours", "minute", "hour"}})
+            return {"type": typ, "status": TRANSLATED, "source": _safe(raw), "native": native}
         if typ == "sun": return {"type": typ, "status": TRANSLATED, "source": _safe(raw), "native": {"type": "sun", "sun": raw.get("event"), "offset": raw.get("offset", 0)}}
         if typ == "event": return {"type": typ, "status": TRANSLATED, "source": _safe(raw), "native": {"type": "event", "event_type": raw.get("event_type"), "payload": raw.get("event_data", {})}}
         if typ in _READ_ONLY_TRIGGER_TYPES: return {"type": typ, "status": _READ_ONLY_TRIGGER_TYPES[typ], "source": _safe(raw), "reason": "No equivalent native trigger semantics"}

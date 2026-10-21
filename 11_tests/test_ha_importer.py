@@ -144,6 +144,20 @@ def test_device_action_translates_to_service_call_and_unresolved_is_mapping():
     assert resolved["items"][0]["compatibility"] == m.TRANSLATED
     assert action["domain"] == "switch" and action["service"] == "turn_on" and action["target_entity_ref"] == 9
 
+def test_device_target_in_service_action_is_native_entity_reference():
+    analyzer = m.HACompatibilityAnalyzer(
+        mappings={"d": 10},
+        service_mappings={"heos.group_volume_down": {"status": m.TRANSLATED, "domain": "media_player", "service": "group_volume_down"}},
+    )
+    plan = analyzer.analyze(
+        {"automations": [{"id": "media", "actions": [{
+            "action": "heos.group_volume_down",
+            "target": {"device_id": "d"},
+        }]}]}
+    )
+    action = plan["items"][0]["preview"]["actions"][0]
+    assert action == {"type": "service", "domain": "media_player", "service": "group_volume_down", "target_entity_ref": 10, "service_data": {}}
+
 
 def test_suggested_or_ambiguous_mapping_never_becomes_authoritative():
     source = {"automations": [{"id": "motion", "triggers": [{

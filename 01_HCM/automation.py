@@ -98,6 +98,7 @@ def _validate_timeout(value):
 class AutomationStore:
     def __init__(self, *, timezone_name='UTC'):
         self.expressions=ExpressionEngine(timezone_name=timezone_name)
+        self._allow_planned=False
     async def _validate_expression_values(self, value):
         if isinstance(value,str) and ('{{' in value or value.strip()):
             # Literal strings are retained; template/native syntax is compiled only when explicitly marked.
@@ -107,13 +108,22 @@ class AutomationStore:
         elif isinstance(value,list):
             for item in value: await self._validate_expression_values(item)
     async def _entity_ref(self, ref):
+        if self._allow_planned and isinstance(ref,dict) and ref.get('planned_helper'):
+            return ref
         if isinstance(ref, int) or (isinstance(ref,str) and ref.isdigit()): return int(ref)
         async with db.acquire() as conn:
             value = await conn.fetchval('SELECT id FROM entities WHERE entity_id=$1', str(ref))
         if value is None: raise AutomationValidationError(f'Unknown entity reference: {ref}')
         return int(value)
 
-    async def validate(self, definition: dict[str,Any], *, existing_id=None):
+    async def validate(self, definition: dict[str,Any], *, existing_id=None, allow_planned=False):
+        previous_planned=self._allow_planned; self._allow_planned=bool(allow_planned)
+        try:
+            return await self._validate_definition(definition, existing_id=existing_id)
+        finally:
+            self._allow_planned=previous_planned
+
+    async def _validate_definition(self, definition: dict[str,Any], *, existing_id=None):
         if not isinstance(definition,dict): raise AutomationValidationError('Automation must be an object')
         allowed={'name','description','enabled','mode','max_runs','triggers','trigger_definitions','conditions','condition','actions','action_sequence'}
         unknown=set(definition)-allowed
@@ -153,7 +163,7 @@ class AutomationStore:
         if typ=='state':
             if 'entity_ref' not in t: raise AutomationValidationError('State trigger needs entity_ref')
             t=dict(t); t['entity_ref']=await self._entity_ref(t['entity_ref'])
-            if 'for' in t and (not isinstance(t['for'],(int,float)) or t['for']<0): raise AutomationValidationError('for must be non-negative seconds')
+            if t.get('for') is not None and (not isinstance(t['for'],(int,float)) or t['for']<0): raise AutomationValidationError('for must be non-negative seconds')
         elif typ=='event':
             if not isinstance(t.get('event_type'),str) or not t['event_type']: raise AutomationValidationError('Event trigger needs event_type')
         elif typ=='numeric_state':
