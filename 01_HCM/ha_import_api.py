@@ -7,6 +7,7 @@ the plan is revalidated before native stores are called.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from copy import deepcopy
 
 from .auth import require_user
 from .ha_importer import (
@@ -50,7 +51,49 @@ async def _request_plan(body: dict, mappings: dict | None = None):
     if getattr(integrations, "registry", None) is not None:
         try: plan = await enrich_plan(plan, integrations.registry.services)
         except Exception: pass
+    try:
+        async with db.acquire() as conn:
+            helper_rows = await conn.fetch("SELECT entity_ref,entity_id,helper_type,config FROM native_helpers")
+        plan = _resolve_native_helper_plans(plan, helper_rows)
+    except Exception:
+        # Analysis remains usable when the optional native inventory is
+        # unavailable; apply still performs authoritative collision checks.
+        pass
     return plan
+
+
+def _resolve_native_helper_plans(plan, helper_rows):
+    """Annotate deterministic helper reuse without creating mappings.
+
+    Native helper identity is the immutable entity reference selected by the
+    stable entity_id and helper_type pair.  The importer-owned mapping may be
+    absent before the first apply, so preview must consult native inventory
+    separately from confirmed external mappings.
+    """
+    result = deepcopy(plan)
+    by_identity = {(str(row.get("entity_id")), str(row.get("helper_type"))): row
+                   for row in helper_rows or []}
+    for item in result.get("items", []):
+        planned = item.get("planned_native_helpers") or []
+        resolved = []
+        for helper in planned:
+            identity = str(helper.get("proposed_entity_id") or helper.get("source_identity") or "")
+            row = by_identity.get((identity, str(helper.get("helper_type"))))
+            if row:
+                resolved.append({**helper, "decision": "REUSE",
+                                 "target_entity_ref": int(row["entity_ref"]),
+                                 "definition_available": False,
+                                 "reuse_evidence": "entity_id_and_helper_type"})
+            else:
+                resolved.append(helper)
+        if not resolved:
+            continue
+        item["planned_native_helpers"] = resolved
+        preview = item.get("preview") or {}
+        preview["native_objects_to_reuse"] = [h for h in resolved if h.get("decision") == "REUSE"]
+        preview["native_objects_to_create"] = [h for h in resolved if h.get("decision") == "CREATE"]
+        item["preview"] = preview
+    return result
 
 
 async def _mapping_candidates(target_catalog=None):
