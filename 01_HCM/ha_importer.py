@@ -89,8 +89,8 @@ SERVICE_MAPPINGS: dict[str, dict[str, Any]] = {
     "media_player.next": {"status": TRANSLATED, "domain": "media_player", "service": "next"},
     "media_player.previous": {"status": TRANSLATED, "domain": "media_player", "service": "previous"},
     "media_player.play_media": {"status": TRANSLATED, "domain": "media_player", "service": "play_media"},
-    "heos.group_volume_up": {"status": TRANSLATED, "domain": "media_player", "service": "volume_up"},
-    "heos.group_volume_down": {"status": TRANSLATED, "domain": "media_player", "service": "volume_down"},
+    "heos.group_volume_up": {"status": TRANSLATED, "domain": "media_player", "service": "group_volume_up"},
+    "heos.group_volume_down": {"status": TRANSLATED, "domain": "media_player", "service": "group_volume_down"},
     # Destination identity remains a configuration/mapping concern.
     "notify.mobile_app_iphone_16": {"status": NEEDS_MAPPING, "domain": "notify", "service": "send", "reason": "Notification destination requires HCM mapping"},
     "notify.mobile_app_rachelles_iphone": {"status": NEEDS_MAPPING, "domain": "notify", "service": "send", "reason": "Notification destination requires HCM mapping"},
