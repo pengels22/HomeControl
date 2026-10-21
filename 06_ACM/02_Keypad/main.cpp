@@ -7,6 +7,7 @@
 #include "board_config.h"
 #include "alarm_types.h"
 #include "protocol.h"
+#include "ui_controller.h"
 
 namespace {
 byte macAddress[6] = {0x02, 0x4b, 0x50, 0x44, 0x00, 0x01};
@@ -14,6 +15,9 @@ EthernetClient acm;
 Preferences config;
 String keypadId = "keypad-001", hostname = "House Entry";
 bool localSiren = false, acmAvailable = false;
+KeypadUiModel uiModel;
+KeypadDisplayBoundary display;
+KeypadUiController uiController(uiModel, display);
 uint32_t lastHeartbeat = 0, lastInput = 0;
 bool inputState[8] = {};
 uint8_t frameHeader[4] = {}; uint8_t frameHeaderUsed = 0; uint32_t frameLength = 0; String framePayload;
@@ -32,7 +36,9 @@ void readInputs() {
 void connectAcm() {
   if (acm.connected()) { acmAvailable = true; return; }
   acm.stop(); String host = config.getString("acm_host", ""); uint16_t port = config.getUShort("acm_port", 6502);
-  acmAvailable = host.length() && acm.connect(host.c_str(), port); if (!acmAvailable) toneFeedback(220, 40);
+  acmAvailable = host.length() && acm.connect(host.c_str(), port);
+  uiController.setAcmConnected(acmAvailable);
+  if (!acmAvailable) toneFeedback(220, 40);
 }
 void sendIntent(const char* intent, const String& detail = "") {
   if (!acm.connected()) return;
@@ -56,6 +62,7 @@ void setup() {
   for (uint8_t i = 0; i < 8; ++i) pinMode(acm_hw::KEYPAD_INPUT_PINS[i], INPUT_PULLUP); pinMode(acm_hw::KEYPAD_PANIC, INPUT_PULLUP); pinMode(acm_hw::KEYPAD_SIREN, OUTPUT); digitalWrite(acm_hw::KEYPAD_SIREN, LOW);
   SPI.begin(acm_hw::ETH_SCK, acm_hw::ETH_MISO, acm_hw::ETH_MOSI, acm_hw::ETH_CS); Ethernet.init(acm_hw::ETH_CS); Ethernet.begin(macAddress); SD.begin(acm_hw::SD_CS, SPI);
   esp_task_wdt_init(10, true); esp_task_wdt_add(nullptr);
+  uiController.begin();
 }
 void loop() {
   const uint32_t now = millis(); esp_task_wdt_reset(); readInputs(); updateTone();

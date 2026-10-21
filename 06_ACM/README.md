@@ -78,3 +78,16 @@ deployment endpoint are provisioned; no plaintext credentials are embedded.
 - Flash each board and verify Ethernet, SD, NVS, watchdog, and recovery timing.
 
 No hardware-in-the-loop or physical flashing is claimed by this repository pass.
+
+## Keypad UI V1
+
+The keypad uses a 480x320 landscape layout defined by `02_Keypad/ui_model.h`
+and a driver-neutral controller in `02_Keypad/ui_controller.h`. HOME always
+keeps separate touch targets for digits 0-9, backspace, and enter. Header
+controls open Alerts and Settings. Armed, delay, entry, and triggered states
+retain the keypad; the physical panic input remains GPIO-only. The reference
+renders in `03_Shared/images/` are regenerated from this layout contract.
+
+The LCD and touch hardware driver is intentionally still behind the
+`KeypadDisplay`/`KeypadTouch` boundary until the exact controller and touch
+coordinates are bench confirmed.

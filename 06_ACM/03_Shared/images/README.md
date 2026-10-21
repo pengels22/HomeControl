@@ -1,18 +1,24 @@
-# Keypad UI screenshots
+# Keypad UI reference renders
 
-These 480×320 renders follow the pages defined in
-`06_ACM/02_Keypad/ui_model.h` for the normal 3.5-inch landscape touchscreen:
+These 480×320 screens are generated from the same layout contract represented
+by `06_ACM/02_Keypad/ui_model.h`. The normal HOME screen always keeps the
+individual 0–9 keypad visible, with notifications and settings controls in the
+header. The keypad is a physical 3.5-inch landscape touchscreen concept.
 
-- `keypad-screen-overview.png` — `HOME`
-- `keypad-menu-notifications.png` — `NOTIFICATIONS`
-- `keypad-menu-settings.png` — `SETTINGS`
-- `keypad-menu-pin-entry.png` — `PIN_ENTRY`
-- `keypad-menu-area-detail.png` — `AREA_DETAIL`
-- `keypad-armed-countdown.png` — exit-delay state
-- `keypad-triggered-alarm.png` — triggered state
-- `keypad-device-overview.png` — screen shown inside a keypad bezel concept
+- `keypad-home-disarmed.png`
+- `keypad-home-armed-home.png`
+- `keypad-home-armed-away.png`
+- `keypad-exit-delay.png`
+- `keypad-entry-delay.png`
+- `keypad-triggered.png`
+- `keypad-alerts-local.png`
+- `keypad-alerts-remote-summary.png`
+- `keypad-area-detail.png`
+- `keypad-settings.png`
+- `keypad-passcode-entry.png`
+- `keypad-master-provision.png`
+- `keypad-force-arm-confirm.png`
+- `keypad-device-overview.png`
 
-The SVG files are retained as editable sources. These are layout/design
-references, not final LCD-driver output; the selected display controller,
-touch coordinates, fonts, colors, and physical bezel still require bench
-verification.
+SVG sources are retained for editing. These are references until the exact LCD
+controller, touch coordinates, fonts, and physical bezel are bench verified.
