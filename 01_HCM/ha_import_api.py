@@ -157,11 +157,20 @@ async def mapping_confirm(body: dict, user=Depends(require_user)):
     try:
         existing = await mapping_registry.list_mappings(source_system="home_assistant", source_kind=body["source_kind"])
         match = next((row for row in existing if row.get("source_identifier") == body["source_identifier"]), None)
+        confidence = str(body.get("confidence", "EXACT")).upper()
         if match:
+            same_target = (match.get("target_kind") == body["target_kind"] and
+                           str(match.get("target_ref")) == str(body["target_ref"]))
+            if same_target and not body.get("replace"):
+                # Confirmation is idempotent: do not rewrite validation or
+                # update timestamps when the requested mapping is unchanged.
+                return {**match, "no_change": True}
             if not body.get("replace"): raise HTTPException(409, "Mapping exists; set replace=true for an explicit replacement")
-            result = await mapping_registry.update_mapping(match["mapping_id"], {"target_kind": body["target_kind"], "target_ref": body["target_ref"], "confidence": "USER_CONFIRMED", "origin": "USER_CONFIRMED", "notes": body.get("notes")}, actor=user.get("user"))
+            result = await mapping_registry.update_mapping(match["mapping_id"], {"target_kind": body["target_kind"], "target_ref": body["target_ref"], "confidence": confidence, "origin": "USER_CONFIRMED", "notes": body.get("notes")}, actor=user.get("user"))
         else:
-            result = await mapping_registry.create_mapping({**body, "source_system": "home_assistant", "confidence": "USER_CONFIRMED", "origin": "USER_CONFIRMED"}, actor=user.get("user"))
+            # The server owns confirmation provenance.  Keep confidence as a
+            # valid confidence value supplied by the reviewer.
+            result = await mapping_registry.create_mapping({**body, "source_system": "home_assistant", "confidence": confidence, "origin": "USER_CONFIRMED"}, actor=user.get("user"))
         if result.get("status") != "VALID":
             raise HTTPException(409, "Mapping target is missing or unavailable")
         for alias in body.get("aliases") or []: await mapping_registry.add_alias(result["mapping_id"], alias)
