@@ -23,6 +23,7 @@ TRANSLATED = "TRANSLATED"
 NEEDS_MAPPING = "NEEDS_MAPPING"
 UNAVAILABLE_SERVICE = "UNAVAILABLE_SERVICE"
 UNSUPPORTED = "UNSUPPORTED"
+HELPER_DEFINITION_REQUIRED = "HELPER_DEFINITION_REQUIRED"
 
 READY = "READY"
 READY_WITH_TRANSLATIONS = "READY_WITH_TRANSLATIONS"
@@ -30,8 +31,10 @@ BLOCKED_MAPPING = "BLOCKED_MAPPING"
 BLOCKED_UNSUPPORTED = "BLOCKED_UNSUPPORTED"
 BLOCKED_SERVICE = "BLOCKED_SERVICE"
 
-_STATUS_RANK = {COMPATIBLE: 0, TRANSLATED: 1, NEEDS_MAPPING: 2, UNAVAILABLE_SERVICE: 3, UNSUPPORTED: 4}
+_STATUS_RANK = {COMPATIBLE: 0, TRANSLATED: 1, NEEDS_MAPPING: 2, HELPER_DEFINITION_REQUIRED: 2,
+                UNAVAILABLE_SERVICE: 3, UNSUPPORTED: 4}
 _ELIGIBILITY = {COMPATIBLE: READY, TRANSLATED: READY_WITH_TRANSLATIONS, NEEDS_MAPPING: BLOCKED_MAPPING,
+                HELPER_DEFINITION_REQUIRED: BLOCKED_MAPPING,
                 UNAVAILABLE_SERVICE: BLOCKED_SERVICE, UNSUPPORTED: BLOCKED_UNSUPPORTED}
 
 # This is intentionally data, rather than a chain of importer-specific if/else
@@ -100,6 +103,8 @@ SERVICE_MAPPINGS: dict[str, dict[str, Any]] = {
 
 _READ_ONLY_TRIGGER_TYPES = {"zone": UNSUPPORTED, "conversation": UNSUPPORTED, "device": NEEDS_MAPPING, "manual": COMPATIBLE}
 _SUPPORTED_HELPERS = {"input_boolean", "input_button", "input_number", "input_text", "input_select", "input_datetime", "counter", "timer", "schedule"}
+_HELPER_DEFINITION_REQUIRED = {"input_number", "input_select", "input_datetime", "counter", "timer", "schedule"}
+_HELPER_RE = re.compile(r"(?<![\w-])(?:input_(?:boolean|button|number|text|select|datetime)|counter|timer|schedule)\.[A-Za-z0-9_]+")
 
 
 class HAImportError(ValueError):
@@ -189,10 +194,61 @@ class HACompatibilityAnalyzer:
         self.registry = registry or {}
         self._entity_refs: set[str] = set()
         self._services: set[str] = set()
+        self._helper_refs: set[str] = set()
+        self._helper_plans: dict[str, dict[str, Any]] = {}
+
+    def _discover_helpers(self, value: Any, *, key: str = "") -> None:
+        """Collect helper entity references without treating helper services as entities."""
+        if isinstance(value, dict):
+            for child_key, child in value.items():
+                self._discover_helpers(child, key=str(child_key))
+        elif isinstance(value, list):
+            for child in value:
+                self._discover_helpers(child, key=key)
+        elif isinstance(value, str) and key not in {"service", "action", "platform"}:
+            self._helper_refs.update(_HELPER_RE.findall(value))
+
+    def _helper_plan(self, source_id: str) -> dict[str, Any]:
+        existing = self._helper_plans.get(source_id)
+        if existing is not None:
+            return existing
+        helper_type, _, name = source_id.partition(".")
+        mapping = self.mappings.get(source_id)
+        if isinstance(mapping, dict):
+            target = mapping.get("target_entity_ref", mapping.get("entity_ref", mapping.get("target_ref")))
+            confidence = str(mapping.get("confidence", mapping.get("status", "UNRESOLVED"))).upper()
+        else:
+            target, confidence = mapping, "EXACT" if mapping is not None else "UNRESOLVED"
+        if target is not None and confidence == "EXACT":
+            plan = {"source_identity": source_id, "helper_type": helper_type, "name": name,
+                    "decision": "REUSE", "target_entity_ref": target, "definition_available": False,
+                    "warnings": []}
+        else:
+            definition = self._helper_definitions.get(source_id)
+            definition_available = definition is not None
+            required = helper_type in _HELPER_DEFINITION_REQUIRED and not definition_available
+            plan = {"source_identity": source_id, "helper_type": helper_type, "name": name,
+                    "decision": "CREATE", "definition_available": definition_available,
+                    "config": _safe(definition or {}),
+                    "proposed_entity_id": source_id,
+                    "planned_identity": f"planned:home_assistant:helper:{source_id}",
+                    "source_fingerprint": _source_fingerprint("helper", definition or {"entity_id": source_id}),
+                    "dependencies": [],
+                    "warnings": ([HELPER_DEFINITION_REQUIRED] if required else [])}
+        self._helper_plans[source_id] = plan
+        return plan
 
     def _map_entity(self, value: Any) -> tuple[str, Any, str]:
         entity = str(value)
         self._entity_refs.add(entity)
+        if entity in self._helper_refs:
+            plan = self._helper_plan(entity)
+            if plan.get("decision") == "REUSE":
+                return entity, plan["target_entity_ref"], COMPATIBLE
+            self._helper_refs.add(entity)
+            if HELPER_DEFINITION_REQUIRED in plan.get("warnings", []):
+                return entity, {"planned_helper": entity}, HELPER_DEFINITION_REQUIRED
+            return entity, {"planned_helper": entity}, TRANSLATED
         canonical = self.registry.get("entity_ids", {}).get(entity, entity)
         mapped = self.mappings.get(entity, self.mappings.get(canonical))
         if isinstance(mapped, dict):
@@ -688,6 +744,12 @@ class HACompatibilityAnalyzer:
         walk(list(nested))
         if status in (UNSUPPORTED, UNAVAILABLE_SERVICE): errors.append("One or more nested elements cannot be represented")
         if status == NEEDS_MAPPING: warnings.append("One or more entity or device mappings require confirmation")
+        planned_helpers = [self._helper_plan(ref) for ref in sorted(self._entity_refs) if ref in self._helper_plans]
+        if planned_helpers:
+            preview["native_objects_to_create"] = [x for x in planned_helpers if x.get("decision") == "CREATE"]
+            preview["native_objects_to_reuse"] = [x for x in planned_helpers if x.get("decision") == "REUSE"]
+        if status == HELPER_DEFINITION_REQUIRED:
+            warnings.append("One or more native helper definitions are required")
         # security_review_required is carried by the nested semantic node; do
         # not infer it from generic unsupported/mapping nodes.
         def has_security(value):
@@ -695,20 +757,33 @@ class HACompatibilityAnalyzer:
             if isinstance(value, list): return any(has_security(v) for v in value)
             return False
         security_review = any(has_security(x) for x in nested)
+        planned_ids = {str(x.get("source_identity")) for x in planned_helpers}
         return {"source_type": source_type, "source_id": source_id, "source_name": obj.get("alias", obj.get("name", source_id)),
                 "source_index": index, "source": _safe(obj), "source_fingerprint": _source_fingerprint(source_type, obj),
                 "compatibility": status, "eligibility": _ELIGIBILITY[status], "confidence": "EXACT" if status == COMPATIBLE else "SUGGESTED" if status == TRANSLATED else "UNRESOLVED",
                 "preview": preview, "warnings": warnings, "errors": errors, "referenced_entities": sorted(self._entity_refs),
-                "referenced_services": sorted(self._services), "unsupported_features": unsupported, "required_mappings": sorted(self._entity_refs),
-                "nested": _safe(nested), "security_review_required": security_review}
+                "referenced_services": sorted(self._services), "unsupported_features": unsupported, "required_mappings": sorted(x for x in self._entity_refs if x not in planned_ids),
+                "planned_native_helpers": planned_helpers, "nested": _safe(nested), "security_review_required": security_review}
 
     def analyze(self, sources: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(sources, dict): raise HAImportError("Source payload must be a mapping")
-        self._entity_refs.clear(); self._services.clear(); aggregate_entities: set[str] = set(); aggregate_services: set[str] = set(); items: list[dict[str, Any]] = []
+        self._entity_refs.clear(); self._services.clear(); self._helper_refs.clear(); self._helper_plans.clear()
+        self._helper_definitions = {}
+        helper_sources = sources.get("helpers")
+        if helper_sources is None:
+            helper_sources = {key: sources[key] for key in _SUPPORTED_HELPERS if key in sources}
+        if helper_sources:
+            if not isinstance(helper_sources, dict): raise HAImportError("helpers must be a mapping")
+            for helper_type, definitions in helper_sources.items():
+                if helper_type not in _SUPPORTED_HELPERS or not isinstance(definitions, dict): continue
+                for name, config in definitions.items():
+                    self._helper_definitions[f"{helper_type}.{name}"] = config if isinstance(config, dict) else {"initial": config}
+        self._discover_helpers({key: sources.get(key) for key in ("automations", "scripts", "scenes")})
+        aggregate_entities: set[str] = set(); aggregate_services: set[str] = set(); items: list[dict[str, Any]] = []
         for source_type in ("automations", "scripts", "scenes"):
             value = sources.get(source_type, sources.get(f"{source_type}.yaml"))
             for source_id, obj, index in _items(value, source_type):
-                self._entity_refs.clear(); self._services.clear()
+                self._entity_refs.clear(); self._services.clear(); self._helper_refs = set(self._helper_refs)
                 if source_type == "automations": item = self._automation(source_id, obj, source_type, index)
                 elif source_type == "scripts":
                     action = self._actions(obj.get("sequence", obj.get("actions", []))); preview = {"name": obj.get("alias", source_id), "description": obj.get("description"), "enabled": False, "mode": obj.get("mode", "single"), "actions": action.get("native", [])}; item = self._item(source_type, source_id, obj, index, action["status"], preview, action)
@@ -723,9 +798,6 @@ class HACompatibilityAnalyzer:
         # Optional helper fragments use HA's domain-shaped configuration:
         # input_boolean: {guest_mode: {initial: true}}.  A complete
         # configuration.yaml is not required.
-        helper_sources = sources.get("helpers")
-        if helper_sources is None:
-            helper_sources = {key: sources[key] for key in _SUPPORTED_HELPERS if key in sources}
         if helper_sources:
             if not isinstance(helper_sources, dict): raise HAImportError("helpers must be a mapping")
             for helper_type, definitions in helper_sources.items():
@@ -733,12 +805,14 @@ class HACompatibilityAnalyzer:
                 for name, config in (definitions or {}).items():
                     if not isinstance(config, dict): config = {"initial": config}
                     source_id = f"{helper_type}.{name}"
+                    self._helper_refs.add(source_id)
+                    self._helper_plan(source_id)
                     item = self._item("helpers", source_id, config, len(items), COMPATIBLE,
                                       {"helper_type": helper_type, "name": str(name), "entity_id": source_id, "config": _safe(config)},
                                       {"status": COMPATIBLE, "type": "helper"})
                     items.append(item)
         counts = {status: sum(1 for item in items if item["compatibility"] == status) for status in (COMPATIBLE, TRANSLATED, NEEDS_MAPPING, UNAVAILABLE_SERVICE, UNSUPPORTED)}
-        return {"schema_version": 1, "source_system": "home_assistant", "analyzed_at": datetime.now(timezone.utc).isoformat(), "items": items, "summary": counts, "referenced_entities": sorted(aggregate_entities), "referenced_services": sorted(aggregate_services), "import_eligible": [x["source_id"] for x in items if x["eligibility"] in (READY, READY_WITH_TRANSLATIONS)]}
+        return {"schema_version": 1, "source_system": "home_assistant", "analyzed_at": datetime.now(timezone.utc).isoformat(), "items": items, "summary": counts, "referenced_entities": sorted(aggregate_entities), "referenced_services": sorted(aggregate_services), "helper_plans": [self._helper_plan(x) for x in sorted(self._helper_refs)], "import_eligible": [x["source_id"] for x in items if x["eligibility"] in (READY, READY_WITH_TRANSLATIONS)]}
 
 
 def _duration_seconds(value: Any) -> float | None:

@@ -232,3 +232,20 @@ credential mappings require individual review and are excluded from bulk
 confirmation. Mapping health (valid, target missing, unconfirmed, ambiguous,
 or invalid) remains distinct from provider availability and capability
 compatibility. A later analysis revision invalidates stale previews.
+
+### Native helper planning V1
+
+Helper references are analyzed as native HCM primitives before external mapping
+review. `input_button` references are safe to plan without a retained HA
+configuration: the plan carries the source identity, proposed entity identity,
+source fingerprint, and a deterministic planned identity. Repeated references
+to the same source helper share one plan object. Existing authoritative helper
+mappings are reused; matching display names alone never select a target.
+
+Helpers with required constraints, including `input_number`, `input_select`,
+`input_datetime`, `counter`, `timer`, and `schedule`, remain explicit
+`HELPER_DEFINITION_REQUIRED` plan blockers when their definitions are absent.
+They are not ordinary provider mapping requests. Future apply ordering is
+validate, create or reuse helpers, persist helper mappings, resolve dependent
+definitions, then create imported automations disabled. This pass performs no
+helper creation or apply.

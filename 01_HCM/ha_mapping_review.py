@@ -83,6 +83,12 @@ def build_mapping_queue(plan: dict, *, mappings: dict[str, Any] | None = None,
     for item in plan.get("items", []):
         refs: set[str] = set(item.get("required_mappings") or []) | set(item.get("referenced_entities") or [])
         _collect(item.get("nested"), refs)
+        planned = {str(x.get("source_identity")) for x in item.get("planned_native_helpers", []) if x.get("source_identity")}
+        planned.update(str(x.get("source_identity")) for x in (item.get("preview") or {}).get("native_objects_to_create", []) if x.get("source_identity"))
+        # A native helper planned by this import is a dependency, not an
+        # external target choice.  Keep it visible on the plan while removing
+        # it from the ordinary mapping-review queue.
+        refs.difference_update(planned)
         for source in sorted(refs):
             if not source: continue
             row = grouped.setdefault(source, {"source_identifier": source, "occurrence_count": 0,

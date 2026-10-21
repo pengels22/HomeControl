@@ -70,6 +70,45 @@ def test_optional_helper_fragments_are_planned():
     assert item["eligibility"] == m.READY
 
 
+def test_referenced_input_button_is_planned_without_external_mapping():
+    plan = m.analyze_home_assistant({"automations": [{"id": "press", "triggers": [
+        {"trigger": "state", "entity_id": "input_button.volume_up"}], "actions": []}]})
+    item = plan["items"][0]
+    assert item["eligibility"] == m.READY_WITH_TRANSLATIONS
+    assert item["required_mappings"] == []
+    assert item["planned_native_helpers"][0]["decision"] == "CREATE"
+    assert item["planned_native_helpers"][0]["helper_type"] == "input_button"
+    assert item["preview"]["triggers"][0]["entity_ref"]["planned_helper"] == "input_button.volume_up"
+
+
+def test_helper_plan_is_deduplicated_across_source_items():
+    plan = m.analyze_home_assistant({"automations": [
+        {"id": "one", "triggers": [{"trigger": "state", "entity_id": "input_button.volume_up"}]},
+        {"id": "two", "triggers": [{"trigger": "state", "entity_id": "input_button.volume_up"}]},
+    ]})
+    assert len(plan["helper_plans"]) == 1
+    assert all(len(item["planned_native_helpers"]) == 1 for item in plan["items"])
+
+
+def test_constrained_helper_without_definition_is_explicitly_blocked():
+    plan = m.analyze_home_assistant({"automations": [{"id": "number", "triggers": [
+        {"trigger": "state", "entity_id": "input_number.level"}], "actions": []}]})
+    item = plan["items"][0]
+    assert item["eligibility"] == m.BLOCKED_MAPPING
+    assert m.HELPER_DEFINITION_REQUIRED in item["planned_native_helpers"][0]["warnings"]
+
+
+def test_authoritative_helper_mapping_reuses_without_create_plan():
+    plan = m.analyze_home_assistant(
+        {"automations": [{"id": "press", "triggers": [{"trigger": "state", "entity_id": "input_button.volume_up"}]}]},
+        mappings={"input_button.volume_up": {"entity_ref": 77, "confidence": "EXACT"}},
+    )
+    helper = plan["helper_plans"][0]
+    assert helper["decision"] == "REUSE"
+    assert helper["target_entity_ref"] == 77
+    assert plan["items"][0]["preview"]["triggers"][0]["entity_ref"] == 77
+
+
 def test_modern_ha_trigger_key_uses_trigger_family_not_event_type():
     plan = m.analyze_home_assistant({"automations": [{"id": "door", "triggers": [{"trigger": "device", "type": "opened", "device_id": "opaque"}], "actions": []}]})
     nested = plan["items"][0]["nested"]
