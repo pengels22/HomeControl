@@ -249,3 +249,13 @@ They are not ordinary provider mapping requests. Future apply ordering is
 validate, create or reuse helpers, persist helper mappings, resolve dependent
 definitions, then create imported automations disabled. This pass performs no
 helper creation or apply.
+
+### Native conversation trigger translation V1
+
+Measured HA conversation triggers are translated only when `command` (or the
+legacy equivalent phrase field) contains one or more bounded literal phrases.
+Whitespace is collapsed and text is case-folded; duplicate normalized phrases
+are removed. The native representation is a `conversation` trigger with a
+bounded `phrases` list. Complex patterns, slots, templates, and dynamic intent
+forms remain unsupported. Command ingestion is provider-neutral and does not
+perform speech recognition or response generation.

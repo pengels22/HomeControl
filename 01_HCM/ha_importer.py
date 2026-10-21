@@ -17,6 +17,7 @@ from typing import Any, Iterable
 import yaml
 
 from .expressions import ExpressionEngine, ExpressionError
+from .command_events import normalize_phrases
 
 COMPATIBLE = "COMPATIBLE"
 TRANSLATED = "TRANSLATED"
@@ -670,6 +671,15 @@ class HACompatibilityAnalyzer:
                 entity = target.get("entity_id") if isinstance(target, dict) else None
                 raw = {**raw, "entity_id": entity, "zone": options.get("zone"), "event": "enter"}
             return self._zone_trigger(raw)
+        if typ == "conversation":
+            command = raw.get("command", raw.get("sentence", raw.get("phrase")))
+            try:
+                phrases = normalize_phrases(command)
+            except ValueError:
+                return {"type": typ, "status": UNSUPPORTED, "source": _safe(raw),
+                        "reason": "Conversation trigger requires bounded literal phrase(s)"}
+            return {"type": typ, "status": TRANSLATED, "source": _safe(raw),
+                    "native": {"type": "conversation", "phrases": phrases}}
         if raw.get("domain") == "zha" and raw.get("type"):
             return self._zha_device_event(raw)
         if (raw.get("platform") == "device" or raw.get("trigger") == "device" or

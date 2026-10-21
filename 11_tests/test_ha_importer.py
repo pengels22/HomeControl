@@ -81,6 +81,14 @@ def test_referenced_input_button_is_planned_without_external_mapping():
     assert item["preview"]["triggers"][0]["entity_ref"]["planned_helper"] == "input_button.volume_up"
 
 
+def test_literal_conversation_trigger_translates_to_native_phrases():
+    plan = m.analyze_home_assistant({"automations": [{"id": "voice", "triggers": [
+        {"trigger": "conversation", "command": [" Volume   Up ", "volume up"]}], "actions": []}]})
+    item = plan["items"][0]
+    assert item["eligibility"] == m.READY_WITH_TRANSLATIONS
+    assert item["preview"]["triggers"] == [{"type": "conversation", "phrases": ["volume up"]}]
+
+
 def test_helper_plan_is_deduplicated_across_source_items():
     plan = m.analyze_home_assistant({"automations": [
         {"id": "one", "triggers": [{"trigger": "state", "entity_id": "input_button.volume_up"}]},

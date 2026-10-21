@@ -127,3 +127,19 @@ accepts only debug/info/warning/error severity, bounded message/category fields,
 and supports dry-run. Secret-like key/value material is redacted before the
 existing logging sink; it cannot configure files, loggers, processes, or system
 destinations.
+
+### Native command triggers
+
+HCM represents trusted text commands as the durable `hcm_native.command` event.
+The bounded command ingestion API (`POST /api/v1/commands`) accepts authenticated
+CONTROL or ADMIN sessions, trims input, collapses whitespace, and case-folds
+text. It emits an event acknowledgement only; it never invokes a service directly.
+
+Automation triggers use `{"type":"conversation","phrases":["volume up"]}`.
+Phrase lists are bounded and de-duplicated after normalization. Matching is exact
+and case-insensitive; no fuzzy matching, regex, speech recognition, NLU, or
+external provider is involved. The event carries only bounded normalized text,
+source, timestamp, correlation/source event identity, and optional bounded user
+or language metadata. Duplicate source event IDs are ignored, while repeated
+commands with distinct events remain distinct. Existing automation modes and the
+integration-event cursor continue to govern execution and restart behavior.

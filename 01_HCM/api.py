@@ -34,6 +34,7 @@ from .models import (
     UserRoleUpdateIn,
     TouchscreenPinIn,
     TouchscreenPermissionIn,
+    CommandIn,
 )
 from .auth import (
     create_login_challenge,
@@ -67,6 +68,7 @@ from .settings import settings
 from . import storage
 from .updater import updater
 from .registry import registry
+from . import command_events
 
 router = APIRouter(prefix='/api/v1')
 hvac = None
@@ -91,6 +93,17 @@ async def health():
         payload['fire_life_safety'] = {'status': 'Unavailable', 'source': 'hcm_safety_controller'}
         payload['safety_inputs'] = {'fire_alarm_s': {'state': 'unknown'}, 'fire_alarm_P': {'state': 'unknown'}}
     return payload
+
+@router.post('/commands')
+async def ingest_command(body: CommandIn, user=Depends(require_user)):
+    if user.get('role') not in {'CONTROL', 'ADMIN'}:
+        raise HTTPException(403, 'CONTROL or ADMIN role required')
+    try:
+        return await command_events.ingest(registry, body.text, source=body.source,
+                                          source_event_id=body.source_event_id,
+                                          user=user.get('user'), language=body.language)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
 
 @router.get('/safety/status')
 async def safety_status(user=Depends(require_user)):

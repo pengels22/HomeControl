@@ -21,6 +21,12 @@ class DeviceCommand(BaseModel):
     logical_name: str
     command: dict[str, Any]
 
+class CommandIn(BaseModel):
+    text: str = Field(min_length=1, max_length=256)
+    source: str = Field(default='authenticated_command', min_length=1, max_length=64)
+    source_event_id: str | None = Field(default=None, max_length=128)
+    language: str | None = Field(default=None, max_length=32)
+
 class LogicalDeviceCreateIn(BaseModel):
     logical_name: str = Field(min_length=1, max_length=120)
     device_class: str = Field(min_length=1, max_length=80)
