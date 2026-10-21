@@ -32,19 +32,19 @@ jobs:
       - name: Test
         run: python -m pytest
       - name: Compile
-        run: python -m compileall -q 00_Heartbeat 01_HCM 02_SIM 03_LCM 04_RCM 05_PNL 06_config 07_servises 10_scripts 11_tests
+        run: python -m compileall -q 00_Heartbeat 01_HCM 02_SIM 03_LCM 04_RCM 05_PNL 07_config 08_servises 11_scripts 12_tests
       - name: Diff check
         run: git diff --check
       - name: Active configuration safety checks
         run: |
-          ! grep -RInE '192\.168\.60|CAN_250KBPS|250000' 02_SIM 04_RCM 06_config/02_SIM 06_config/04_RCM 06_config/06_RMC
+          ! grep -RInE '192\.168\.60|CAN_250KBPS|250000' 02_SIM 04_RCM 07_config/02_SIM 07_config/04_RCM 07_config/06_RMC
       - name: JavaScript syntax
         run: |
           node --check 01_HCM/www/app.js
-          npm ci --prefix 07_servises/matter_bridge --ignore-scripts
-          npm run check --prefix 07_servises/matter_bridge
-          HCM_MATTER_VALIDATE_ONLY=true HCM_MATTER_STORAGE="$RUNNER_TEMP/hcm-matter" HCM_MATTER_PASSCODE=20202021 node 07_servises/matter_bridge/bridge.mjs
+          npm ci --prefix 08_servises/matter_bridge --ignore-scripts
+          npm run check --prefix 08_servises/matter_bridge
+          HCM_MATTER_VALIDATE_ONLY=true HCM_MATTER_STORAGE="$RUNNER_TEMP/hcm-matter" HCM_MATTER_PASSCODE=20202021 node 08_servises/matter_bridge/bridge.mjs
       - name: Build and verify HCM deployment image (no GPIO or app lifespan)
         run: |
-          docker build --build-arg HCM_GIT_SHA="$GITHUB_SHA" -f 06_config/01_HCM/Dockerfile.live -t hcm-ci .
-          docker run --rm --network none hcm-ci python 10_scripts/hcm_verify.py --expected-sha "$GITHUB_SHA"
+          docker build --build-arg HCM_GIT_SHA="$GITHUB_SHA" -f 07_config/01_HCM/Dockerfile.live -t hcm-ci .
+          docker run --rm --network none hcm-ci python 11_scripts/hcm_verify.py --expected-sha "$GITHUB_SHA"

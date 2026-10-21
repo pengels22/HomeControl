@@ -16,9 +16,9 @@ from . import db
 from .registry import registry
 from .settings import settings
 
-protocol = import_module('07_servises.common.protocol')
-rmc_firmware = import_module('07_servises.common.rmc_firmware')
-global_config = import_module('07_servises.common.global_config')
+protocol = import_module('08_servises.common.protocol')
+rmc_firmware = import_module('08_servises.common.rmc_firmware')
+global_config = import_module('08_servises.common.global_config')
 log = logging.getLogger(__name__)
 
 
@@ -29,7 +29,7 @@ class UpdateOrchestrator:
     can replace the hook without changing updater sequencing.
     """
 
-    def __init__(self, hook: str = '07_servises/firewall_update_hook.sh', update_port: int | None = None, globals_=None):
+    def __init__(self, hook: str = '08_servises/firewall_update_hook.sh', update_port: int | None = None, globals_=None):
         self.globals = globals_ or global_config.load_global_config('HCM')
         self.hook = Path(hook)
         self.update_port = int(update_port or self.globals.API_Update_Port)

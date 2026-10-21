@@ -2,7 +2,7 @@
 from importlib import import_module
 from . import db
 
-contract = import_module('07_servises.common.channel_metadata')
+contract = import_module('08_servises.common.channel_metadata')
 FIELDS = tuple(contract.ChannelMetadata.model_fields)
 SELECT = '''
 SELECT c.*, m.device_id, m.hostname, m.module_type, m.control_session_online, m.last_state,

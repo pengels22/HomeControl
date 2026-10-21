@@ -299,7 +299,7 @@ class RegistryBridge:
                 await self.client.publish(topic, json.dumps(body), retain=True, qos=1)
 
     async def start_matter(self):
-        path = Path(__file__).resolve().parents[1] / '07_servises/matter_bridge/bridge.mjs'
+        path = Path(__file__).resolve().parents[1] / '08_servises/matter_bridge/bridge.mjs'
         try:
             self.matter_state = 'starting'
             self.matter = await asyncio.create_subprocess_exec('node', str(path), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)

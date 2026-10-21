@@ -3,14 +3,14 @@ import asyncio, logging, sys, time, uuid
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from importlib import import_module
-common_agent = import_module('07_servises.common.agent')
-common_can = import_module('07_servises.common.can')
-common_cfg = import_module('07_servises.common.config')
-common_io = import_module('07_servises.common.io')
-common_global_config = import_module('07_servises.common.global_config')
-common_rmc_fw = import_module('07_servises.common.rmc_firmware')
-common_safety = import_module('07_servises.common.safety_arbiter')
-common_profiles = import_module('07_servises.common.hardware_profiles')
+common_agent = import_module('08_servises.common.agent')
+common_can = import_module('08_servises.common.can')
+common_cfg = import_module('08_servises.common.config')
+common_io = import_module('08_servises.common.io')
+common_global_config = import_module('08_servises.common.global_config')
+common_rmc_fw = import_module('08_servises.common.rmc_firmware')
+common_safety = import_module('08_servises.common.safety_arbiter')
+common_profiles = import_module('08_servises.common.hardware_profiles')
 
 class SIMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
@@ -20,7 +20,7 @@ class SIMAgent(common_agent.ModuleAgent):
         if not isinstance(self.hardware_profile, dict):
             root = Path(__file__).resolve().parents[1]
             self.hardware_profile = common_profiles.load_profile(
-                root / '06_config/02_SIM/hardware_pins.yaml', 'SIM'
+                root / '07_config/02_SIM/hardware_pins.yaml', 'SIM'
             ).data
         config.setdefault('can_bitrate', self.global_config.CAN_Bitrate)
         config.setdefault('can_enabled', self.global_config.CAN_Enabled)
@@ -518,9 +518,9 @@ class SIMAgent(common_agent.ModuleAgent):
 async def main():
     logging.basicConfig(level=logging.INFO)
     root = Path(__file__).resolve().parents[1]
-    cfg = common_cfg.load_yaml(root / '06_config/02_SIM/sim.yaml')
+    cfg = common_cfg.load_yaml(root / '07_config/02_SIM/sim.yaml')
     cfg['hardware_profile'] = common_profiles.load_profile(
-        root / '06_config/02_SIM/hardware_pins.yaml', 'SIM'
+        root / '07_config/02_SIM/hardware_pins.yaml', 'SIM'
     ).data
     await SIMAgent(cfg).run()
 

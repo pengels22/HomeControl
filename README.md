@@ -12,15 +12,15 @@ The current audited software baseline is:
 
 Start here:
 
-- [White-paper index](09_documentation/whitepapers/README.md)
-- [System architecture](09_documentation/whitepapers/HOMECONTROL_SYSTEM_WHITE_PAPER.md)
-- [Implementation status](09_documentation/whitepapers/IMPLEMENTATION_STATUS.md)
-- [Life-safety and arbitration](09_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md)
-- [Network and heartbeat](09_documentation/whitepapers/NETWORK_AND_HEARTBEAT.md)
-- [Hardware modules and I/O](09_documentation/whitepapers/HARDWARE_MODULES_AND_IO.md)
-- [Security, authentication, and updates](09_documentation/whitepapers/SECURITY_AUTH_AND_UPDATES.md)
-- [Commissioning and validation](09_documentation/whitepapers/COMMISSIONING_AND_VALIDATION.md)
-- [Glossary](09_documentation/whitepapers/GLOSSARY.md)
+- [White-paper index](10_documentation/whitepapers/README.md)
+- [System architecture](10_documentation/whitepapers/HOMECONTROL_SYSTEM_WHITE_PAPER.md)
+- [Implementation status](10_documentation/whitepapers/IMPLEMENTATION_STATUS.md)
+- [Life-safety and arbitration](10_documentation/whitepapers/LIFE_SAFETY_AND_ARBITRATION.md)
+- [Network and heartbeat](10_documentation/whitepapers/NETWORK_AND_HEARTBEAT.md)
+- [Hardware modules and I/O](10_documentation/whitepapers/HARDWARE_MODULES_AND_IO.md)
+- [Security, authentication, and updates](10_documentation/whitepapers/SECURITY_AUTH_AND_UPDATES.md)
+- [Commissioning and validation](10_documentation/whitepapers/COMMISSIONING_AND_VALIDATION.md)
+- [Glossary](10_documentation/whitepapers/GLOSSARY.md)
 
 Where older dated material conflicts with the white papers or current source, the white papers and audited source are authoritative.
 
@@ -97,13 +97,13 @@ Repository defaults remain nonphysical.
 - `03_LCM` — Lighting Control Module
 - `04_RCM` — Relay Control Module
 - `05_PNL` — Panel Module
-- `06_config` — hardware/config/deployment manifests
-- `07_servises` — shared/system services (spelling retained by project)
-- `08_database` — PostgreSQL schema and migrations
-- `09_documentation` — current runbooks, pinout, and white papers
-- `10_scripts` — simulators, deployment, and admin tooling
-- `11_tests` — automated software tests
-- `12_hardware_tests` — explicitly gated HIL tests
+- `07_config` — hardware/config/deployment manifests
+- `08_servises` — shared/system services (spelling retained by project)
+- `09_database` — PostgreSQL schema and migrations
+- `10_documentation` — current runbooks, pinout, and white papers
+- `11_scripts` — simulators, deployment, and admin tooling
+- `12_tests` — automated software tests
+- `13_hardware_tests` — explicitly gated HIL tests
 
 ## Current readiness
 

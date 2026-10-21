@@ -1552,11 +1552,11 @@ python -m compileall -q \
   03_LCM \
   04_RCM \
   05_PNL \
-  06_config \
-  07_servises \
-  10_scripts \
-  11_tests \
-  12_hardware_tests
+  07_config \
+  08_servises \
+  11_scripts \
+  12_tests \
+  13_hardware_tests
 
 Run JavaScript syntax validation once.
 

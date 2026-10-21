@@ -8,7 +8,7 @@ from . import db
 from .priority import OutputSource, active_intent, coerce_source, record_intent
 from .registry import registry
 
-safety_arbiter_mod = import_module('07_servises.common.safety_arbiter')
+safety_arbiter_mod = import_module('08_servises.common.safety_arbiter')
 log = logging.getLogger(__name__)
 
 class MaintenanceLockedError(PermissionError):

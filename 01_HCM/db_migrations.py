@@ -13,7 +13,7 @@ from . import db
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = sorted(
-    path for path in (ROOT / '08_database').glob('[0-9][0-9][0-9]_*.sql')
+    path for path in (ROOT / '09_database').glob('[0-9][0-9][0-9]_*.sql')
     if not path.name.endswith('_preflight.sql')
 )
 

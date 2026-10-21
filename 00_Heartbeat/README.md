@@ -2,7 +2,7 @@
 
 Unified Heartbeat V3 is the independent HomeControl supervision service.
 
-Architecture authority: [Network, Communications, and Supervision white paper](../09_documentation/whitepapers/NETWORK_AND_HEARTBEAT.md).
+Architecture authority: [Network, Communications, and Supervision white paper](../10_documentation/whitepapers/NETWORK_AND_HEARTBEAT.md).
 
 ## Current deployment
 
@@ -108,8 +108,8 @@ Use the repository deployment framework rather than historical V1/V2 migration i
 
 Current deployment references:
 
-- [Jetson operations](../09_documentation/JETSON_OPERATIONS.md)
-- [HCM operations](../09_documentation/HCM_OPERATIONS.md)
+- [Jetson operations](../10_documentation/JETSON_OPERATIONS.md)
+- [HCM operations](../10_documentation/HCM_OPERATIONS.md)
 
 Do not replace or restart an otherwise healthy Heartbeat V3 service as a side effect of ordinary HCM container updates.
 

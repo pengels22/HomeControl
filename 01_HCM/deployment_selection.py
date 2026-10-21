@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-COMMON = REPO_ROOT / "06_config" / "10_Common"
+COMMON = REPO_ROOT / "07_config" / "10_Common"
 
 
 def _load_common(name: str):
@@ -23,7 +23,7 @@ def _load_common(name: str):
 
 
 def select_deployment_package(device_type: str, *, device_id: str | None = None, hardware_platform: str | None = None) -> str:
-    """Return the approved 06_config package for a discovered device.
+    """Return the approved 07_config package for a discovered device.
 
     This is planning-only commissioning integration. It never grants SSH access,
     executes scripts, or changes device state.

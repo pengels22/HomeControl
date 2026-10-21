@@ -20,7 +20,7 @@ from . import db
 from . import storage
 from .settings import settings
 
-module_infra = __import__("importlib").import_module("07_servises.common.module_infra")
+module_infra = __import__("importlib").import_module("08_servises.common.module_infra")
 
 
 UNSET = object()

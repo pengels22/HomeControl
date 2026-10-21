@@ -9,7 +9,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from importlib import import_module
 
-EventRecord = import_module('07_servises.common.module_infra').EventRecord
+EventRecord = import_module('08_servises.common.module_infra').EventRecord
 
 
 @dataclass(eq=False)

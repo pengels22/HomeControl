@@ -16,8 +16,8 @@ from .settings import settings
 
 # First pass local auth. Replace challenge verification with platform passkey/WebAuthn once RP ID is finalized.
 _sessions: dict[str, tuple[str,str,float]] = {}
-global_config = import_module('07_servises.common.global_config')
-module_infra = import_module('07_servises.common.module_infra')
+global_config = import_module('08_servises.common.global_config')
+module_infra = import_module('08_servises.common.module_infra')
 PASSWORD_ITERATIONS = int(global_config.load_global_config('HCM').Auth_Password_PBKDF2_Iterations)
 SUPPORTED_ROLES = {"ADMIN", "READONLY"}
 TOUCHSCREEN_PERMISSIONS = {"VIEWER", "CONTROL", "ADMIN"}

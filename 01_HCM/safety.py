@@ -10,9 +10,9 @@ from .notifications import notifications, Notification
 from .priority import OutputSource, clear_source
 
 log = logging.getLogger(__name__)
-fire_input_mod = import_module('07_servises.common.fire_input')
-arbiter_mod = import_module('07_servises.common.safety_arbiter')
-global_config = import_module('07_servises.common.global_config')
+fire_input_mod = import_module('08_servises.common.fire_input')
+arbiter_mod = import_module('08_servises.common.safety_arbiter')
+global_config = import_module('08_servises.common.global_config')
 
 
 class SafetyHeartbeatReporter:

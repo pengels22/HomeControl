@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-COMMON = ROOT / "06_config" / "10_Common"
+COMMON = ROOT / "07_config" / "10_Common"
 
 
 def _load_module(name: str, path: Path):
@@ -78,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "status":
-        manifests = manifest.load_all_manifests(ROOT / "06_config")
+        manifests = manifest.load_all_manifests(ROOT / "07_config")
         data = {
             "repository": str(ROOT),
             "manifests": {device_type: item.package for device_type, item in sorted(manifests.items())},

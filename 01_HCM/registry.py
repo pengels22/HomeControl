@@ -17,8 +17,8 @@ from . import role_switching
 from .settings import settings
 from homecontrol_identity import InvalidDeviceId, maybe_normalize_device_id
 
-protocol = import_module('07_servises.common.protocol')
-module_infra = import_module('07_servises.common.module_infra')
+protocol = import_module('08_servises.common.protocol')
+module_infra = import_module('08_servises.common.module_infra')
 log = logging.getLogger(__name__)
 
 MODULE_TYPES = ('RCM', 'LCM', 'SIM', 'PNL')

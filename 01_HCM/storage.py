@@ -14,7 +14,7 @@ from importlib import import_module
 
 from .settings import settings
 
-infra = import_module('07_servises.common.module_infra')
+infra = import_module('08_servises.common.module_infra')
 
 
 CONFIG_DIRS = ('RCM', 'LCM', 'SIM', 'system')

@@ -3,20 +3,20 @@ import asyncio, logging, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from importlib import import_module
-channel_contract = import_module('07_servises.common.channel_metadata')
-common_agent = import_module('07_servises.common.agent')
-common_cfg = import_module('07_servises.common.config')
-common_hw = import_module('07_servises.common.hardware')
-common_pinmap = import_module('07_servises.common.pinmap')
-common_io = import_module('07_servises.common.io')
-common_global_config = import_module('07_servises.common.global_config')
-common_safety = import_module('07_servises.common.safety_arbiter')
-common_infra = import_module('07_servises.common.module_infra')
-common_profiles = import_module('07_servises.common.hardware_profiles')
-common_commissioning = import_module('07_servises.common.commissioning')
-common_drivers = import_module('07_servises.common.physical_drivers')
-common_factory = import_module('07_servises.common.hardware_factory')
-state_confidence = import_module('07_servises.common.state_confidence')
+channel_contract = import_module('08_servises.common.channel_metadata')
+common_agent = import_module('08_servises.common.agent')
+common_cfg = import_module('08_servises.common.config')
+common_hw = import_module('08_servises.common.hardware')
+common_pinmap = import_module('08_servises.common.pinmap')
+common_io = import_module('08_servises.common.io')
+common_global_config = import_module('08_servises.common.global_config')
+common_safety = import_module('08_servises.common.safety_arbiter')
+common_infra = import_module('08_servises.common.module_infra')
+common_profiles = import_module('08_servises.common.hardware_profiles')
+common_commissioning = import_module('08_servises.common.commissioning')
+common_drivers = import_module('08_servises.common.physical_drivers')
+common_factory = import_module('08_servises.common.hardware_factory')
+state_confidence = import_module('08_servises.common.state_confidence')
 
 class RCMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
@@ -26,7 +26,7 @@ class RCMAgent(common_agent.ModuleAgent):
         if not isinstance(self.hardware_profile, dict) or not self.hardware_profile:
             root = Path(__file__).resolve().parents[1]
             self.hardware_profile = common_profiles.load_profile(
-                root / '06_config/04_RCM/hardware_pins.yaml', 'RCM'
+                root / '07_config/04_RCM/hardware_pins.yaml', 'RCM'
             ).data
         relay_count = int(config.get('relay_count', self.global_config.RCM_Relay_Count))
         names = common_infra.RCM_RELAY_CHANNELS[:relay_count]
@@ -255,9 +255,9 @@ class RCMAgent(common_agent.ModuleAgent):
 async def main():
     logging.basicConfig(level=logging.INFO)
     root = Path(__file__).resolve().parents[1]
-    cfg = common_cfg.load_yaml(root / '06_config/04_RCM/rcm.yaml')
+    cfg = common_cfg.load_yaml(root / '07_config/04_RCM/rcm.yaml')
     cfg['hardware_profile'] = common_profiles.load_profile(
-        root / '06_config/04_RCM/hardware_pins.yaml', 'RCM'
+        root / '07_config/04_RCM/hardware_pins.yaml', 'RCM'
     ).data
     await RCMAgent(cfg).run()
 

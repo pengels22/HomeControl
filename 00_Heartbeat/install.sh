@@ -51,7 +51,7 @@ install -m 755 hcm_heartbeat.py /usr/local/lib/hcm-heartbeat/hcm_heartbeat.py
 install -m 644 gpio_inputs.py /usr/local/lib/hcm-heartbeat/gpio_inputs.py
 install -m 644 ../homecontrol_identity.py /usr/local/lib/hcm-heartbeat/homecontrol_identity.py
 if [ "$TARGET" = "conflict" ]; then
-    install -m 644 ../06_config/07_CONFLICT/hardware_pins.yaml /etc/hcm-heartbeat/hardware_pins.yaml
+    install -m 644 ../07_config/07_CONFLICT/hardware_pins.yaml /etc/hcm-heartbeat/hardware_pins.yaml
 fi
 install -m 755 hcm-heartbeat /usr/local/bin/hcm-heartbeat
 if [ -e /etc/hcm-heartbeat/config.json ]; then

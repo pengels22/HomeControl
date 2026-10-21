@@ -6,7 +6,7 @@ from enum import Enum
 from importlib import import_module
 from typing import Awaitable, Callable
 
-global_config = import_module('07_servises.common.global_config')
+global_config = import_module('08_servises.common.global_config')
 hcm_globals = global_config.load_global_config('HCM')
 
 def ms_to_seconds(value: int) -> float:

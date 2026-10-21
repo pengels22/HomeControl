@@ -3,9 +3,9 @@ import asyncio, logging, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from importlib import import_module
-common_agent = import_module('07_servises.common.agent')
-common_cfg = import_module('07_servises.common.config')
-common_global_config = import_module('07_servises.common.global_config')
+common_agent = import_module('08_servises.common.agent')
+common_cfg = import_module('08_servises.common.config')
+common_global_config = import_module('08_servises.common.global_config')
 
 class PNLAgent(common_agent.ModuleAgent):
     def __init__(self, config):
@@ -44,7 +44,7 @@ class PNLAgent(common_agent.ModuleAgent):
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    cfg = common_cfg.load_yaml(Path(__file__).resolve().parents[1] / '06_config/05_PNL/pnl.yaml')
+    cfg = common_cfg.load_yaml(Path(__file__).resolve().parents[1] / '07_config/05_PNL/pnl.yaml')
     await PNLAgent(cfg).run()
 
 if __name__ == '__main__': asyncio.run(main())

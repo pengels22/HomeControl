@@ -2,7 +2,7 @@ from pathlib import Path
 from importlib import import_module
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-global_config = import_module('07_servises.common.global_config')
+global_config = import_module('08_servises.common.global_config')
 hcm_globals = global_config.load_global_config('HCM')
 
 def ms_to_s(value: int) -> int:
@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     update_port: int = hcm_globals.API_Update_Port
     update_request_secret_file: Path | None = Path('/etc/homecontrol/update-request.secret')
     database_url: str | None = None
-    config_root: Path = Path('06_config')
+    config_root: Path = Path('07_config')
     dev_mode: bool = hcm_globals.HCM_Dev_Mode
     tls_enabled: bool = hcm_globals.HCM_TLS_Enabled
     tls_cert: str | None = None
