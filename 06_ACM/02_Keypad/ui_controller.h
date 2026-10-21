@@ -59,7 +59,7 @@ class KeypadUiController {
     auto inside = [x, y](const TouchRect& r) { return x >= r.x && y >= r.y && x < r.x + r.width && y < r.y + r.height; };
     if (inside(keypad_layout::NOTIFICATIONS)) return TouchAction::NOTIFICATIONS;
     if (inside(keypad_layout::SETTINGS)) return TouchAction::SETTINGS;
-    for (uint8_t i = 0; i < 12; ++i) if (inside(keypad_layout::DIGITS[i])) {
+    for (uint8_t i = 0; i < NumericKeypadComponent::KEY_COUNT; ++i) if (inside(NumericKeypadComponent::region(i))) {
       if (i == 9) return TouchAction::BACKSPACE;
       if (i == 10) return TouchAction::DIGIT_0;
       if (i == 11) return TouchAction::ENTER;

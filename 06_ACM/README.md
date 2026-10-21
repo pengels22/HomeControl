@@ -88,6 +88,10 @@ controls open Alerts and Settings. Armed, delay, entry, and triggered states
 retain the keypad; the physical panic input remains GPIO-only. The reference
 renders in `03_Shared/images/` are regenerated from this layout contract.
 
+The numeric keypad is one reusable `NumericKeypadComponent`. Its 12 key
+regions and labels are identical for disarm, master PIN, first-boot
+provisioning, settings authentication, and entry-delay flows.
+
 The LCD and touch hardware driver is intentionally still behind the
 `KeypadDisplay`/`KeypadTouch` boundary until the exact controller and touch
 coordinates are bench confirmed.

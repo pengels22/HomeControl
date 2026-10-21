@@ -37,6 +37,17 @@ constexpr TouchRect ACTION_LEFT = {52, 261, 176, 48};
 constexpr TouchRect ACTION_RIGHT = {252, 261, 176, 48};
 }
 
+// One reusable numeric keypad for every PIN and arm/disarm flow.
+class NumericKeypadComponent {
+ public:
+  static constexpr uint8_t KEY_COUNT = 12;
+  static const TouchRect& region(uint8_t index) { return keypad_layout::DIGITS[index < KEY_COUNT ? index : 0]; }
+  static char label(uint8_t index) {
+    static constexpr char labels[KEY_COUNT] = {'1', '2', '3', '4', '5', '6', '7', '8', '9', 'B', '0', 'E'};
+    return labels[index < KEY_COUNT ? index : 0];
+  }
+};
+
 struct RemoteAreaSummary {
   String name;
   String status;
