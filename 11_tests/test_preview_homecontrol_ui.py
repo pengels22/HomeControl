@@ -121,6 +121,7 @@ def test_ha_mapping_page_separates_persisted_rows_from_ephemeral_queue(client):
     section = js[js.index('async function renderHaMappings'):js.index('async function renderIntegrations')]
     assert 'api("/mappings?source_system=home_assistant")' in section
     assert 'Confirmed mappings' in section
+    assert 'target?.display_name' in section
     assert 'Unresolved identities' in section
     assert 'Confirmed mappings unavailable' in section
     assert 'Unresolved mapping queue unavailable' in section

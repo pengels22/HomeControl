@@ -1197,7 +1197,7 @@ async function renderHaMappings() {
     const sourceLabel = (item) => item.source_kind === "device" ? "Home Assistant device (sanitized)" : (item.source_identifier || "Unknown source");
     const confirmed = mappings.length ? `<div class="detail-list">${mappings.map((item) => {
       const target = entityByRef.get(String(item.target_ref));
-      const targetName = target?.name || target?.entity_id || "Unknown target";
+      const targetName = target?.display_name || target?.name || target?.entity_id || "Unknown target";
       return `<article class="detail-item"><strong>${esc(sourceLabel(item))}</strong><div class="detail-fields">${detailField("Target", targetName)}${detailField("Entity", target?.entity_id || item.target_ref)}${detailField("Origin", item.origin)}${detailField("Health", item.status)}${item.confidence ? detailField("Confidence", item.confidence) : ""}</div></article>`;
     }).join("")}</div>` : `<div class="empty">No confirmed Home Assistant mappings.</div>`;
     const queue = queueResult.status === "fulfilled" ? queueResult.value : null;
