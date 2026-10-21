@@ -64,7 +64,7 @@ async def analyzer_mappings(source_system="home_assistant"):
     for row in rows:
         if row["status"] != "VALID" or row["origin"] not in CONFIRMED_ORIGINS: continue
         key = row["source_identifier"]
-        value = {"entity_ref": int(row["target_ref"])} if row["target_kind"] in {"entity", "entity_ref", "helper/entity_ref"} and str(row["target_ref"]).isdigit() else row["target_ref"]
+        value = {"entity_ref": int(row["target_ref"])} if row["target_kind"] in {"entity", "entity_ref"} and str(row["target_ref"]).isdigit() else row["target_ref"]
         result[key] = value
     aliases = []
     async with db.acquire() as conn:
@@ -72,7 +72,7 @@ async def analyzer_mappings(source_system="home_assistant"):
             FROM migration_mapping_aliases a JOIN migration_mappings m ON m.mapping_id=a.mapping_id
             WHERE m.source_system=$1 AND m.status='VALID' AND m.origin IN ('EXACT_AUTOMATIC','USER_CONFIRMED')""", source_system)
     for row in aliases:
-        target = {"entity_ref": int(row["target_ref"])} if row["target_kind"] in {"entity", "entity_ref", "helper/entity_ref"} and str(row["target_ref"]).isdigit() else row["target_ref"]
+        target = {"entity_ref": int(row["target_ref"])} if row["target_kind"] in {"entity", "entity_ref"} and str(row["target_ref"]).isdigit() else row["target_ref"]
         result[row["alias_identifier"]] = target
     # Migration 020 remains authoritative for notification/TTS configuration;
     # expose it through the same analyzer input without rewriting that data.
@@ -89,7 +89,6 @@ async def _target_exists(conn, target_kind, target_ref):
     queries = {
         "entity": "SELECT enabled,available FROM entities WHERE id=$1",
         "entity_ref": "SELECT enabled,available FROM entities WHERE id=$1",
-        "helper/entity_ref": "SELECT enabled,available FROM entities WHERE id=$1",
         "device_id": "SELECT enabled,TRUE AS available FROM logical_devices WHERE id=$1",
         "automation_id": "SELECT enabled,TRUE AS available FROM automations WHERE automation_id=$1",
         "script_id": "SELECT enabled,TRUE AS available FROM native_scripts WHERE script_id=$1",
@@ -104,7 +103,7 @@ async def _target_exists(conn, target_kind, target_ref):
     # ``target_ref`` is intentionally TEXT in the mapping schema, while
     # several HCM target tables use integer primary keys.  Coerce only those
     # target kinds so asyncpg receives the type expected by the query.
-    integer_targets = {"entity", "entity_ref", "helper/entity_ref", "device_id", "room_id", "zone"}
+    integer_targets = {"entity", "entity_ref", "device_id", "room_id", "zone"}
     query_ref = target_ref
     if target_kind in integer_targets:
         try:
@@ -166,6 +165,14 @@ async def invalidate_mapping(mapping_id, *, actor=None):
         row = await conn.fetchrow("UPDATE migration_mappings SET status='INVALID',actor=$2,updated_at=now() WHERE mapping_id=$1 RETURNING *", _uuid(mapping_id), actor)
     if not row: raise LookupError("Mapping not found")
     return _public(row)
+
+
+async def delete_mapping(mapping_id, *, importer_only=True):
+    """Delete only an importer-owned mapping during compensating rollback."""
+    async with db.acquire() as conn:
+        where = "mapping_id=$1 AND origin='IMPORT_PLANNED'" if importer_only else "mapping_id=$1"
+        result = await conn.execute(f"DELETE FROM migration_mappings WHERE {where}", _uuid(mapping_id))
+    return result.endswith('1')
 
 
 async def add_alias(mapping_id, alias_identifier, *, source_system=None, source_kind=None):

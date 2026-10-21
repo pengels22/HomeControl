@@ -140,3 +140,21 @@ async def update_source_enabled(staged_id, enabled: bool):
         row = await conn.fetchrow("UPDATE ha_migration_items SET source_enabled=$2,state_provenance='HA_RUNTIME_STATE',native_preview=jsonb_set(native_preview,'{enabled}',$3::jsonb),updated_at=now() WHERE staged_id=$1 RETURNING *", UUID(str(staged_id)), bool(enabled), json.dumps(bool(enabled)))
     if not row: raise LookupError("Staged migration item not found")
     return _row(row)
+
+
+async def mark_imported(staged_id, native_ref: str):
+    async with db.acquire() as conn:
+        row = await conn.fetchrow("""UPDATE ha_migration_items
+            SET imported_native_ref=$2, lifecycle_status='HA_IMPORTED', imported_at=COALESCE(imported_at, now()), updated_at=now()
+            WHERE staged_id=$1 RETURNING *""", UUID(str(staged_id)), str(native_ref))
+    if not row: raise LookupError("Staged migration item not found")
+    return _row(row)
+
+
+async def mark_import_stale(staged_id):
+    async with db.acquire() as conn:
+        row = await conn.fetchrow("""UPDATE ha_migration_items
+            SET lifecycle_status='HA_IMPORT_STALE', updated_at=now()
+            WHERE staged_id=$1 RETURNING *""", UUID(str(staged_id)))
+    if not row: raise LookupError("Staged migration item not found")
+    return _row(row)

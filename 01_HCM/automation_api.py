@@ -17,7 +17,21 @@ async def _user(user=Depends(require_user)): return user
 
 @router.get('')
 async def list_automations(user=Depends(_user)):
-    return {'automations':await _engine().store.list()}
+    automations = await _engine().store.list()
+    from . import db
+    async with db.acquire() as conn:
+        provenance = await conn.fetch("""SELECT source_staged_id, source_system, source_kind, source_identifier,
+            source_fingerprint, imported_at FROM automations WHERE source_system IS NOT NULL""")
+    by_id = {str(row['source_staged_id']): dict(row) for row in provenance if row['source_staged_id']}
+    for item in automations:
+        source = by_id.get(str(item.get('automation_id')))
+        if source:
+            item.update({'source': 'HA_IMPORTED', 'source_system': source['source_system'], 'source_kind': source['source_kind'],
+                         'source_staged_id': str(source['source_staged_id']), 'source_identifier': source['source_identifier'],
+                         'source_fingerprint': source['source_fingerprint'], 'imported_at': source['imported_at']})
+        else:
+            item['source'] = 'NATIVE'
+    return {'automations': automations}
 
 @router.post('')
 async def create_automation(body:dict,user=Depends(_user)):

@@ -18,8 +18,13 @@ from . import mapping_registry
 from .ha_capability_enrichment import enrich_plan
 from .ha_mapping_review import build_mapping_queue, preview_mapping
 from .hcm_target_catalog import candidates as catalog_candidates, catalog_from_rows, load_catalog, summary as catalog_summary
+from . import db
 
 router = APIRouter(prefix="/api/v1/import/home-assistant", dependencies=[Depends(require_user)])
+
+# Helpers are native HCM entities.  ``entity_ref`` is the canonical mapping
+# target kind; slash-qualified kinds are rejected by the mapping schema.
+IMPORT_HELPER_TARGET_KIND = "entity_ref"
 
 
 def _admin(user: dict[str, str]):
@@ -193,7 +198,7 @@ async def mapping_confirm_bulk(body: dict, user=Depends(require_user)):
 
 @router.post("/apply")
 async def apply(body: dict, user=Depends(require_user)):
-    """Apply a previously returned plan, with imported automations disabled.
+    """Apply a previously returned plan while preserving staged state and provenance.
 
     The endpoint deliberately accepts the plan as data so the caller can review
     and retain it.  A dry run performs all eligibility checks and creates nothing.
@@ -242,15 +247,31 @@ async def apply(body: dict, user=Depends(require_user)):
             if current.get("eligibility") not in ("READY", "READY_WITH_TRANSLATIONS"):
                 report["blocked"].append({"source_id": source_id, "reason": current.get("eligibility")}); continue
             preview = current.get("preview") or {}
+            async with db.acquire() as conn:
+                staged = await conn.fetchrow("""SELECT * FROM ha_migration_items
+                    WHERE source_system='home_assistant' AND source_kind='automation' AND source_identifier=$1""", source_id)
+            if not staged:
+                raise LookupError("staged automation source is no longer present")
+            source_enabled = bool(staged["source_enabled"])
+            existing_ref = staged["imported_native_ref"]
+            if existing_ref:
+                async with db.acquire() as conn:
+                    existing = await conn.fetchrow("SELECT automation_id FROM automations WHERE automation_id=$1", existing_ref)
+                if existing:
+                    report["already_imported"].append({"source_id": source_id, "staged_id": str(staged["staged_id"]), "native_ref": str(existing_ref), "status": "NO_CHANGE"})
+                    continue
+                async with db.acquire() as conn:
+                    await conn.execute("UPDATE ha_migration_items SET lifecycle_status='HA_IMPORT_STALE',updated_at=now() WHERE staged_id=$1", staged["staged_id"])
+                raise RuntimeError("staged record has stale imported native ref")
             if body.get("dry_run", False):
                 definition = {"name": preview.get("name", source_id), "description": preview.get("description"),
-                              "enabled": False, "mode": preview.get("mode", "single"),
+                              "enabled": source_enabled, "mode": preview.get("mode", "single"),
                               "max_runs": min(int(preview.get("max_runs", 10)), 10),
                               "triggers": preview.get("triggers") or [], "conditions": preview.get("conditions"),
                               "actions": preview.get("actions") or []}
                 normalized = await engine.store.validate(definition, allow_planned=True)
                 helpers = current.get("planned_native_helpers") or preview.get("native_objects_to_create", []) + preview.get("native_objects_to_reuse", [])
-                report["dependencies"].append({"source_id": source_id, "helpers": [h.get("source_identity") for h in helpers], "helper_order": [h.get("source_identity") for h in helpers]})
+                report["dependencies"].append({"source_id": source_id, "staged_id": str(staged["staged_id"]), "helpers": [h.get("source_identity") for h in helpers], "helper_order": [h.get("source_identity") for h in helpers], "enabled": source_enabled})
                 report["imported"].append({"source_id": source_id, "status": "validated", "enabled": normalized["enabled"], "helper_count": len(helpers)})
                 continue
             if source_type == "scripts":
@@ -261,10 +282,10 @@ async def apply(body: dict, user=Depends(require_user)):
             elif source_type == "helpers":
                 row = await native.create_helper(preview["helper_type"], preview["name"], preview.get("config", {}), entity_id=preview["entity_id"])
             else:
-                definition = {"name": preview.get("name", source_id), "description": preview.get("description"), "enabled": False, "mode": preview.get("mode", "single"), "max_runs": min(int(preview.get("max_runs", 10)), 10), "triggers": preview.get("triggers") or [], "conditions": preview.get("conditions"), "actions": preview.get("actions") or []}
-                row = await engine.create_automation(definition)
-            report["imported"].append({"source_id": source_id, "native_id": str(row.get("script_id", row.get("scene_id", row.get("automation_id", ""))))})
-            report["provenance"].append({"source_system": "home_assistant", "source_type": source_type, "source_id": source_id, "source_fingerprint": item.get("source_fingerprint")})
+                row = await _apply_automation(engine, native, staged, current, preview, source_enabled)
+            native_id = str(row.get("script_id", row.get("scene_id", row.get("automation_id", ""))))
+            report["imported"].append({"source_id": source_id, "staged_id": str(staged["staged_id"]), "native_id": native_id, "enabled": source_enabled, "status": "CREATED"})
+            report["provenance"].append({"source_system": "home_assistant", "source_type": source_type, "source_id": source_id, "staged_id": str(staged["staged_id"]), "source_fingerprint": item.get("source_fingerprint"), "native_ref": native_id})
         except Exception as exc:
             report["failed"].append({"source_id": source_id, "error": type(exc).__name__, "message": str(exc)})
     return report
@@ -273,3 +294,103 @@ async def apply(body: dict, user=Depends(require_user)):
 def _slug(value: str) -> str:
     import re
     return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_") or "imported"
+
+
+def _materialize_helpers(value, refs):
+    if isinstance(value, dict):
+        planned = value.get("planned_helper")
+        if planned and planned in refs:
+            return refs[planned]
+        return {key: _materialize_helpers(item, refs) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_materialize_helpers(item, refs) for item in value]
+    return value
+
+
+async def _helper_refs(native, planned):
+    refs, mappings, created_helpers = {}, [], []
+    async with db.acquire() as conn:
+        existing_maps = await conn.fetch("""SELECT * FROM migration_mappings
+            WHERE source_system='home_assistant' AND source_kind='helper' AND origin='IMPORT_PLANNED'""")
+    by_source = {str(row["source_identifier"]): row for row in existing_maps}
+    for helper in planned:
+        identity = str(helper.get("source_identity") or "")
+        if not identity:
+            continue
+        mapped = by_source.get(identity)
+        if mapped:
+            async with db.acquire() as conn:
+                target = await conn.fetchrow("SELECT entity_ref,helper_type FROM native_helpers WHERE entity_ref=$1", int(mapped["target_ref"]))
+            if not target or target["helper_type"] != helper.get("helper_type"):
+                raise RuntimeError("helper mapping target is stale or collides")
+            refs[identity] = int(target["entity_ref"])
+            mappings.append({"source_identity": identity, "mapping_id": str(mapped["mapping_id"]), "status": "REUSED", "target_ref": int(target["entity_ref"])})
+            continue
+        entity_id = str(helper.get("proposed_entity_id") or identity)
+        async with db.acquire() as conn:
+            collision = await conn.fetchrow("SELECT entity_ref,helper_type FROM native_helpers WHERE entity_id=$1", entity_id)
+        if collision and collision["helper_type"] != helper.get("helper_type"):
+            raise RuntimeError("deterministic helper identity collides with an unrelated helper")
+        if collision:
+            ref = int(collision["entity_ref"])
+            status = "CREATED_FOR_REUSE"
+        else:
+            created = await native.create_helper(helper["helper_type"], helper.get("name") or entity_id.split(".", 1)[-1], helper.get("config") or {}, entity_id=entity_id)
+            ref = int(created["entity_ref"])
+            status = "CREATED"
+            created_helpers.append({"helper_id": str(created["helper_id"]), "entity_ref": ref, "source_identity": identity})
+        try:
+            mapping = await mapping_registry.create_mapping({
+                "source_system": "home_assistant", "source_kind": "helper", "source_identifier": identity,
+                "source_fingerprint": helper.get("source_fingerprint"), "target_kind": IMPORT_HELPER_TARGET_KIND,
+                "target_ref": str(ref), "confidence": "EXACT", "origin": "IMPORT_PLANNED",
+                "notes": "Importer-generated helper identity mapping"})
+        except Exception:
+            if status == "CREATED":
+                try:
+                    await native.delete_helper(created_helpers[-1]["helper_id"])
+                except Exception:
+                    pass
+            raise
+        refs[identity] = ref
+        mappings.append({"source_identity": identity, "mapping_id": str(mapping["mapping_id"]), "status": status, "target_ref": ref})
+        by_source[identity] = mapping
+    return refs, mappings, created_helpers
+
+
+async def _apply_automation(engine, native, staged, item, preview, source_enabled):
+    planned = item.get("planned_native_helpers") or preview.get("native_objects_to_create", []) + preview.get("native_objects_to_reuse", [])
+    refs, helper_mappings, created_helpers = await _helper_refs(native, planned)
+    materialized = _materialize_helpers(preview, refs)
+    definition = {"name": materialized.get("name", str(staged["source_identifier"])),
+                  "description": materialized.get("description"), "enabled": source_enabled,
+                  "mode": materialized.get("mode", "single"), "max_runs": min(int(materialized.get("max_runs", 10)), 10),
+                  "triggers": materialized.get("triggers") or [], "conditions": materialized.get("conditions"),
+                  "actions": materialized.get("actions") or []}
+    normalized = await engine.store.validate(definition, allow_planned=False)
+    row = None
+    try:
+        row = await engine.create_automation(normalized)
+        async with db.acquire() as conn:
+            await conn.execute("""UPDATE automations SET source_system='home_assistant', source_kind='automation',
+                source_staged_id=$2, source_identifier=$3, source_fingerprint=$4, imported_at=now()
+                WHERE automation_id=$1""", row["automation_id"], staged["staged_id"], str(staged["source_identifier"]), str(staged["source_fingerprint"]))
+            await conn.execute("""UPDATE ha_migration_items SET imported_native_ref=$2, lifecycle_status='HA_IMPORTED', imported_at=now(), updated_at=now()
+                WHERE staged_id=$1""", staged["staged_id"], str(row["automation_id"]))
+    except Exception:
+        if row:
+            await engine.delete_automation(row["automation_id"])
+        for mapping in helper_mappings:
+            if mapping.get("status") in {"CREATED", "CREATED_FOR_REUSE"}:
+                try:
+                    await mapping_registry.delete_mapping(mapping["mapping_id"])
+                except Exception:
+                    pass
+        for helper in created_helpers:
+            try:
+                await native.delete_helper(helper["helper_id"])
+            except Exception:
+                pass
+        raise
+    row["helper_mappings"] = helper_mappings
+    return row

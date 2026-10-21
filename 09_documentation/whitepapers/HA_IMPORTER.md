@@ -117,6 +117,20 @@ Endpoints:
 - `POST /api/v1/import/home-assistant/apply` (ADMIN): reviewed plan, selected
   item IDs, mappings, and optional `dry_run`.
 
+Apply preserves the persisted `source_enabled` value from the staged workspace
+as the initial native automation state.  Successful automation imports retain a
+durable staged-to-native reference and source fingerprint, and the staged row is
+marked `HA_IMPORTED`; the source document remains available for comparison.
+Planned helpers are created or reused by deterministic helper identity before
+the automation is stored.  Each importer-created helper receives an
+`IMPORT_PLANNED` source mapping, which is reusable on later applies and is kept
+separate from user-confirmed external mappings.  Reapplying a staged row whose
+native reference still exists returns an idempotent no-change result.  A missing
+referenced native object is reported as stale provenance and never duplicated.
+If a later native write fails, the staged row is not marked imported; any helper
+created earlier remains safely reusable and its importer mapping records that
+identity for the next attempt.
+
 No live Home Assistant connection or filesystem path is accepted. Provenance is
 returned with every applied item (`home_assistant`, source type/id/fingerprint),
 and source content is never overwritten. Durable plan/history storage and update

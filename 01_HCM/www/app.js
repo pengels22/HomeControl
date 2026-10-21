@@ -1251,7 +1251,8 @@ async function renderAutomations() {
   }
   const native = Array.isArray(nativeResult.value?.automations) ? nativeResult.value.automations : [];
   const staged = Array.isArray(stagedResult.value?.items) ? stagedResult.value.items : [];
-  const rows = [...native.map((item) => ({...item, source: "NATIVE"})), ...staged.map((item) => ({...item, source: "HA_STAGED"}))];
+  const importedStaged = new Set(native.filter((item) => item.source === "HA_IMPORTED").map((item) => item.source_staged_id));
+  const rows = [...native, ...staged.filter((item) => !importedStaged.has(item.staged_id)).map((item) => ({...item, source: item.lifecycle_status === "HA_IMPORTED" ? "HA_IMPORTED" : "HA_STAGED"}))];
   const renderRows = () => {
     const needle = ($("content").querySelector("[data-automation-search]")?.value || "").trim().toLowerCase();
     const source = $("content").querySelector("[data-automation-source-filter]")?.value || "all";
@@ -1287,7 +1288,7 @@ async function openAutomationDetail(id, source) {
     const definition = staged ? (item.native_preview || {}) : (item.definition || item);
     const visual = `<div class="editor-visual"><h4>WHEN</h4><pre>${esc(JSON.stringify(definition.triggers || definition.trigger || [], null, 2))}</pre><h4>AND IF</h4><pre>${esc(JSON.stringify(definition.conditions || definition.condition || [], null, 2))}</pre><h4>THEN DO</h4><pre>${esc(JSON.stringify(definition.actions || definition.action || [], null, 2))}</pre></div>`;
     modal(`<section class="modal detail-modal" role="dialog" aria-modal="true"><div class="modal-head"><h3>${esc(staged ? (item.display_name || item.source_name) : (item.name || "Automation"))}</h3><button type="button" class="secondary" data-close-dialog>Close</button></div>
-      <div class="detail-fields">${detailField("Source", staged ? "HA STAGED" : "NATIVE")}${detailField("Runtime", staged ? "Not imported" : (item.enabled ? "Enabled" : "Disabled"))}${staged ? detailField("State source", "HA runtime snapshot") : detailField("Mode", item.mode || "single")}${staged ? automationCompatibilityLabel(item) : ""}</div>
+      <div class="detail-fields">${detailField("Source", staged ? (item.lifecycle_status === "HA_IMPORTED" ? "HA IMPORTED" : "HA STAGED") : (item.source === "HA_IMPORTED" ? "HA IMPORTED" : "NATIVE"))}${detailField("Runtime", staged ? (item.lifecycle_status === "HA_IMPORTED" ? (item.enabled ? "Enabled" : "Disabled") : "Not imported") : (item.enabled ? "Enabled" : "Disabled"))}${staged ? detailField("State source", "HA runtime snapshot") : detailField("Mode", item.mode || "single")}${staged ? automationCompatibilityLabel(item) : ""}</div>
       <div class="editor-tabs"><button type="button" class="secondary" data-editor-tab="visual">Visual</button><button type="button" class="secondary" data-editor-tab="yaml">${staged ? "Source YAML" : "HCM YAML"}</button></div>
       <div data-editor-pane="visual">${visual}</div><div data-editor-pane="yaml" hidden><textarea data-automation-yaml rows="22" spellcheck="false">${esc(sourceYaml)}</textarea>${staged ? `<p class="muted">Read-only Home Assistant source. Editing staged YAML is not enabled in this pass.</p>` : `<div class="modal-actions"><button type="button" data-save-native-automation="${esc(id)}">Save HCM YAML</button></div>`}</div>
       ${staged ? `<div class="notice">Native Preview is read-only. Import is gated by compatibility and remains unexecuted.</div>` : ""}</section>`);
