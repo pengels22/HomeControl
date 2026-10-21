@@ -74,6 +74,23 @@ async def test_direct_mapping_endpoint_passes_valid_confidence(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_mapping_list_returns_confirmed_home_assistant_row(monkeypatch):
+    row = {"mapping_id": "m1", "source_system": "home_assistant", "source_kind": "device",
+           "target_kind": "entity_ref", "target_ref": "10", "status": "VALID",
+           "origin": "USER_CONFIRMED", "confidence": "EXACT"}
+
+    class FakeMappings:
+        async def list_mappings(self, **filters):
+            assert filters == {"source_system": "home_assistant", "source_kind": None, "status": None}
+            return [row]
+
+    monkeypatch.setattr(mapping_api, "mappings", FakeMappings())
+    result = await mapping_api.list_mapping_records(source_system="home_assistant")
+    assert result["mappings"] == [row]
+    assert result["mappings"][0]["target_ref"] == "10"
+
+
+@pytest.mark.asyncio
 async def test_integer_target_refs_are_coerced_before_asyncpg_query():
     received = []
 

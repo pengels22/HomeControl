@@ -1182,13 +1182,30 @@ async function renderSettings() {
 
 async function renderHaMappings() {
   setTitle("Migration", "HA Mapping Review");
-  $("content").innerHTML = `<section class="panel"><div class="panel-head"><h3>Home Assistant mapping queue</h3><span class="muted">Review only · no import or service execution</span></div><div class="loading">Loading queue...</div></section>`;
+  $("content").innerHTML = `<section class="panel"><div class="panel-head"><h3>Home Assistant mappings</h3><span class="muted">Review only · no import or service execution</span></div><div class="loading">Loading mappings...</div></section>`;
   try {
-    const data = await api("/import/home-assistant/mapping-queue", {method: "POST", body: JSON.stringify({})});
-    const rows = Array.isArray(data.items) ? data.items : [];
-    $("content").innerHTML = `<section class="panel"><div class="panel-head"><h3>Unresolved identities</h3><span class="muted">${esc(data.total || 0)} items</span></div>${rows.length ? `<div class="detail-list">${rows.map((item) => `<article class="detail-item"><strong>${esc(item.display_name)}</strong><div class="detail-fields">${detailField("Kind", item.source_kind)}${detailField("Health", item.mapping_health)}${detailField("Occurrences", item.occurrence_count)}${detailField("Impact", item.impact?.score)}</div></article>`).join("")}</div>` : `<div class="empty">No queue data is available. Submit an offline analyzer source set to review mappings.</div>`}</section>`;
+    const [mappingResult, queueResult, entityResult] = await Promise.allSettled([
+      api("/mappings?source_system=home_assistant"),
+      api("/import/home-assistant/mapping-queue", {method: "POST", body: JSON.stringify({})}),
+      api("/integrations/entities")
+    ]);
+    if (mappingResult.status !== "fulfilled") throw mappingResult.reason;
+    const mappings = Array.isArray(mappingResult.value?.mappings) ? mappingResult.value.mappings : null;
+    if (!mappings) throw new Error("Invalid mapping response");
+    const entities = entityResult.status === "fulfilled" && Array.isArray(entityResult.value?.entities) ? entityResult.value.entities : [];
+    const entityByRef = new Map(entities.map((item) => [String(item.id), item]));
+    const sourceLabel = (item) => item.source_kind === "device" ? "Home Assistant device (sanitized)" : (item.source_identifier || "Unknown source");
+    const confirmed = mappings.length ? `<div class="detail-list">${mappings.map((item) => {
+      const target = entityByRef.get(String(item.target_ref));
+      const targetName = target?.name || target?.entity_id || "Unknown target";
+      return `<article class="detail-item"><strong>${esc(sourceLabel(item))}</strong><div class="detail-fields">${detailField("Target", targetName)}${detailField("Entity", target?.entity_id || item.target_ref)}${detailField("Origin", item.origin)}${detailField("Health", item.status)}${item.confidence ? detailField("Confidence", item.confidence) : ""}</div></article>`;
+    }).join("")}</div>` : `<div class="empty">No confirmed Home Assistant mappings.</div>`;
+    const queue = queueResult.status === "fulfilled" ? queueResult.value : null;
+    const rows = Array.isArray(queue?.items) ? queue.items : [];
+    const queuePanel = queue ? (rows.length ? `<div class="detail-list">${rows.map((item) => `<article class="detail-item"><strong>${esc(item.display_name)}</strong><div class="detail-fields">${detailField("Kind", item.source_kind)}${detailField("Health", item.mapping_health)}${detailField("Occurrences", item.occurrence_count)}${detailField("Impact", item.impact?.score)}</div></article>`).join("")}</div>` : `<div class="empty">No unresolved mapping identities are loaded. Submit an offline analyzer source set to review the queue.</div>`) : `<div class="notice warn">Unresolved mapping queue unavailable: ${esc(queueResult.reason?.message || "Request failed")}</div>`;
+    $("content").innerHTML = `<section class="panel"><div class="panel-head"><h3>Confirmed mappings</h3><span class="muted">${esc(mappings.length)} persisted records</span></div>${confirmed}</section><section class="panel"><div class="panel-head"><h3>Unresolved identities</h3><span class="muted">${esc(queue?.total || 0)} items</span></div>${queuePanel}</section>`;
   } catch (error) {
-    $("content").innerHTML = `<section class="panel"><div class="notice warn">Mapping queue unavailable: ${esc(error.message)}</div></section>`;
+    $("content").innerHTML = `<section class="panel"><div class="notice warn">Confirmed mappings unavailable: ${esc(error.message)}</div></section>`;
   }
 }
 

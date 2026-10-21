@@ -116,6 +116,16 @@ def test_frontend_formats_structured_errors_and_reads_explicit_safety_status(cli
     assert 'minlength="10"' in js
 
 
+def test_ha_mapping_page_separates_persisted_rows_from_ephemeral_queue(client):
+    js = client.get('/static/app.js').text
+    section = js[js.index('async function renderHaMappings'):js.index('async function renderIntegrations')]
+    assert 'api("/mappings?source_system=home_assistant")' in section
+    assert 'Confirmed mappings' in section
+    assert 'Unresolved identities' in section
+    assert 'Confirmed mappings unavailable' in section
+    assert 'Unresolved mapping queue unavailable' in section
+
+
 def test_dashboard_detail_popups_render_individual_field_rows(client):
     js = client.get("/static/app.js").text
     lockout_item = js[js.index("function lockoutItem"):js.index("async function openFaultsDialog")]
