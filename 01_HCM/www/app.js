@@ -1209,6 +1209,57 @@ async function renderHaMappings() {
   }
 }
 
+function automationBadge(source) {
+  return `<span class="status-pill">${esc(source === "HA_STAGED" ? "HA STAGED" : source === "HA_IMPORTED" ? "HA IMPORTED" : "NATIVE")}</span>`;
+}
+
+async function renderAutomations() {
+  setTitle("Settings", "Automations");
+  $("content").innerHTML = `<section class="panel"><div class="panel-head"><h3>Automations</h3><button type="button" data-add-automation>Add Automation</button></div><div class="loading">Loading automations...</div></section>`;
+  const [nativeResult, stagedResult] = await Promise.allSettled([api("/automations"), api("/import/home-assistant/staged?limit=500")]);
+  const native = nativeResult.status === "fulfilled" && Array.isArray(nativeResult.value?.automations) ? nativeResult.value.automations : [];
+  const staged = stagedResult.status === "fulfilled" && Array.isArray(stagedResult.value?.items) ? stagedResult.value.items : [];
+  const rows = [...native.map((item) => ({...item, source: "NATIVE", runtime: item.enabled ? "Enabled" : "Disabled", state: item.enabled ? "ENABLED" : "DISABLED"})), ...staged.map((item) => ({...item, source: "HA_STAGED", runtime: "Not imported", state: item.source_enabled ? "Source enabled" : "Source disabled"}))];
+  const renderRows = (filter = "", group = "all") => {
+    const needle = filter.trim().toLowerCase();
+    const visible = rows.filter((item) => (!needle || String(item.name || item.source_name || "").toLowerCase().includes(needle)) && (group === "all" || (group === "enabled" && (item.enabled || item.source_enabled)) || (group === "disabled" && item.enabled === false && item.source === "NATIVE") || (group === "staged" && item.source === "HA_STAGED") || (group === "native" && item.source === "NATIVE") || (group === "ready" && ["READY", "READY_WITH_TRANSLATIONS"].includes(item.compatibility_status)) || (group === "blocked" && String(item.compatibility_status || "").startsWith("BLOCKED_"))));
+    return visible.length ? `<div class="detail-list">${visible.map((item) => {
+      const name = item.name || item.source_name || item.source_identifier;
+      const compatibility = item.compatibility_status ? detailField("Migration", item.compatibility_status) : "";
+      const toggle = item.source === "NATIVE" ? `<button class="secondary" data-automation-toggle="${esc(item.automation_id)}" data-enabled="${item.enabled ? "true" : "false"}">${item.enabled ? "Disable" : "Enable"}</button>` : `<button class="secondary" data-staged-toggle="${esc(item.staged_id)}" data-enabled="${item.source_enabled ? "true" : "false"}>Planned: ${item.source_enabled ? "Enabled" : "Disabled"}</button>`;
+      return `<article class="detail-item" data-automation-row><div class="panel-head"><strong>${esc(name)}</strong>${automationBadge(item.source)}</div><div class="detail-fields">${detailField("State", item.state)}${detailField("Runtime", item.runtime)}${compatibility}${item.state_provenance ? detailField("Provenance", item.state_provenance) : ""}</div><div class="modal-actions inline-actions">${toggle}</div></article>`;
+    }).join("")}</div>` : `<div class="empty">No automations match this view.</div>`;
+  };
+  const initial = renderRows();
+  $("content").innerHTML = `<section class="panel"><div class="panel-head"><h3>Automation management</h3><button type="button" data-add-automation>Add Automation</button></div><div class="settings-grid"><label>Search <input data-automation-search placeholder="Search by name or alias"></label><label>Group <select data-automation-group><option value="all">All</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option><option value="staged">Staged</option><option value="native">Native</option><option value="ready">Ready to Import</option><option value="blocked">Blocked</option></select></label></div><p class="muted">${native.length} native · ${staged.length} HA staged · staged records never execute</p><div data-automation-list>${initial}</div></section>`;
+  const refresh = () => { const list = $("content").querySelector("[data-automation-list]"); if (list) list.innerHTML = renderRows($("content").querySelector("[data-automation-search]")?.value || "", $("content").querySelector("[data-automation-group]")?.value || "all"); };
+  $("content").querySelector("[data-automation-search]")?.addEventListener("input", refresh);
+  $("content").querySelector("[data-automation-group]")?.addEventListener("change", refresh);
+}
+
+async function renderHelpers() {
+  setTitle("Settings", "Helpers");
+  const [liveResult, stagedResult] = await Promise.allSettled([api("/helpers"), api("/import/home-assistant/staged?limit=500")]);
+  const live = liveResult.status === "fulfilled" && Array.isArray(liveResult.value?.helpers) ? liveResult.value.helpers : [];
+  const planned = [];
+  if (stagedResult.status === "fulfilled") for (const item of stagedResult.value.items || []) for (const helper of item.native_preview?.native_objects_to_create || item.compatibility_summary?.planned_helpers || []) if (helper.source_identity) planned.push(helper);
+  $("content").innerHTML = `<section class="panel"><div class="panel-head"><h3>Live helpers</h3><span class="muted">${live.length}</span></div>${live.length ? `<div class="detail-list">${live.map((item) => `<article class="detail-item"><strong>${esc(item.name || item.entity_id)}</strong><div class="detail-fields">${detailField("Type", item.helper_type)}${detailField("State", item.state)}${detailField("Provenance", "NATIVE")}</div></article>`).join("")}</div>` : `<div class="empty">No native helpers have been created yet.</div>`}</section><section class="panel"><div class="panel-head"><h3>Planned migration helpers</h3><span class="muted">PLANNED · not live</span></div>${planned.length ? `<div class="detail-list">${planned.map((item) => `<article class="detail-item"><strong>${esc(item.source_identity)}</strong><div class="detail-fields">${detailField("Type", item.helper_type)}${detailField("Status", "PLANNED")}</div></article>`).join("")}</div>` : `<div class="empty">No planned helpers in the staged workspace.</div>`}</section>`;
+}
+
+async function renderDevicesServices() {
+  setTitle("Settings", "Devices & Services");
+  const [integrationsResult, devicesResult, entitiesResult] = await Promise.allSettled([api("/integrations"), api("/integrations/devices"), api("/integrations/entities")]);
+  const integrations = integrationsResult.status === "fulfilled" ? integrationsResult.value.integrations || [] : [];
+  const devices = devicesResult.status === "fulfilled" ? devicesResult.value.devices || [] : [];
+  const entities = entitiesResult.status === "fulfilled" ? entitiesResult.value.entities || [] : [];
+  $("content").innerHTML = `<section class="panel"><div class="panel-head"><h3>Devices &amp; Services</h3></div><div class="modal-actions inline-actions"><a class="button" href="/settings">Integrations</a><a class="button" href="/devices">Devices</a><a class="button" href="/ha-mappings">HA Mappings</a></div><div class="detail-fields">${detailField("Integrations", integrations.length)}${detailField("Devices", devices.length)}${detailField("Entities", entities.length)}</div></section>`;
+}
+
+async function openAutomationEditor() {
+  const definition = {name: "New Automation", description: "", enabled: true, mode: "single", max_runs: 10, triggers: [{type: "conversation", phrases: ["new automation"]}], conditions: null, actions: [{type: "stop"}]};
+  modal(`<section class="modal detail-modal" role="dialog" aria-modal="true"><div class="modal-head"><h3>Add Automation</h3><button type="button" class="secondary" data-close-dialog>Cancel</button></div><label>Name <input data-new-automation-name value="New Automation"></label><label>HCM YAML (JSON-compatible) <textarea data-new-automation-yaml rows="14">${esc(JSON.stringify(definition, null, 2))}</textarea></label><p class="muted">Staged HA YAML remains separate. This editor creates a native HCM Automation and defaults to enabled.</p><div class="modal-actions"><button type="button" data-save-new-automation>Save</button></div></section>`);
+}
+
 async function renderIntegrations() {
   const panel=$("integration-settings");
   try {
@@ -1614,6 +1665,9 @@ async function renderRoute() {
     const parts = routeParts();
     if (parts[0] === "devices" && parts[1]) return await renderDeviceDetail(decodeURIComponent(parts.slice(1).join("/")));
     if (parts[0] === "devices") return await renderDevices();
+    if (parts[0] === "devices-services") return await renderDevicesServices();
+    if (parts[0] === "automations") return await renderAutomations();
+    if (parts[0] === "helpers") return await renderHelpers();
     if (parts[0] === "service") return go("/dashboard");
     if (parts[0] === "settings") return await renderSettings();
     if (parts[0] === "ha-mappings") return await renderHaMappings();
@@ -1656,6 +1710,28 @@ document.addEventListener("click", async (event) => {
   if (addUser) {
     openAddUserDialog();
     return;
+  }
+  const addAutomation = event.target.closest("[data-add-automation]");
+  if (addAutomation) { await openAutomationEditor(); return; }
+  const automationToggle = event.target.closest("[data-automation-toggle]");
+  if (automationToggle) {
+    const action = automationToggle.dataset.enabled === "true" ? "disable" : "enable";
+    await api(`/automations/${encodeURIComponent(automationToggle.dataset.automationToggle)}/${action}`, {method: "POST"});
+    await renderAutomations(); return;
+  }
+  const stagedToggle = event.target.closest("[data-staged-toggle]");
+  if (stagedToggle) {
+    await api(`/import/home-assistant/staged/${encodeURIComponent(stagedToggle.dataset.stagedToggle)}`, {method: "PATCH", body: JSON.stringify({source_enabled: stagedToggle.dataset.enabled !== "true"})});
+    await renderAutomations(); return;
+  }
+  const saveNewAutomation = event.target.closest("[data-save-new-automation]");
+  if (saveNewAutomation) {
+    const yaml = document.querySelector("[data-new-automation-yaml]")?.value || "";
+    let definition;
+    try { definition = JSON.parse(yaml); } catch { setError("HCM YAML must be valid JSON-compatible YAML in this editor"); return; }
+    definition.name = document.querySelector("[data-new-automation-name]")?.value || definition.name;
+    await api("/automations", {method: "POST", body: JSON.stringify(definition)});
+    closeDialog(); await renderAutomations(); return;
   }
   const addIntegration = event.target.closest("[data-add-integration]");
   if (addIntegration) { await showIntegrationChooser(); return; }

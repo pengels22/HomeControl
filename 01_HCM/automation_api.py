@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from .auth import require_user
 from .automation import AutomationValidationError
 from .integrations.runtime import runtime as integrations
+import yaml
 
 router=APIRouter(prefix='/api/v1/automations',dependencies=[Depends(require_user)])
 
@@ -21,7 +22,7 @@ async def list_automations(user=Depends(_user)):
 @router.post('')
 async def create_automation(body:dict,user=Depends(_user)):
     _role(user,True)
-    try: return await _engine().create_automation(body)
+    try: return await _engine().create_automation(_definition(body))
     except (AutomationValidationError,ValueError) as exc: raise HTTPException(400,str(exc))
 
 @router.get('/{automation_id}')
@@ -32,9 +33,17 @@ async def get_automation(automation_id:str,user=Depends(_user)):
 @router.put('/{automation_id}')
 async def update_automation(automation_id:str,body:dict,user=Depends(_user)):
     _role(user,True)
-    try: return await _engine().update_automation(automation_id,body)
+    try: return await _engine().update_automation(automation_id,_definition(body))
     except LookupError as exc: raise HTTPException(404,str(exc))
     except (AutomationValidationError,ValueError) as exc: raise HTTPException(400,str(exc))
+
+
+def _definition(body: dict) -> dict:
+    if not isinstance(body, dict): raise ValueError("Automation definition must be an object")
+    if "yaml" not in body: return body
+    parsed = yaml.safe_load(body["yaml"])
+    if not isinstance(parsed, dict): raise ValueError("HCM YAML must contain an automation object")
+    return parsed
 
 @router.post('/{automation_id}/enable')
 async def enable(automation_id:str,user=Depends(_user)):

@@ -144,6 +144,8 @@ from .primitives_api import router as primitives_router
 app.include_router(primitives_router)
 from .ha_import_api import router as ha_import_router
 app.include_router(ha_import_router)
+from .ha_staging_api import router as ha_staging_router
+app.include_router(ha_staging_router)
 from .mapping_api import router as mapping_router
 app.include_router(mapping_router)
 from .zone_api import router as zone_router
