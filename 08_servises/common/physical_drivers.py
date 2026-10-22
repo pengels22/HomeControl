@@ -220,6 +220,44 @@ class MCP23017RelayDriver:
         return {"driver": "MCP23017", "address": f"0x{self.address:02X}", "initialized": self.initialized, "shadow": self.shadow}
 
 
+class MCP23017InputDriver:
+    """MCP23017 input reader with pull-ups for RCM front-panel switches."""
+
+    IODIRA = 0x00
+    IODIRB = 0x01
+    GPPUA = 0x0C
+    GPPUB = 0x0D
+    GPIOA = 0x12
+    GPIOB = 0x13
+
+    def __init__(self, bus: LockedI2C, mcp1_address: int = 0x26, mcp2_address: int = 0x27):
+        self.bus = bus
+        self.addresses = (int(mcp1_address), int(mcp2_address))
+        self.initialized = False
+
+    def initialize(self) -> dict[str, Any]:
+        for address in self.addresses:
+            self.bus.write(address, self.IODIRA, 0xFF)
+            self.bus.write(address, self.IODIRB, 0xFF)
+            self.bus.write(address, self.GPPUA, 0xFF)
+            self.bus.write(address, self.GPPUB, 0xFF)
+        self.initialized = True
+        return {"ok": True, "addresses": [f"0x{x:02X}" for x in self.addresses], "mode": "inputs_pullup"}
+
+    def read_ports(self) -> dict[str, int]:
+        if not self.initialized:
+            raise HardwareTransportError("MCP23017 input driver is not initialized")
+        mcp1, mcp2 = self.addresses
+        return {
+            "mcp1_gpa": self.bus.read(mcp1, self.GPIOA),
+            "mcp1_gpb": self.bus.read(mcp1, self.GPIOB),
+            "mcp2_gpa": self.bus.read(mcp2, self.GPIOA),
+        }
+
+    def diagnostics(self) -> dict[str, Any]:
+        return {"driver": "MCP23017_INPUT", "addresses": [f"0x{x:02X}" for x in self.addresses], "initialized": self.initialized}
+
+
 class PCA9685Driver:
     MODE1 = 0x00
     PRESCALE = 0xFE
@@ -364,6 +402,7 @@ def build_lab1_mock_drivers(profile: dict[str, Any] | None = None) -> dict[str, 
     return {
         "i2c_transport": transport,
         "rcm_relays": XL9535RelayDriver(bus),
+        "rcm_inputs": MCP23017InputDriver(bus, 0x26, 0x27),
         "lcm_relays": MCP23017RelayDriver(bus, mcp_address),
         "lcm_pwm": PCA9685Driver(bus, pwm_address, int(i2c.get('pca9685', {}).get('frequency_hz', 1000))),
         "shelly_1": MockShellyTransport(),

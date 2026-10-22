@@ -53,6 +53,22 @@ def test_mcp23017_uses_port_b_and_does_not_touch_port_a():
     assert all(op['register'] not in {0x00, 0x14} for op in writes)
 
 
+def test_rcm_input_driver_configures_pullups_and_reads_front_panel_ports():
+    transport = drivers.MockI2CTransport(strict_registers=True, device_registers={
+        0x26: {0x00, 0x01, 0x0C, 0x0D, 0x12, 0x13},
+        0x27: {0x00, 0x01, 0x0C, 0x0D, 0x12, 0x13},
+    })
+    driver = drivers.MCP23017InputDriver(drivers.LockedI2C(transport))
+    driver.initialize()
+    transport.registers[(0x26, 0x12)] = 0xFE
+    transport.registers[(0x26, 0x13)] = 0x7F
+    transport.registers[(0x27, 0x12)] = 0xFD
+    assert driver.read_ports() == {'mcp1_gpa': 0xFE, 'mcp1_gpb': 0x7F, 'mcp2_gpa': 0xFD}
+    writes = [op for op in transport.operations if op['op'] == 'write']
+    assert len(writes) == 8
+    assert all(op['value'] == 0xFF for op in writes)
+
+
 def test_pca9685_programs_sleep_wake_and_uses_on_zero_off_raw():
     transport = drivers.MockI2CTransport(strict_registers=True, device_registers={
         0x40: set(range(0x00, 0x10)) | {0xFE},
@@ -88,6 +104,7 @@ def test_shelly_mock_and_debounce_are_deterministic():
 def test_lab1_bundle_contains_production_classes_and_only_mock_transports():
     bundle = drivers.build_lab1_mock_drivers()
     assert isinstance(bundle['rcm_relays'], drivers.XL9535RelayDriver)
+    assert isinstance(bundle['rcm_inputs'], drivers.MCP23017InputDriver)
     assert isinstance(bundle['lcm_relays'], drivers.MCP23017RelayDriver)
     assert isinstance(bundle['lcm_pwm'], drivers.PCA9685Driver)
     assert isinstance(bundle['i2c_transport'], drivers.MockI2CTransport)

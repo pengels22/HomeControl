@@ -50,6 +50,205 @@ MCP2_ASSIGNMENTS = {
     "fault_led": {"port": "A", "pin": 7},
 }
 
+SWITCH_DEBOUNCE_MS = 250
+BANK_TIMEOUT_MS = 5000
+
+
+class OverrideState:
+    WAIT_FOR_HIGH = "WAIT_FOR_HIGH"
+    ARMED = "ARMED"
+    WAIT_FOR_RELEASE = "WAIT_FOR_RELEASE"
+
+
+class RCMBankController:
+    """Debounced, mutually-exclusive RCM bank and front-panel override logic.
+
+    Inputs passed to ``sample`` are asserted masks (bit 1 means the physical
+    active-low contact is closed). ``update_from_raw`` converts MCP GPIO input
+    bytes into those masks. Relay state is never changed by bank selection or
+    timeout; only a qualified override calls the supplied dispatcher.
+    """
+
+    def __init__(self, dispatch, *, debounce_ms: int = SWITCH_DEBOUNCE_MS, timeout_ms: int = BANK_TIMEOUT_MS):
+        self.dispatch = dispatch
+        self.debounce_ms = int(debounce_ms)
+        self.timeout_ms = int(timeout_ms)
+        self.active_bank = 0
+        self.last_bank_activity_ms = 0
+        self.selection_generation = 0
+        self.selector_conflict = False
+        self._selector_raw = [False] * 4
+        self._selector_stable = [False] * 4
+        self._selector_changed_at = [0] * 4
+        self._selector_initialized = False
+        self._startup_release_required = False
+        self._override_on_raw = [False] * 8
+        self._override_off_raw = [False] * 8
+        self._override_on_stable = [False] * 8
+        self._override_off_stable = [False] * 8
+        self._override_on_changed_at = [0] * 8
+        self._override_off_changed_at = [0] * 8
+        self._override_initialized = False
+        self._high_since = [None] * 8
+        self.override_states = [OverrideState.WAIT_FOR_HIGH] * 8
+
+    @staticmethod
+    def _elapsed(now: int, then: int) -> int:
+        return (int(now) - int(then)) & 0xFFFFFFFF
+
+    @staticmethod
+    def _active_bank_from_stable(stable: list[bool]) -> int | None:
+        selected = [index + 1 for index, value in enumerate(stable) if value]
+        return selected[0] if len(selected) == 1 else None
+
+    def _update_debounce(self, raw: list[bool], stable: list[bool], changed_at: list[int], now: int) -> bool:
+        changed = False
+        for index, value in enumerate(raw):
+            if value != stable[index] and self._elapsed(now, changed_at[index]) >= self.debounce_ms:
+                stable[index] = value
+                changed = True
+        return changed
+
+    def _start_selection_interlock(self) -> None:
+        self.selection_generation += 1
+        self.override_states = [OverrideState.WAIT_FOR_HIGH] * 8
+        self._high_since = [None] * 8
+
+    def _update_raw(self, raw: list[bool], previous: list[bool], changed_at: list[int], now: int) -> None:
+        for index, value in enumerate(raw):
+            if value != previous[index]:
+                previous[index] = value
+                changed_at[index] = int(now) & 0xFFFFFFFF
+
+    def _qualify_startup(self, now: int) -> None:
+        if not self._startup_release_required:
+            return
+        if any(self._selector_stable) or any(self._override_on_stable) or any(self._override_off_stable):
+            return
+        if all(self._elapsed(now, value) >= self.debounce_ms for value in self._selector_changed_at):
+            self._startup_release_required = False
+
+    def _process_selection(self, now: int, rising_edge: bool) -> bool:
+        if self._startup_release_required:
+            return False
+        selected_count = sum(self._selector_stable)
+        if selected_count > 1:
+            if self.active_bank or not self.selector_conflict:
+                self.active_bank = 0
+                self._start_selection_interlock()
+            self.selector_conflict = True
+            return True
+        if selected_count == 0:
+            self.selector_conflict = False
+            return False
+        if self.selector_conflict:
+            return False
+        bank = self._active_bank_from_stable(self._selector_stable)
+        if bank is None:
+            return False
+        # A selector's stable inactive->asserted edge is the only selection event.
+        if not rising_edge:
+            return False
+        self.active_bank = bank
+        self.last_bank_activity_ms = int(now) & 0xFFFFFFFF
+        self._start_selection_interlock()
+        return True
+
+    def _process_overrides(self, now: int) -> list[dict[str, Any]]:
+        if not self.active_bank or self.selector_conflict or self._startup_release_required:
+            return []
+        operations = []
+        for index in range(8):
+            on = self._override_on_stable[index]
+            off = self._override_off_stable[index]
+            high = not on and not off
+            if self.override_states[index] == OverrideState.WAIT_FOR_HIGH:
+                if high:
+                    if self._high_since[index] is None:
+                        self._high_since[index] = int(now) & 0xFFFFFFFF
+                    elif self._elapsed(now, self._high_since[index]) >= self.debounce_ms:
+                        self.override_states[index] = OverrideState.ARMED
+                else:
+                    self._high_since[index] = None
+                continue
+            if self.override_states[index] == OverrideState.WAIT_FOR_RELEASE:
+                if high:
+                    if self._high_since[index] is None:
+                        self._high_since[index] = int(now) & 0xFFFFFFFF
+                    elif self._elapsed(now, self._high_since[index]) >= self.debounce_ms:
+                        self.override_states[index] = OverrideState.ARMED
+                else:
+                    self._high_since[index] = None
+                continue
+            if on == off:
+                continue
+            value = on
+            channel = (self.active_bank - 1) * 8 + index
+            self.dispatch(channel, value)
+            self.last_bank_activity_ms = int(now) & 0xFFFFFFFF
+            self.override_states[index] = OverrideState.WAIT_FOR_RELEASE
+            self._high_since[index] = None
+            operations.append({"override": index + 1, "channel_index": channel, "value": value, "bank": self.active_bank, "generation": self.selection_generation})
+        return operations
+
+    def sample(self, selector_asserted: int, override_on_asserted: int, override_off_asserted: int, now_ms: int) -> dict[str, Any]:
+        now = int(now_ms) & 0xFFFFFFFF
+        selectors = [bool(selector_asserted & (1 << index)) for index in range(4)]
+        on = [bool(override_on_asserted & (1 << index)) for index in range(8)]
+        off = [bool(override_off_asserted & (1 << index)) for index in range(8)]
+        if not self._selector_initialized:
+            self._selector_raw = selectors[:]
+            self._selector_stable = [False] * 4
+            self._selector_changed_at = [now] * 4
+            self._selector_initialized = True
+            self._startup_release_required = any(selectors)
+        if not self._override_initialized:
+            self._override_on_raw = on[:]
+            self._override_off_raw = off[:]
+            self._override_on_stable = [False] * 8
+            self._override_off_stable = [False] * 8
+            self._override_on_changed_at = [now] * 8
+            self._override_off_changed_at = [now] * 8
+            self._override_initialized = True
+        self._update_raw(selectors, self._selector_raw, self._selector_changed_at, now)
+        self._update_raw(on, self._override_on_raw, self._override_on_changed_at, now)
+        self._update_raw(off, self._override_off_raw, self._override_off_changed_at, now)
+        previous_selector_stable = self._selector_stable[:]
+        selector_changed = self._update_debounce(self._selector_raw, self._selector_stable, self._selector_changed_at, now)
+        selector_rising = any(not previous_selector_stable[index] and self._selector_stable[index] for index in range(4))
+        self._update_debounce(self._override_on_raw, self._override_on_stable, self._override_on_changed_at, now)
+        self._update_debounce(self._override_off_raw, self._override_off_stable, self._override_off_changed_at, now)
+        self._qualify_startup(now)
+        bank_changed = self._process_selection(now, selector_rising) if selector_changed or self.selector_conflict else False
+        if self.active_bank and self._elapsed(now, self.last_bank_activity_ms) >= self.timeout_ms:
+            self.active_bank = 0
+            self.selector_conflict = False
+            self._start_selection_interlock()
+            bank_changed = True
+        operations = [] if bank_changed else self._process_overrides(now)
+        return self.status(now, operations=operations)
+
+    def update_from_raw(self, mcp2_gpa: int, mcp1_gpa: int, mcp1_gpb: int, now_ms: int) -> dict[str, Any]:
+        # All contacts are active LOW with pull-ups, so a zero GPIO bit is an
+        # asserted logical input for the state machine.
+        return self.sample((~int(mcp2_gpa)) & 0x0F, (~int(mcp1_gpa)) & 0xFF, (~int(mcp1_gpb)) & 0xFF, now_ms)
+
+    def status(self, now_ms: int, *, operations: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        remaining = 0
+        if self.active_bank:
+            elapsed = self._elapsed(now_ms, self.last_bank_activity_ms)
+            remaining = max(0, self.timeout_ms - elapsed)
+        return {
+            "active_bank": self.active_bank,
+            "last_bank_activity_ms": self.last_bank_activity_ms,
+            "timeout_ms": self.timeout_ms,
+            "timeout_remaining_ms": remaining,
+            "selector_conflict": self.selector_conflict,
+            "selection_generation": self.selection_generation,
+            "override_states": list(self.override_states),
+            "operations": list(operations or []),
+        }
+
 
 def utc_ts() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

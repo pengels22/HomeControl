@@ -20,6 +20,7 @@ class HardwareDriverBundle:
     mode: str
     transport_type: str
     rcm_relays: Any | None = None
+    rcm_inputs: Any | None = None
     lcm_relays: Any | None = None
     lcm_pwm: Any | None = None
     shelly_1: Any | None = None
@@ -41,7 +42,7 @@ class HardwareDriverBundle:
             "transport_type": self.transport_type,
             "diagnostics": dict(self.diagnostics),
         }
-        for name in ("rcm_relays", "lcm_relays", "lcm_pwm", "shelly_1", "shelly_2"):
+        for name in ("rcm_relays", "rcm_inputs", "lcm_relays", "lcm_pwm", "shelly_1", "shelly_2"):
             driver = getattr(self, name)
             if driver is not None and hasattr(driver, "diagnostics"):
                 result[name] = driver.diagnostics()
@@ -54,7 +55,7 @@ class HardwareDriverBundle:
         return getattr(self, key, default)
 
     def items(self):
-        return ((name, getattr(self, name)) for name in ("rcm_relays", "lcm_relays", "lcm_pwm", "shelly_1", "shelly_2"))
+        return ((name, getattr(self, name)) for name in ("rcm_relays", "rcm_inputs", "lcm_relays", "lcm_pwm", "shelly_1", "shelly_2"))
 
 
 def _profile_data(profile: dict[str, Any] | None) -> dict[str, Any]:
@@ -102,6 +103,7 @@ def build_hardware_bundle(
             mode="mock",
             transport_type="mock",
             rcm_relays=bundle.get("rcm_relays"),
+            rcm_inputs=bundle.get("rcm_inputs"),
             lcm_relays=bundle.get("lcm_relays"),
             lcm_pwm=bundle.get("lcm_pwm"),
             shelly_1=bundle.get("shelly_1"),
@@ -120,6 +122,11 @@ def build_hardware_bundle(
         addresses = tuple(
             _address(profile, name, default)
             for name, default in (("relay_card_1", 0x20), ("relay_card_2", 0x21))
+        )
+        bundle.rcm_inputs = drivers.MCP23017InputDriver(
+            bus,
+            mcp1_address=_address(profile, "mcp1", 0x26),
+            mcp2_address=_address(profile, "mcp2", 0x27),
         )
         bundle.rcm_relays = drivers.XL9535RelayDriver(bus, addresses=addresses)
     else:

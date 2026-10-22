@@ -38,6 +38,7 @@
 | Module mTLS | Implemented / deployment-unverified | Supported but not enabled in dev defaults |
 | RCM software agent | Implemented / tested | Full 32-channel model |
 | RCM XL9535 driver | Implemented / hardware-unverified | Real Linux I2C path exists |
+| RCM bank selection and local override latch | Implemented / tested / hardware-unverified | MCP1/MCP2 active-low inputs, 250 ms debounce, 5 s timeout, conflict/startup interlocks; physical behavior still requires HIL |
 | RCM safe-off | Implemented / tested | Safety and all_off command real driver OFF |
 | LCM relay driver | Implemented / hardware-unverified | MCP23017 path exists |
 | LCM 0-10 V driver | Implemented / hardware-unverified | PCA9685 path exists |

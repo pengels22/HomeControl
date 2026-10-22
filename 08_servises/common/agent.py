@@ -176,6 +176,9 @@ class ModuleAgent:
     async def heartbeat_pulse(self) -> None:
         await self.heartbeat_control('pulse', self.heartbeat_watchdog_name)
 
+    async def poll_local_inputs(self) -> None:
+        """Hook for modules with a bounded local input polling loop."""
+
     async def apply_command(self, payload: dict[str, Any]) -> dict[str, Any]:
         return {'ok': False, 'error': 'command_not_implemented'}
 
@@ -759,8 +762,16 @@ $('login-form').addEventListener('submit',login);$('refresh').addEventListener('
 
     async def run(self) -> None:
         web_task = None
+        input_task = None
         if self.web.get('enabled', False):
             web_task = asyncio.create_task(self._run_web())
+        poll_interval = getattr(self, 'local_input_poll_interval_s', None)
+        if poll_interval:
+            async def local_input_loop():
+                while self.running:
+                    await self.poll_local_inputs()
+                    await asyncio.sleep(float(poll_interval))
+            input_task = asyncio.create_task(local_input_loop())
         delay = self.reconnect_initial_s
         try:
             while self.running:
@@ -774,3 +785,5 @@ $('login-form').addEventListener('submit',login);$('refresh').addEventListener('
         finally:
             if web_task:
                 web_task.cancel()
+            if input_task:
+                input_task.cancel()

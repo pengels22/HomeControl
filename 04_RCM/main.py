@@ -1,5 +1,5 @@
 from __future__ import annotations
-import asyncio, logging, sys
+import asyncio, logging, sys, time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from importlib import import_module
@@ -21,6 +21,7 @@ state_confidence = import_module('08_servises.common.state_confidence')
 class RCMAgent(common_agent.ModuleAgent):
     def __init__(self, config):
         super().__init__('RCM', config)
+        self.local_input_poll_interval_s = 0.01
         self.global_config = common_global_config.load_global_config('RCM')
         self.hardware_profile = config.get('hardware_profile', {})
         if not isinstance(self.hardware_profile, dict) or not self.hardware_profile:
@@ -52,7 +53,11 @@ class RCMAgent(common_agent.ModuleAgent):
             self.driver_bundle = None
         if self.driver_bundle:
             self.driver_bundle['rcm_relays'].initialize()
+            if self.driver_bundle.get('rcm_inputs'):
+                self.driver_bundle['rcm_inputs'].initialize()
         self.relays = common_hw.DigitalBank(names)
+        self._pending_override_operations: list[tuple[int, bool]] = []
+        self.bank_controller = common_infra.RCMBankController(self._queue_override)
         self.relay_hardware_map = {ch: common_infra.RCM_RELAY_MAP[ch] for ch in names}
         if profile_map:
             self.relay_hardware_map = {
@@ -117,6 +122,7 @@ class RCMAgent(common_agent.ModuleAgent):
     async def collect_state(self):
         return {
             'relays': self.relays.snapshot(),
+            'bank_selector': self.bank_controller.status(int(time.monotonic() * 1000) & 0xFFFFFFFF),
             'relay_hardware_map': {
                 channel: {'component': component, 'index': index}
                 for channel, (component, index) in self.relay_hardware_map.items()
@@ -143,6 +149,34 @@ class RCMAgent(common_agent.ModuleAgent):
             },
             'hardware_driver': self.driver_bundle['rcm_relays'].diagnostics() if self.driver_bundle else {'mode': 'not_instantiated'},
         }
+
+    def _queue_override(self, channel_index: int, value: bool) -> None:
+        self._pending_override_operations.append((int(channel_index), bool(value)))
+
+    async def poll_local_inputs(self) -> None:
+        if not self.driver_bundle or not self.driver_bundle.get('rcm_inputs'):
+            return
+        try:
+            ports = self.driver_bundle['rcm_inputs'].read_ports()
+            status = self.bank_controller.update_from_raw(
+                ports['mcp2_gpa'], ports['mcp1_gpa'], ports['mcp1_gpb'],
+                int(time.monotonic() * 1000) & 0xFFFFFFFF,
+            )
+            pending = list(self._pending_override_operations)
+            self._pending_override_operations.clear()
+            for channel_index, value in pending:
+                channel = common_infra.RCM_RELAY_CHANNELS[channel_index]
+                await self.apply_command({
+                    'op': 'set_relay',
+                    'channel': channel,
+                    'value': value,
+                    'source': 'local_override',
+                    'physical_write_requested': self.io_mode == 'real',
+                })
+            self.state['bank_selector'] = status
+        except Exception as exc:
+            logging.getLogger(__name__).exception('RCM front-panel input poll failed')
+            self.faults['front_panel_inputs'] = {'error': str(exc)}
 
     async def apply_command(self, payload):
         if payload.get('op') == 'metadata_hvac_off':
