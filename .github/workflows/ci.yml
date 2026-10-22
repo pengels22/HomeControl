@@ -3,7 +3,15 @@ name: HomeControl CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '06_ACM/**'
+      - '12_tests/test_acm*.py'
+      - '.github/workflows/acm-ci.yml'
   pull_request:
+    paths-ignore:
+      - '06_ACM/**'
+      - '12_tests/test_acm*.py'
+      - '.github/workflows/acm-ci.yml'
 
 jobs:
   checks:

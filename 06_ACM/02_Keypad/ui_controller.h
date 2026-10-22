@@ -24,10 +24,12 @@ class KeypadDisplayBoundary final : public KeypadDisplay {
 
 class KeypadUiController {
  public:
+  using ActionHandler = void (*)(const char* action, const String& pin);
   KeypadUiController(KeypadUiModel& model, KeypadDisplay& display) : model_(model), display_(display) {}
   void begin() { display_.begin(); render(); }
   void apply(const AlarmSnapshot& snapshot) { model_.apply(snapshot); render(); }
   void setAcmConnected(bool connected) { model_.setAcmConnected(connected); render(); }
+  void setActionHandler(ActionHandler handler) { action_handler_ = handler; }
   // Hardware drivers call this after converting a touch sample to display pixels.
   // Business logic receives only the semantic action below.
   void handleTouch(uint16_t x, uint16_t y) { touch(actionAt(x, y)); }
@@ -68,14 +70,12 @@ class KeypadUiController {
       if (model_.state() == AlarmState::DISARMED) return TouchAction::ARM_HOME;
       return TouchAction::DISARM;
     }
-    if (inside(keypad_layout::ACTION_RIGHT)) {
-      if (model_.state() == AlarmState::DISARMED) return TouchAction::ARM_AWAY;
-      return TouchAction::BACK;
-    }
+    if (inside(keypad_layout::ACTION_RIGHT)) return model_.state() == AlarmState::DISARMED ? TouchAction::ARM_AWAY : TouchAction::DISARM;
     return TouchAction::NONE;
   }
-  void submitPin() { model_.takePin(); }
+  void submitPin() { const String pin=model_.takePin(); if(!action_handler_||!pin.length()) return; const char* action=model_.state()==AlarmState::DISARMED?(model_.pendingArmMode()==AlarmState::ARMED_AWAY?"ARM_AWAY":"ARM_HOME"):"DISARM"; action_handler_(action,pin); model_.page(KeypadPage::HOME); }
   void render() { display_.render(model_); }
   KeypadUiModel& model_;
   KeypadDisplay& display_;
+  ActionHandler action_handler_=nullptr;
 };

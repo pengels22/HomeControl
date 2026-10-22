@@ -20,6 +20,7 @@ class KeypadManager {
   bool receiveUpdate(const String& mac, uint8_t channel, bool open, uint32_t now);
   void broadcastAlarmState(const AlarmSnapshot& snapshot);
   void setTimeSync(bool valid, uint32_t unix_seconds);
+  bool takeActionAudit(String& event, String& metadata);
   bool online(uint8_t index) const { return index < ConfigStore::MAX_KEYPADS && runtime_[index].online; }
   uint8_t logicalSlot(uint8_t keypadIndex, uint8_t input) const { return 24 + keypadIndex * 8 + input; }
  private:
@@ -33,6 +34,7 @@ class KeypadManager {
   bool remote_known_[ConfigStore::MAX_KEYPADS][8] = {};
   AlarmState alarm_state_=AlarmState::DISARMED;
   bool time_valid_=false; uint32_t time_unix_=0;
+  String pending_audit_event_, pending_audit_metadata_;
   void setFault(uint8_t keypadIndex, bool fault);
   void connect(uint8_t index, uint32_t now);
   void process(uint8_t index, uint32_t now);
@@ -43,4 +45,5 @@ class KeypadManager {
   static String value(const String& json, const char* key);
   static String normalizeMac(String value);
   void logKeypad(uint8_t index, const char* event);
+  void handleAction(uint8_t index, const String& frame);
 };

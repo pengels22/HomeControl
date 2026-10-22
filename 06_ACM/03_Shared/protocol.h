@@ -23,6 +23,8 @@ constexpr char LOCAL_SIREN_OFF[] = "LOCAL_SIREN_OFF";
 constexpr char TIME_REQUEST[] = "TIME_REQUEST";
 constexpr char TIME_RESPONSE[] = "TIME_RESPONSE";
 constexpr char TIME_SYNC[] = "TIME_SYNC";
+constexpr char KEYPAD_ACTION[] = "KEYPAD_ACTION";
+constexpr char ACTION_RESULT[] = "ACTION_RESULT";
 
 // Incremental parser for the single, bounded, big-endian length-prefixed frame
 // used by both firmware targets. It is deliberately ArduinoJson-free so the

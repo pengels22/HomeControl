@@ -1,0 +1,35 @@
+name: ACM CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '06_ACM/**'
+      - '12_tests/test_acm*.py'
+      - '.github/workflows/acm-ci.yml'
+  pull_request:
+    paths:
+      - '06_ACM/**'
+      - '12_tests/test_acm*.py'
+      - '.github/workflows/acm-ci.yml'
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest pytest-asyncio
+      - name: ACM tests
+        run: python -m pytest 12_tests/test_acm*.py 12_tests/test_protocol.py
+      - name: PlatformIO builds
+        run: |
+          python -m pip install platformio
+          pio run -d 06_ACM
+      - name: Diff check
+        run: git diff --check
