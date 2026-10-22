@@ -1,6 +1,6 @@
 # HomeControl Network, Communications, and Supervision White Paper
 
-**Audited software baseline:** `6fc4179c3a2671fc66c81dc9f69d320ee2420f8f`
+**Audited software baseline:** `544c5c87594d955a2a33e2bac336ae5a536f2463`
 
 ## Purpose
 
@@ -41,6 +41,30 @@ are superseded.
 ## Communication planes
 
 HomeControl intentionally separates several traffic classes.
+
+### ACM supervision and HCM integration
+
+ACM has two distinct integration paths. ACM initiates TCP sessions to keypad
+listeners; keypads send a heartbeat every 30 seconds and become offline at
+approximately 90 seconds, with their eight remote inputs marked FAULT. A
+reconnect validates keypad identity and requires a complete eight-input
+snapshot before clearing FAULT. ACM-to-keypad supervision is separate from
+ACM-to-HCM status/time exchange and from Unified Heartbeat V3/Conflict
+supervision.
+
+ACM sends HCM compact `ACM_STATUS` containing only:
+
+- `device_id`;
+- `hostname`;
+- `sequence`;
+- `state`;
+- `countdown`;
+- `trouble`.
+
+It does not send sensor maps, Areas, credentials, relay topology, or keypad
+topology. Time follows `HCM → ACM → keypad`; ACM has no public Internet NTP
+primary. HCM acknowledgements or HCM heartbeat status do not gate ACM alarm
+authority.
 
 ### HCM user/API plane
 

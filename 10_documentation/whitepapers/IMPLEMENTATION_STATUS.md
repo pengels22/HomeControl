@@ -1,7 +1,7 @@
 # HomeControl Implementation Status
 
-**Audited baseline:** `6fc4179c3a2671fc66c81dc9f69d320ee2420f8f`  
-**Hosted CI:** successful, run `39183220588`
+**Audited baseline:** `544c5c87594d955a2a33e2bac336ae5a536f2463`
+**Hosted ACM CI:** successful on the synchronized baseline
 
 ## Status definitions
 
@@ -54,6 +54,19 @@
 | Conflict Manager | Implemented / deployment-validated in dev scope | Independent supervisor |
 | Generic update trust | Implemented / tested | HMAC + Ed25519 + SHA256 + replay store |
 | Update installers | Partial | Trust envelope stronger than target-specific physical installers |
+| ACM alarm state machine | Implemented / tested | Standalone-first global alarm authority; Home/Away, delays, bypass, FAULT, and Panic paths |
+| ACM local sensors | Implemented / hardware-unverified | 24 inputs, pull-up polarity, stable 250 ms debounce |
+| ACM remote keypad supervision | Implemented / hardware-unverified | Up to 7 keypads, 30 s heartbeat, ~90 s FAULT, identity and snapshot reconnect |
+| ACM credential storage | Implemented / tested | Master/Standard PIN records, PBKDF2-HMAC-SHA256, reprovision path |
+| ACM alarm relays | Implemented / hardware-unverified | Eight active-low outputs with safe boot intent and siren policy |
+| ACM keypad siren/piezo | Implemented / hardware-unverified | 5 V siren reconciliation and nonblocking delay chirps |
+| ACM embedded web administration | Implemented / software-tested | Master-only local HTTP administration, bounded and CSRF-protected |
+| ACM SD logging | Implemented / hardware-unverified | Unsynced and monthly local-time logs with bounded web tail |
+| ACM HCM time synchronization | Implemented / deployment-unverified | HCM supplies time; ACM forwards synchronized time to keypads |
+| ACM HCM compact status integration | Implemented / deployment-unverified | Compact `ACM_STATUS`; HCM is not alarm authority |
+| ACM keypad UI model/controller | Implemented / tested | Shared numeric keypad geometry and semantic action controller |
+| ACM LCD/touch physical renderer | Partial / hardware pending | Concrete renderer remains behind the display boundary until hardware is confirmed |
+| ACM HIL commissioning | Not yet performed | Software baseline is `ACM_V1_READY_FOR_HIL` |
 | Hardware-in-loop tests | Gated / not yet run on field hardware | Explicit opt-in only |
 | GitHub branch protection | Not configured | `main` currently unprotected |
 

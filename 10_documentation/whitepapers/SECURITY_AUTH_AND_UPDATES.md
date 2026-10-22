@@ -1,10 +1,26 @@
 # HomeControl Security, Authentication, and Update White Paper
 
-**Audited software baseline:** `6fc4179c3a2671fc66c81dc9f69d320ee2420f8f`
+**Audited software baseline:** `544c5c87594d955a2a33e2bac336ae5a536f2463`
 
 ## Purpose
 
 This paper describes the implemented security boundaries for HomeControl: user authentication, touchscreen access, module identity, heartbeat authentication, pairing, and software-update trust.
+
+## ACM credential and administration boundary
+
+ACM stores named Master and Standard PIN credentials, up to 16 records, with a
+per-record 16-byte random salt and PBKDF2-HMAC-SHA256. PINs are not stored in
+plaintext. ACM's embedded administration surface is local HTTP on the trusted
+network; it does not claim HTTPS. Administration accepts Master PINs only and
+rejects Standard credentials. Sessions use server-side random tokens, a
+five-minute idle timeout, HttpOnly cookies, SameSite=Strict, CSRF-protected
+POST mutations, login rate limiting, and bounded HTTP requests. Credential
+mutations require current Master reauthentication.
+
+Legacy credential records enter a limited reprovision route that creates a new
+Master credential rather than importing legacy secrets. Public/configuration
+backups exclude PIN values, salts, hashes, session secrets, and other
+credential material. ACM firmware updates are USB-only; ACM has no OTA path.
 
 ## User authentication
 

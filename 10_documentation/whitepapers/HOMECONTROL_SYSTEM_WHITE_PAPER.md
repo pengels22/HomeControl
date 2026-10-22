@@ -1,8 +1,8 @@
 # HomeControl System White Paper
 
-**Status:** Draft authoritative architecture  
-**Audited software baseline:** `6fc4179c3a2671fc66c81dc9f69d320ee2420f8f`  
-**Hosted CI:** HomeControl CI run `39183220588`, successful
+**Status:** Draft authoritative architecture
+**Audited software baseline:** `544c5c87594d955a2a33e2bac336ae5a536f2463`
+**Hosted ACM CI:** successful on the synchronized baseline
 
 ## 1. Purpose
 
@@ -19,6 +19,31 @@ The system is designed around five principles:
 This paper describes the architecture actually represented by the audited repository. It deliberately distinguishes implemented behavior from hardware that remains uncommissioned or planned.
 
 ## 2. Core Components
+
+### ACM — Alarm Control Module
+
+ACM is the standalone-first security alarm controller implemented on ESP32-S3
+hardware. It is the authority for security alarm operation; HCM receives only
+compact global ACM status and time/status integration. ACM provides 24 local
+alarm inputs, up to 7 enrolled PoE keypads with 8 inputs each, and 80 logical
+sensor slots total (`24 + 7×8`). It also provides 8 active-low relay outputs,
+local embedded HTTP administration, and SD event logging.
+
+ACM retains alarm operation when HCM is unavailable. HCM loss does not prevent
+arming, disarming, entry delay, alarm triggering, siren operation, or physical
+keypad Panic. Panic is a physical keypad input only; there is no touchscreen
+Panic action. ACM Areas are organizational/display metadata, not alarm
+partitions. Each local sensor and keypad belongs to exactly one Area, all eight
+inputs inherit the keypad Area, and multiple keypads may share an Area.
+
+The ACM state model is `DISARMED`, `ARMING_DELAY`, `ARMED_HOME`, `ARMED_AWAY`,
+`ENTRY_DELAY`, `TRIGGERED`, and `TROUBLE`. Home arm is immediate with opening
+sensors active and motion ignored. Away arm enters a 30-second arming delay;
+sensors are ignored during that delay, opening starts a 30-second entry delay,
+and motion must remain active for 10 continuous seconds before entry delay.
+An open sensor never blocks arm: it is bypassed until it closes once, then
+becomes active normally. FAULT represents an unavailable sensor/device and is
+distinct from OPEN; it does not itself trigger an alarm.
 
 ### HCM — Home Control Manager
 

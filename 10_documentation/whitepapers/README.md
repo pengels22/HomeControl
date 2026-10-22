@@ -8,11 +8,12 @@ Merged into `main` by the documentation consolidation commit `82818c0`.
 These papers are the retained documentation authority for the current review
 baseline; they do not authorize deployment or physical commissioning.
 
-Code baseline used for the current draft:
+Code baseline used for the current documentation synchronization:
 
 - Repository: `pengels22/HomeControl`
-- Commit: `6fc4179c3a2671fc66c81dc9f69d320ee2420f8f`
-- Hosted CI: HomeControl CI run `39183220588` — success
+- Commit: `544c5c87594d955a2a33e2bac336ae5a536f2463`
+- Hosted ACM CI: SUCCESS on the synchronized baseline
+- ACM audit: [ACM V1 reconciliation](../../06_ACM/ACM_V1_RECONCILIATION.md) — `ACM_V1_READY_FOR_HIL`
 
 These papers distinguish among:
 
@@ -44,6 +45,9 @@ These papers distinguish among:
 - [Commissioning and Validation Manual](COMMISSIONING_AND_VALIDATION.md)
 - [Glossary and Acronyms](GLOSSARY.md)
 
+The ACM V1 software baseline is ready for hardware-in-the-loop validation. This
+does not commission ACM or any other HomeControl module.
+
 ## Documentation policy
 
 The white papers describe what the current repository and approved architecture actually support. Historical documents under `10_documentation/` remain useful design records, but where they conflict with these white papers or the current audited source, they are historical rather than authoritative.
@@ -52,6 +56,7 @@ No hardware is considered physically commissioned solely because software tests 
 
 ## Current documentation-freeze baseline
 
-The software baseline is considered ready for documentation freeze and controlled RCM bench testing. This does not mean the installed physical system is commissioned.
+The software baseline is considered ready for documentation freeze and ACM HIL
+validation. This does not mean ACM or the installed physical system is commissioned.
 
 Known physical gaps remain documented in the implementation-status and commissioning papers.

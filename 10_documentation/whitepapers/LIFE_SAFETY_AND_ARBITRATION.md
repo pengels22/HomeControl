@@ -1,6 +1,6 @@
 # HomeControl Life-Safety and Safety Arbitration White Paper
 
-**Audited software baseline:** `6fc4179c3a2671fc66c81dc9f69d320ee2420f8f`
+**Audited software baseline:** `544c5c87594d955a2a33e2bac336ae5a536f2463`
 
 ## Purpose
 

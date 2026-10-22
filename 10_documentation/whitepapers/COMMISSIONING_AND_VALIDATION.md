@@ -1,12 +1,41 @@
 # HomeControl Commissioning and Validation Manual
 
-**Audited software baseline:** `6fc4179c3a2671fc66c81dc9f69d320ee2420f8f`
+**Audited software baseline:** `544c5c87594d955a2a33e2bac336ae5a536f2463`
 
 ## Purpose
 
 This manual defines the intended progression from approved design to physically commissioned HomeControl hardware.
 
 Automated software-test success is not physical commissioning.
+
+## ACM V1 HIL and commissioning sequence
+
+The ACM software baseline is `ACM_V1_READY_FOR_HIL`; ACM is not physically
+commissioned. Validate in this order:
+
+1. boot/output safety;
+2. Ethernet/W5500;
+3. ACM web UI;
+4. HCM connection and time sync;
+5. SD/logging;
+6. I2C/MCP;
+7. 24 local inputs;
+8. eight relay outputs;
+9. one keypad enrollment;
+10. keypad eight inputs;
+11. keypad Panic;
+12. piezo;
+13. keypad 5 V siren;
+14. heartbeat/offline FAULT;
+15. reconnect snapshot;
+16. complete Home/Away alarm scenarios;
+17. failure testing.
+
+Required scenarios include Home arm, Away arm, open-at-arm, entry delay,
+motion active for 9 seconds then close, motion active for 10 seconds, disarm
+during delay, triggered disarm, Panic, keypad disconnect, HCM disconnect, SD
+failure, stale time, and power cycle. Green software CI is evidence of software
+readiness only and is not physical commissioning.
 
 ## Lifecycle states
 

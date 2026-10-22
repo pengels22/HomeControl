@@ -13,6 +13,7 @@ This glossary defines terms as they are used in the current HomeControl architec
 | **RMC** | Room Monitoring Cluster | CAN-connected room sensor microcontroller node. |
 | **PNL** | Panel Module | Wall-panel logical agent and configuration role. |
 | **Conflict Manager** | Independent supervisory processor | Maintains network-wide heartbeat registry and detects communication conflicts/failures independently of HCM. |
+| **ACM** | **Alarm Control Module** | Standalone-first ESP32-S3 security alarm authority. |
 
 ## Hardware and electrical terms
 
@@ -81,6 +82,15 @@ This glossary defines terms as they are used in the current HomeControl architec
 | **Life Safety** | Fire/emergency control class | Overrides normal automation but remains below maintenance lockout for energization. |
 | **Local Override** | Local/manual command class | Higher priority than normal user/rule commands. |
 | **Safe Off** | Deenergized safety state | May be commanded even when normal energization authorization is unavailable. |
+| **Area** | ACM organizational/display grouping | An Area is not an alarm partition; ACM alarm state is global. |
+| **FAULT** | Sensor/device unavailable state | Distinct from OPEN and does not itself trigger an alarm. |
+| **ARMING_DELAY** | Away exit-delay state | Thirty-second state before `ARMED_AWAY`. |
+| **ENTRY_DELAY** | Alarm entry-delay state | Thirty-second state before `TRIGGERED`. |
+| **ARMED_HOME** | Home alarm state | Opening sensors active; motion ignored. |
+| **ARMED_AWAY** | Away alarm state | Opening sensors active; qualified motion can start entry delay. |
+| **TRIGGERED** | Alarm state | ACM alarm condition that drives configured sirens. |
+| **Master PIN** | ACM administrator credential | Master-only ACM web and credential administration credential; independent of normal HCM users/touchscreen authentication. |
+| **Standard PIN** | ACM non-administrator credential | Credential for ordinary ACM alarm actions; cannot administer ACM web credentials. |
 | **State Confidence** | Strength of state evidence | Indicates what kind of evidence supports the reported state. |
 | **SIMULATED** | State-confidence label | State exists only in simulation/in-memory path. |
 | **COMMANDED** | State-confidence label | Software command/state is known, but hardware output was not independently read. |

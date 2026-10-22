@@ -1,10 +1,29 @@
 # HomeControl Hardware Modules and I/O White Paper
 
-**Audited software baseline:** `6fc4179c3a2671fc66c81dc9f69d320ee2420f8f`
+**Audited software baseline:** `544c5c87594d955a2a33e2bac336ae5a536f2463`
 
 ## Purpose
 
 This paper describes the current HomeControl module hardware contracts and the software paths that operate them. It distinguishes physical-driver support from physical commissioning.
+
+## ACM — Alarm Control Module
+
+ACM uses the ESP32-S3 target and the following software pin contract:
+
+| Function | Pins/addresses |
+|---|---|
+| W5500 | CS 10, MOSI 11, MISO 12, SCK 13, RESET 9, INT 14 |
+| SD | CS 4, MISO 5, MOSI 6, SCK 7 |
+| I2C | SDA 8, SCL 18 |
+| MCP devices | `0x20` local inputs, `0x21` relay bank |
+| Keypad | Panic GPIO16, piezo GPIO17, 5 V siren GPIO15 |
+
+ACM local and keypad inputs use pull-ups with `LOW = CLOSED` and `HIGH = OPEN`.
+Both paths require 250 ms stable-state debounce. ACM has 24 local alarm inputs,
+up to 7 enrolled PoE keypads with 8 inputs each, and 8 active-low relay
+outputs. Software initializes ACM relay outputs HIGH before enabling the output
+direction and initializes the keypad 5 V siren OFF. These are software safety
+intentions and still require physical validation.
 
 ## Hardware mode model
 
