@@ -36,6 +36,7 @@ bool relayActive[ConfigStore::MAX_RELAYS] = {};
 bool relaySiren[ConfigStore::MAX_RELAYS] = {};
 String deviceId = "acm-001", hostname = "ACM-001";
 uint32_t lastInput = 0, lastHeartbeat = 0, lastSnapshot = 0, lastLogMonth = 0;
+String ethernetMac(){uint8_t value[6]={};Ethernet.MACAddress(value);String result;for(uint8_t i=0;i<6;++i){if(i)result+=':';if(value[i]<16)result+='0';result+=String(value[i],HEX);}return result;}
 
 void mcpWrite(uint8_t address, uint8_t reg, uint8_t value) { Wire.beginTransmission(address); Wire.write(reg); Wire.write(value); Wire.endTransmission(); }
 void setRelay(uint8_t index, bool active) {
@@ -97,13 +98,14 @@ void setup() {
   for (uint8_t i = 0; i < ConfigStore::MAX_CHANNELS; ++i) { alarmCore->setSensorInUse(i, true); alarmCore->setSensorType(i, configStore.channel(i).type); }
   keypadManager.begin(configStore, *alarmCore, &eventLogger);
   webAdmin.begin(configStore, pins, *alarmCore, keypadManager, eventLogger, hostname, deviceId);
+  webAdmin.setEthernetMac(ethernetMac());
   snapshot = alarmCore->snapshot(); for (uint8_t i = 0; i < ConfigStore::MAX_RELAYS; ++i) relaySiren[i] = configStore.relay(i).siren; if (configStore.recoveryRequired()) snapshot.trouble_flags |= TROUBLE_CONFIG;
   esp_task_wdt_init(10, true); esp_task_wdt_add(nullptr);
 }
 void loop() {
   const uint32_t now = millis(); esp_task_wdt_reset(); webAdmin.tick(now); eventLogger.tick(now); if(eventLogger.takeTimeLost()){eventLogger.log("TIME_SYNC_LOST");keypadManager.setTimeSync(false,0);} scanInputs(); if (alarmCore) keypadManager.tick(now); if (alarmCore) { const uint32_t trouble = snapshot.trouble_flags; alarmCore->tick(now); snapshot = alarmCore->snapshot(); snapshot.trouble_flags |= trouble; applySirenRelays(snapshot.state); }
   const bool connectedBefore=hcm.connected(); if (now - lastHeartbeat >= acm_protocol::HEARTBEAT_INTERVAL_MS) { lastHeartbeat = now; connectHcm(); if (hcm.connected()) acm_protocol::sendHeartbeat(hcm, deviceId, hostname, ++snapshot.sequence); }
-  const bool connected=hcm.connected(); if(connected&&!hcmWasConnected){eventLogger.log("HCM_COMMS_RESTORED");hcmWasConnected=true;hcmParser.reset();lastTimeRequest=0;} if(!connected&&hcmWasConnected){eventLogger.log("HCM_COMMS_LOST");hcmWasConnected=false;} if(connected) { requestHcmTime(now); processHcmFrames(now); } (void)connectedBefore;
+  const bool connected=hcm.connected(); webAdmin.setHcmConnected(connected); if(connected&&!hcmWasConnected){eventLogger.log("HCM_COMMS_RESTORED");hcmWasConnected=true;hcmParser.reset();lastTimeRequest=0;} if(!connected&&hcmWasConnected){eventLogger.log("HCM_COMMS_LOST");hcmWasConnected=false;} if(connected) { requestHcmTime(now); processHcmFrames(now); } (void)connectedBefore;
   if (now - lastSnapshot >= acm_protocol::SNAPSHOT_INTERVAL_MS) { lastSnapshot = now; sendStatus(true); }
   static AlarmState previousState = AlarmState::TROUBLE; static uint32_t previousBitmap = 0; static uint32_t previousCountdown = 0xffffffff; if (snapshot.state != previousState || snapshot.open_bitmap[0] != previousBitmap || snapshot.countdown_seconds != previousCountdown) { const AlarmState oldState=previousState; previousState = snapshot.state; previousBitmap = snapshot.open_bitmap[0]; previousCountdown = snapshot.countdown_seconds; ++snapshot.sequence; if(snapshot.state!=oldState){String auditEvent,auditMetadata;const bool audited=keypadManager.takeActionAudit(auditEvent,auditMetadata);if(audited)eventLogger.log(auditEvent.c_str(),auditMetadata); else if(snapshot.state==AlarmState::ARMING_DELAY)eventLogger.log("ARMING_DELAY"); else if(snapshot.state==AlarmState::ARMED_HOME)eventLogger.log("ARMED_HOME"); else if(snapshot.state==AlarmState::ARMED_AWAY)eventLogger.log("ARMED_AWAY"); else if(snapshot.state==AlarmState::ENTRY_DELAY)eventLogger.log("ENTRY_DELAY"); else if(snapshot.state==AlarmState::TRIGGERED){String metadata;if(snapshot.trigger_sensor!=0xffff&&snapshot.trigger_sensor<ConfigStore::MAX_CHANNELS)metadata=String("Sensor=")+configStore.channel(snapshot.trigger_sensor).name+" Area="+String(configStore.channel(snapshot.trigger_sensor).area_id)+" PriorMode=ARMED_AWAY";eventLogger.log("ALARM_TRIGGERED",metadata);} else if(snapshot.state==AlarmState::DISARMED)eventLogger.log("DISARMED"); if(oldState!=AlarmState::TRIGGERED&&snapshot.state==AlarmState::TRIGGERED)eventLogger.log("SIRENS_ON"); if(oldState==AlarmState::TRIGGERED&&snapshot.state!=AlarmState::TRIGGERED)eventLogger.log("SIRENS_OFF");} sendStatus(false); keypadManager.broadcastAlarmState(snapshot); }
   if(eventLogger.sdFailed())snapshot.trouble_flags|=TROUBLE_SD; delay(1);

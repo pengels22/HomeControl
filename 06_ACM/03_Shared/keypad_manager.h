@@ -16,6 +16,7 @@ class KeypadManager {
   int8_t enrollIdentity(const String& mac, const String& ip, const String& name, const String& firmware);
   bool enrollKeypad(const IPAddress& ip, uint16_t port = acm_protocol::KEYPAD_PORT);
   bool removeKeypad(uint8_t index);
+  bool updateKeypadConfig(uint8_t index, const String& name, uint16_t area_id, const String input_names[8], const SensorType input_types[8]);
   bool receiveHeartbeat(const String& mac, const String& ip, uint32_t now);
   bool receiveSnapshot(const String& mac, const bool open[8], uint32_t now);
   bool receiveUpdate(const String& mac, uint8_t channel, bool open, uint32_t now);

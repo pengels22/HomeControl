@@ -46,3 +46,17 @@ def test_pin_admin_mutations_use_master_reauthentication_and_audit_without_secre
     assert "PIN=" in web
     assert "hash" not in web.lower()
     assert "salt" not in web.lower()
+
+
+def test_completion_surfaces_are_wired_to_runtime_apis():
+    config = source("06_ACM/03_Shared/config_store.cpp")
+    manager = source("06_ACM/03_Shared/keypad_manager.cpp")
+    web = source("06_ACM/03_Shared/web_admin.cpp")
+    assert "DEFAULT_ROOMS" in config
+    assert "addRoom" in config
+    assert "updateKeypadConfig" in manager
+    assert "keypad_update" in web
+    assert "keypad_remove" in web
+    assert "Custom..." in web
+    assert "MASTER_PIN_CHANGED" in web
+    assert "localTime" in web

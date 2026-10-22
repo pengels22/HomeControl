@@ -62,7 +62,7 @@ bool EventLogger::log(const String& event,const String& metadata) {
 bool EventLogger::setTime(uint32_t unix_seconds,uint32_t now) {
   if(unix_seconds<1609459200UL || unix_seconds>4102444800UL) return false;
   struct timeval tv{static_cast<time_t>(unix_seconds),0}; if(settimeofday(&tv,nullptr)!=0)return false;
-  configureTimezone(); const bool was=time_synced_; time_synced_=true; last_sync_millis_=now;
+  configureTimezone(); const bool was=time_synced_; time_synced_=true; had_time_sync_=true; last_sync_millis_=now;
   if(!was) time_restored_pending_=true; return true;
 }
 
@@ -72,4 +72,5 @@ void EventLogger::tick(uint32_t now) {
 }
 bool EventLogger::takeTimeLost(){const bool value=time_lost_pending_;time_lost_pending_=false;return value;}
 bool EventLogger::takeTimeRestored(){const bool value=time_restored_pending_;time_restored_pending_=false;return value;}
+String EventLogger::localTime() const {if(!time_synced_)return "";time_t current=time(nullptr);struct tm local{};localtime_r(&current,&local);char buffer[24];strftime(buffer,sizeof(buffer),"%Y-%m-%d %H:%M:%S",&local);return String(buffer)+" America/Detroit";}
 String EventLogger::recentLines(uint16_t max_lines){if(!sd_ready_||!max_lines)return "";File file=SD.open(time_synced_?monthlyPath(millis()):String("/logs/unsynced.log"),FILE_READ);if(!file)return "";const size_t size=file.size();const size_t start=size>8192?size-8192:0;file.seek(start);if(start)file.readStringUntil('\n');String lines[100];uint16_t count=0;while(file.available()){String line=file.readStringUntil('\n');if(count<100)lines[count++]=line;else{for(uint16_t i=1;i<100;++i)lines[i-1]=lines[i];lines[99]=line;}}file.close();if(max_lines>100)max_lines=100;String out;const uint16_t begin=count>max_lines?count-max_lines:0;for(uint16_t i=begin;i<count;++i){out+=lines[i];if(i+1<count)out+='\n';}return out;}

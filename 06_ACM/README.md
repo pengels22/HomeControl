@@ -135,6 +135,7 @@ trusted management network. It uses Master-PIN-only login, an ephemeral
 server-side session with a five-minute idle timeout, an HttpOnly/SameSite
 cookie, CSRF-protected configuration POSTs, bounded request parsing, and
 escaped HTML rendering. The interface provides Channels, Outputs, Areas,
-Keypads, PINs, System, Logs, and Logout pages backed by the live ConfigStore,
+Keypads with full input editing, PIN administration, seeded/custom Room /
+Location suggestions, System telemetry, bounded Logs, and Logout pages backed by the live ConfigStore,
 PinStore, AlarmCore, KeypadManager, and EventLogger. Firmware updates remain
 USB-only; V1 does not provide OTA or HTTPS.
