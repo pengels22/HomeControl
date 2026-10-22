@@ -7,6 +7,7 @@ import http.client
 import json
 import re
 import socket
+import stat
 import sys
 import time
 from copy import deepcopy
@@ -17,6 +18,8 @@ from urllib.parse import quote
 SOCKET = "/var/run/docker.sock"
 HOMECONTROL_STORAGE_BIND = "/srv/hcm-data/homecontrol:/var/lib/homecontrol:rw"
 HOMECONTROL_STORAGE_DEST = "/var/lib/homecontrol"
+CONFLICT_STATUS_SECRET_SOURCE = "/etc/hcm/conflict-status.secret"
+CONFLICT_STATUS_SECRET_DEST = "/etc/hcm-heartbeat/heartbeat-auth.secret"
 
 
 class DockerDeployError(RuntimeError):
@@ -138,6 +141,7 @@ def create_clone(source, image, name):
     config["Image"] = image
     host_config["Binds"] = ensure_homecontrol_storage_bind(host_config.get("Binds") or [])
     configure_safety_gpio(host_config)
+    configure_conflict_status_secret(host_config)
     body = {
         "Hostname": config.get("Hostname"),
         "Domainname": config.get("Domainname", ""),
@@ -210,6 +214,19 @@ def ensure_homecontrol_storage_bind(binds):
             return result
     result.append(HOMECONTROL_STORAGE_BIND)
     return result
+
+
+def configure_conflict_status_secret(host_config, secret_path=CONFLICT_STATUS_SECRET_SOURCE, expected_uid=10001):
+    """Mount only a protected, app-readable copy of the host heartbeat key."""
+    path = Path(secret_path)
+    if not path.exists():
+        return
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != expected_uid or stat.S_IMODE(info.st_mode) != 0o400:
+        raise DockerDeployError("Conflict status secret copy has unsafe ownership or mode")
+    binds = [bind for bind in host_config.get("Binds") or [] if bind.split(":")[1] != CONFLICT_STATUS_SECRET_DEST]
+    binds.append(str(path) + ":" + CONFLICT_STATUS_SECRET_DEST + ":ro")
+    host_config["Binds"] = binds
 
 
 def validate_clone_source(source):

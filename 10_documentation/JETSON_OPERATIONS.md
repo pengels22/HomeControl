@@ -115,6 +115,12 @@ This reads version, health, the unauthenticated safety-status response (must be
 401), and static JavaScript. It does not read GPIO or trigger fire actions.
 The deployment helper runs these checks before declaring success and restores
 the original container on failure. It preserves the independent host services.
+The Jetson adapter makes an app-readable, mode `0400` copy of the host heartbeat
+authentication key at `/etc/hcm/conflict-status.secret` and mounts it read-only
+at the path HCM uses to verify Conflict's signed `/status` response. The host
+Heartbeat V3 key remains root-only. Re-run the adapter after key rotation so the
+copy stays in sync; an invalid or missing signature leaves the UI status
+Unavailable.
 
 ### Authentication schema prerequisite
 

@@ -1791,6 +1791,9 @@ def test_jetson_schema_gate_precedes_container_replacement():
     assert 'transaction(readonly=True)' in gate.command
     assert not adapter.framework_rollback_needed(gate, RuntimeError('missing schema'))
     assert 'migrate' not in gate.command
+    assert names.index('provision_conflict_status_secret') < names.index('replace_hcm_container')
+    assert names.index('replace_hcm_container') < names.index('verify_conflict_supervisor') < names.index('record_release')
+    assert not adapter.framework_rollback_needed(steps[names.index('provision_conflict_status_secret')], RuntimeError('missing secret'))
 
 
 def test_release_marker_writes_real_newline():
@@ -1818,3 +1821,19 @@ def test_jetson_gpio_mapping_is_minimal_and_persistent(tmp_path, monkeypatch):
     host['Privileged'] = True
     with pytest.raises(module.DockerDeployError, match='privileged'):
         module.configure_safety_gpio(host, str(wiring))
+
+
+def test_hcm_clone_mounts_protected_conflict_status_secret_read_only(tmp_path):
+    module = load_script_module('hcm_conflict_secret_clone_test', '11_scripts/hcm_docker_deploy.py')
+    secret = tmp_path / 'conflict-status.secret'
+    secret.write_bytes(b'test-only-key')
+    secret.chmod(0o400)
+    host = {'Binds': ['/srv/hcm-data/homecontrol:/var/lib/homecontrol:rw']}
+
+    module.configure_conflict_status_secret(host, str(secret), expected_uid=os.getuid())
+    module.configure_conflict_status_secret(host, str(secret), expected_uid=os.getuid())
+    assert host['Binds'].count(str(secret) + ':' + module.CONFLICT_STATUS_SECRET_DEST + ':ro') == 1
+
+    secret.chmod(0o444)
+    with pytest.raises(module.DockerDeployError, match='unsafe ownership or mode'):
+        module.configure_conflict_status_secret(host, str(secret), expected_uid=os.getuid())

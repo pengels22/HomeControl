@@ -340,8 +340,10 @@ class JetsonDockerAdapter(BaseAdapter):
             AdapterStep("build_hcm_image", f"sudo docker build --build-arg HCM_GIT_SHA={artifact.release} -t {image} -f {release_dir}/07_config/01_HCM/Dockerfile.live {release_dir}", changes_system=True, timeout=600),
             AdapterStep("verify_hcm_image_git", f"sudo docker run --rm --user 10001:10001 {image} git --version", changes_system=True, timeout=60),
             AdapterStep("verify_hcm_schema", self._schema_check_command(release_dir), timeout=60),
+            AdapterStep("provision_conflict_status_secret", "sudo -n test -f /etc/hcm-heartbeat/heartbeat-auth.secret && sudo -n install -o 10001 -g 10001 -m 0400 /etc/hcm-heartbeat/heartbeat-auth.secret /etc/hcm/conflict-status.secret && sudo -n cmp -s /etc/hcm-heartbeat/heartbeat-auth.secret /etc/hcm/conflict-status.secret && sudo -n test \"$(sudo -n stat -c '%u:%a' /etc/hcm/conflict-status.secret)\" = '10001:400'", changes_system=True),
             AdapterStep("replace_hcm_container", f"sudo python3 {release_dir}/11_scripts/hcm_docker_deploy.py deploy --image {image} --expected-sha {artifact.release} --rollback-name {rollback_name} --deployment-id {deployment_id or artifact.release}", changes_system=True, timeout=180),
             AdapterStep("verify_hcm_api", self._hcm_health_command(), timeout=60),
+            AdapterStep("verify_conflict_supervisor", "sudo -n docker exec hcm-test python -c \"import asyncio,importlib; result=asyncio.run(importlib.import_module('01_HCM.management').conflict_supervisor_status()); print('conflict_supervisor_status='+str(result.get('status'))); assert result.get('status') == 'Healthy', result.get('reason')\"", timeout=60),
             AdapterStep("record_release", f"printf '%s\n' {artifact.release} | sudo tee {self.release_marker()} >/dev/null", changes_system=True),
         ]
 
@@ -482,7 +484,7 @@ class JetsonDockerAdapter(BaseAdapter):
         return self._run_rollback_steps(transport, self.rollback_steps_for_deployment(deployment_id, artifact.release))
 
     def framework_rollback_needed(self, step: AdapterStep, exc: Exception) -> bool:
-        if step.name in {"replace_hcm_container", "verify_hcm_schema"}:
+        if step.name in {"replace_hcm_container", "verify_hcm_schema", "provision_conflict_status_secret"}:
             return False
         return True
 
