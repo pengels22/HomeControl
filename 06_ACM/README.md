@@ -111,3 +111,19 @@ immediately on disarm or reconnect reconciliation. The separate 3.3 V piezo
 only provides short acknowledgement tones and one short chirp per second while
 `ARMING_DELAY` or `ENTRY_DELAY` countdown seconds change. It is stopped in all
 other alarm states and is never used as the continuous alarm sounder.
+
+## V1 event logging and time
+
+ACM is the authoritative audit logger. It follows the time hierarchy
+`HCM → ACM → keypads`: ACM requests UTC over its existing framed HCM
+connection, applies `America/Detroit` (`EST5EDT` with local DST rules), and
+sends valid time to authorized keypads after snapshot synchronization. Alarm
+operation does not wait for time; unsynchronized entries use an `UNSYNC+...ms`
+monotonic marker and never fabricate a calendar date.
+
+ACM and keypad logs use `/logs/YYYY-MM.log` after synchronization and write one
+`*****` date separator per local date during a run. Keypad-only events remain
+minimal. SD initialization is centralized in the logger with retry backoff;
+SD loss sets trouble state but does not stop sensors, networking, alarm logic,
+or sirens. HCM and keypad communication, sensor, alarm, siren, fault, and time
+transitions are logged once at their transition boundaries.

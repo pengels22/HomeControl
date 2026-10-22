@@ -12,6 +12,7 @@
 #include "alarm_core.h"
 #include "config_store.h"
 #include "keypad_manager.h"
+#include "event_logger.h"
 
 namespace {
 constexpr uint8_t MCP_IODIRA = 0x00, MCP_IODIRB = 0x01, MCP_GPPUA = 0x0c, MCP_GPPUB = 0x0d, MCP_GPIOA = 0x12, MCP_GPIOB = 0x13;
@@ -24,6 +25,10 @@ ConfigStore configStore;
 AlarmSnapshot snapshot;
 AlarmCore* alarmCore = nullptr;
 KeypadManager keypadManager;
+EventLogger eventLogger(acm_hw::SD_CS);
+acm_protocol::FrameParser hcmParser;
+bool hcmWasConnected=false;
+uint32_t lastTimeRequest=0;
 SensorState sensors[24];
 bool relayActive[ConfigStore::MAX_RELAYS] = {};
 bool relaySiren[ConfigStore::MAX_RELAYS] = {};
@@ -47,19 +52,15 @@ void applySirenRelays(AlarmState state) {
   }
 }
 uint8_t mcpRead(uint8_t address, uint8_t reg) { Wire.beginTransmission(address); Wire.write(reg); Wire.endTransmission(false); Wire.requestFrom(address, (uint8_t)1); return Wire.available() ? Wire.read() : 0xff; }
-void logEvent(const char* event, uint16_t sensor = 0xffff) {
-  if (!SD.begin(acm_hw::SD_CS)) { snapshot.trouble_flags |= TROUBLE_SD; return; }
-  String path = String("/logs/") + (lastLogMonth ? lastLogMonth : 202610) + ".log";
-  File f = SD.open(path, FILE_APPEND); if (!f) { snapshot.trouble_flags |= TROUBLE_SD; return; }
-  f.printf("%lu %s%s%s\n", millis(), event, sensor == 0xffff ? "" : " sensor=", sensor == 0xffff ? "" : String(sensor + 1).c_str()); f.close();
-}
+void logEvent(const char* event, uint16_t sensor = 0xffff) { String metadata; if(sensor != 0xffff) metadata=String("Channel=")+String(sensor+1); eventLogger.log(event,metadata); }
+void logLocalSensor(uint8_t index,bool open){const ChannelRecord& channel=configStore.channel(index);String metadata=String("Sensor=")+channel.name+" Area="+String(channel.area_id)+" Source=ACM Channel="+String(index+1);eventLogger.log(open?"SENSOR_OPEN":"SENSOR_CLOSED",metadata);}
 void scanInputs() {
   const uint8_t a = mcpRead(acm_hw::MCP_ACM_INPUTS, MCP_GPIOA), b = mcpRead(acm_hw::MCP_ACM_INPUTS, MCP_GPIOB);
   const uint32_t raw = (uint32_t)a | ((uint32_t)b << 8); const uint32_t now = millis();
   if (now - lastInput < 250) return; lastInput = now;
-  for (uint8_t i = 0; i < 16; ++i) { sensors[i].open = !(raw & (1u << i)); if (alarmCore) alarmCore->setSensor(i, sensors[i].open); }
+  for (uint8_t i = 0; i < 16; ++i) { const bool open = !(raw & (1u << i)); if (open != sensors[i].open) logLocalSensor(i, open); sensors[i].open = open; if (alarmCore) alarmCore->setSensor(i, sensors[i].open); }
   const uint8_t c = mcpRead(acm_hw::MCP_ACM_RELAYS, MCP_GPIOA);
-  for (uint8_t i = 0; i < 8; ++i) { sensors[16 + i].open = !(c & (1u << i)); if (alarmCore) alarmCore->setSensor(16 + i, sensors[16 + i].open); }
+  for (uint8_t i = 0; i < 8; ++i) { const bool open = !(c & (1u << i)); if (open != sensors[16 + i].open) logLocalSensor(16 + i, open); sensors[16 + i].open = open; if (alarmCore) alarmCore->setSensor(16 + i, sensors[16 + i].open); }
   snapshot.open_bitmap[0] = snapshot.open_bitmap[1] = snapshot.open_bitmap[2] = 0;
   for (uint8_t i = 0; i < 24; ++i) if (sensors[i].open && !sensors[i].bypassed) snapshot.open_bitmap[i / 32] |= (1u << (i % 32));
 }
@@ -73,8 +74,10 @@ void initializeHardware() {
   mcpWrite(acm_hw::MCP_ACM_RELAYS, MCP_GPIOB, 0xff);
   mcpWrite(acm_hw::MCP_ACM_RELAYS, MCP_IODIRB, 0x00);
   SPI.begin(acm_hw::ETH_SCK, acm_hw::ETH_MISO, acm_hw::ETH_MOSI, acm_hw::ETH_CS); Ethernet.init(acm_hw::ETH_CS); Ethernet.begin(macAddress);
-  if (!SD.begin(acm_hw::SD_CS, SPI)) snapshot.trouble_flags |= TROUBLE_SD;
+
 }
+void requestHcmTime(uint32_t now){if(!hcm.connected())return;if(!lastTimeRequest||static_cast<uint32_t>(now-lastTimeRequest)>=300000UL){lastTimeRequest=now;acm_protocol::sendFrame(hcm,acm_protocol::TIME_REQUEST,"{} ");}}
+void processHcmFrames(uint32_t now){while(hcm.available()){hcmParser.feed(static_cast<uint8_t>(hcm.read()));if(hcmParser.invalid()){hcmParser.reset();return;}if(hcmParser.complete()){const String frame=hcmParser.take();if(frame.indexOf("\"type\":\"TIME_RESPONSE\"")>=0){const int key=frame.indexOf("\"unix\":");if(key>=0){const uint32_t unix_seconds=static_cast<uint32_t>(frame.substring(key+7).toInt());if(eventLogger.setTime(unix_seconds,now)){if(eventLogger.takeTimeRestored()){eventLogger.log("TIME_SYNC_RESTORED");}keypadManager.setTimeSync(true,unix_seconds);}}}}}}
 void connectHcm() {
   if (hcm.connected()) return;
   hcm.stop();
@@ -87,17 +90,18 @@ void sendStatus(bool full) { if (hcm.connected()) acm_protocol::sendAlarmStatus(
 
 void setup() {
   Serial.begin(115200); config.begin("acm", false); deviceId = config.getString("device_id", deviceId); hostname = config.getString("hostname", hostname);
-  pins.begin("alarm"); configStore.begin(); initializeHardware(); snapshot.state = pins.hasMaster() ? AlarmState::DISARMED : AlarmState::TROUBLE; logEvent("ACM_BOOT");
+  pins.begin("alarm"); configStore.begin(); initializeHardware(); eventLogger.begin(); snapshot.state = pins.hasMaster() ? AlarmState::DISARMED : AlarmState::TROUBLE; logEvent("ACM_BOOT");
   static AlarmCore core(pins); alarmCore = &core; alarmCore->begin(config.getUInt("home_exit_ms", 0), config.getUInt("away_exit_ms", 30000));
   for (uint8_t i = 0; i < ConfigStore::MAX_CHANNELS; ++i) { alarmCore->setSensorInUse(i, true); alarmCore->setSensorType(i, configStore.channel(i).type); }
-  keypadManager.begin(configStore, *alarmCore);
+  keypadManager.begin(configStore, *alarmCore, &eventLogger);
   snapshot = alarmCore->snapshot(); for (uint8_t i = 0; i < ConfigStore::MAX_RELAYS; ++i) relaySiren[i] = configStore.relay(i).siren; if (configStore.recoveryRequired()) snapshot.trouble_flags |= TROUBLE_CONFIG;
   esp_task_wdt_init(10, true); esp_task_wdt_add(nullptr);
 }
 void loop() {
-  const uint32_t now = millis(); esp_task_wdt_reset(); scanInputs(); if (alarmCore) keypadManager.tick(now); if (alarmCore) { const uint32_t trouble = snapshot.trouble_flags; alarmCore->tick(now); snapshot = alarmCore->snapshot(); snapshot.trouble_flags |= trouble; applySirenRelays(snapshot.state); }
-  if (now - lastHeartbeat >= acm_protocol::HEARTBEAT_INTERVAL_MS) { lastHeartbeat = now; connectHcm(); if (hcm.connected()) acm_protocol::sendHeartbeat(hcm, deviceId, hostname, ++snapshot.sequence); }
+  const uint32_t now = millis(); esp_task_wdt_reset(); eventLogger.tick(now); if(eventLogger.takeTimeLost()){eventLogger.log("TIME_SYNC_LOST");keypadManager.setTimeSync(false,0);} scanInputs(); if (alarmCore) keypadManager.tick(now); if (alarmCore) { const uint32_t trouble = snapshot.trouble_flags; alarmCore->tick(now); snapshot = alarmCore->snapshot(); snapshot.trouble_flags |= trouble; applySirenRelays(snapshot.state); }
+  const bool connectedBefore=hcm.connected(); if (now - lastHeartbeat >= acm_protocol::HEARTBEAT_INTERVAL_MS) { lastHeartbeat = now; connectHcm(); if (hcm.connected()) acm_protocol::sendHeartbeat(hcm, deviceId, hostname, ++snapshot.sequence); }
+  const bool connected=hcm.connected(); if(connected&&!hcmWasConnected){eventLogger.log("HCM_COMMS_RESTORED");hcmWasConnected=true;hcmParser.reset();lastTimeRequest=0;} if(!connected&&hcmWasConnected){eventLogger.log("HCM_COMMS_LOST");hcmWasConnected=false;} if(connected) { requestHcmTime(now); processHcmFrames(now); } (void)connectedBefore;
   if (now - lastSnapshot >= acm_protocol::SNAPSHOT_INTERVAL_MS) { lastSnapshot = now; sendStatus(true); }
-  static AlarmState previousState = AlarmState::TROUBLE; static uint32_t previousBitmap = 0; static uint32_t previousCountdown = 0xffffffff; if (snapshot.state != previousState || snapshot.open_bitmap[0] != previousBitmap || snapshot.countdown_seconds != previousCountdown) { previousState = snapshot.state; previousBitmap = snapshot.open_bitmap[0]; previousCountdown = snapshot.countdown_seconds; ++snapshot.sequence; sendStatus(false); keypadManager.broadcastAlarmState(snapshot); }
-  delay(1);
+  static AlarmState previousState = AlarmState::TROUBLE; static uint32_t previousBitmap = 0; static uint32_t previousCountdown = 0xffffffff; if (snapshot.state != previousState || snapshot.open_bitmap[0] != previousBitmap || snapshot.countdown_seconds != previousCountdown) { const AlarmState oldState=previousState; previousState = snapshot.state; previousBitmap = snapshot.open_bitmap[0]; previousCountdown = snapshot.countdown_seconds; ++snapshot.sequence; if(snapshot.state!=oldState){if(snapshot.state==AlarmState::ARMING_DELAY)eventLogger.log("ARMING_DELAY"); else if(snapshot.state==AlarmState::ARMED_HOME)eventLogger.log("ARMED_HOME"); else if(snapshot.state==AlarmState::ARMED_AWAY)eventLogger.log("ARMED_AWAY"); else if(snapshot.state==AlarmState::ENTRY_DELAY)eventLogger.log("ENTRY_DELAY"); else if(snapshot.state==AlarmState::TRIGGERED){String metadata;if(snapshot.trigger_sensor!=0xffff&&snapshot.trigger_sensor<ConfigStore::MAX_CHANNELS)metadata=String("Sensor=")+configStore.channel(snapshot.trigger_sensor).name+" Area="+String(configStore.channel(snapshot.trigger_sensor).area_id)+" PriorMode=ARMED_AWAY";eventLogger.log("ALARM_TRIGGERED",metadata);} else if(snapshot.state==AlarmState::DISARMED)eventLogger.log("DISARMED"); if(oldState!=AlarmState::TRIGGERED&&snapshot.state==AlarmState::TRIGGERED)eventLogger.log("SIRENS_ON"); if(oldState==AlarmState::TRIGGERED&&snapshot.state!=AlarmState::TRIGGERED)eventLogger.log("SIRENS_OFF");} sendStatus(false); keypadManager.broadcastAlarmState(snapshot); }
+  if(eventLogger.sdFailed())snapshot.trouble_flags|=TROUBLE_SD; delay(1);
 }

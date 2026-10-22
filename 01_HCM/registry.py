@@ -556,6 +556,17 @@ class ModuleRegistry:
         peer = writer.get_extra_info('peername')
         try:
             first = await protocol.read_frame(reader)
+            # ACM V1 time bootstrap is deliberately narrow and does not alter
+            # the authenticated module registry protocol. It permits an ACM
+            # that has no HCM module certificate yet to obtain authoritative
+            # UTC time over its configured HCM connection.
+            if first.get('type') in ('TIME_REQUEST', 'time_request'):
+                await conn.send('TIME_RESPONSE', {'unix': int(time.time())})
+                while True:
+                    request = await protocol.read_frame(reader)
+                    if request.get('type') in ('TIME_REQUEST', 'time_request'):
+                        await conn.send('TIME_RESPONSE', {'unix': int(time.time())})
+                return
             if first.get('type') != 'identify':
                 raise protocol.ProtocolError('first message must be identify')
             ident = first.get('payload', {})
