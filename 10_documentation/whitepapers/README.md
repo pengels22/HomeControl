@@ -5,7 +5,7 @@ This directory is the authoritative white-paper set for the HomeControl project 
 ## Status
 
 Merged into `main` by the documentation consolidation commit `82818c0`.
-These papers are the retained documentation authority for the current review
+These papers are the retained documentation authority for the current synchronized
 baseline; they do not authorize deployment or physical commissioning.
 
 Code baseline used for the current documentation synchronization:

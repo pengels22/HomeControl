@@ -126,13 +126,19 @@ Safety deenergization is allowed to command initialized real hardware OFF even w
 
 ## Next recommended milestones
 
-1. Run final documentation review and merge the white-paper branch.
-2. Explicitly identify the Linux I2C bus on the RCM bench target.
-3. Place a bench RCM profile into BENCH_TESTING outside repository defaults.
-4. Run the single selected-channel HIL relay test with a meter/LED/test load.
-5. Advance to RCM module commissioning only after successful bench evidence.
-6. Repeat a controlled process for LCM.
-7. Commission physical HCM fire GPIO separately.
+The current immediate milestone is `ACM_V1_READY_FOR_HIL`:
+
+1. Freeze ACM V1 software at the audited baseline unless HIL exposes a defect.
+2. Begin ACM boot/output-safety validation.
+3. Validate ACM W5500 Ethernet, identity, web administration, and HCM connection/time synchronization.
+4. Validate SD logging and power-cycle behavior.
+5. Validate ACM MCP/I2C and all 24 local inputs.
+6. Validate all 8 ACM relay outputs and siren policy.
+7. Bring up and enroll one physical ACM keypad.
+8. Validate keypad inputs, Panic, piezo, 5 V siren, heartbeat/offline FAULT, and reconnect snapshot.
+9. Execute the complete ACM Home/Away/failure HIL scenario set documented in `COMMISSIONING_AND_VALIDATION.md`.
+10. Record HIL evidence and only then classify ACM physical commissioning status.
+11. Resume the existing controlled RCM/LCM commissioning sequence afterward.
 
 ## Channel registry extension
 
