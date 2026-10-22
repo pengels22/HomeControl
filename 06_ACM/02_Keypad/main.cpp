@@ -47,7 +47,7 @@ void processFrame(const String& frame){
   if(frame.indexOf("LOCAL_SIREN_OFF")>=0){localSiren=false;digitalWrite(acm_hw::KEYPAD_SIREN,LOW);}
   if(frame.indexOf("\"type\":\"IDENTIFY_REQUEST\"")>=0){sendIdentity();return;}
   if(frame.indexOf("\"type\":\"SENSOR_SNAPSHOT_REQUEST\"")>=0){sendSnapshot();return;}
-  if(frame.indexOf("\"type\":\"HELLO_ACM\"")>=0){if(!hadSession){hadSession=true;eventLogger.log("ACM_COMMS_RESTORED");}acm_protocol::sendFrame(acm,acm_protocol::HELLO_KEYPAD,String("{\"keypad_id\":\"")+keypadId+"\",\"mac\":\""+keypadId+"\"}");return;}
+  if(frame.indexOf("\"type\":\"HELLO_KEYPAD\"")>=0){if(!hadSession){hadSession=true;eventLogger.log("ACM_COMMS_RESTORED");}acm_protocol::sendFrame(acm,acm_protocol::HELLO_ACM,String("{\"keypad_id\":\"")+keypadId+"\",\"mac\":\""+keypadId+"\"}");return;}
   if(frame.indexOf("\"type\":\"TIME_SYNC\"")>=0){const uint32_t unix_seconds=static_cast<uint32_t>(jsonValue(frame,"unix").toInt());if(eventLogger.setTime(unix_seconds)){if(eventLogger.takeTimeRestored())eventLogger.log("TIME_SYNC_RESTORED");}return;}
   if(frame.indexOf("\"type\":\"ACTION_RESULT\"")>=0){toneFeedback(jsonValue(frame,"success")=="true"?880:220,jsonValue(frame,"success")=="true"?100:220);return;}
   if(frame.indexOf("\"type\":\"ALARM_STATE\"")>=0){

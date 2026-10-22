@@ -32,6 +32,8 @@ acm_protocol::FrameParser hcmParser;
 bool hcmWasConnected=false;
 uint32_t lastTimeRequest=0;
 SensorState sensors[24];
+bool localRawOpen[24] = {}, localDebouncedOpen[24] = {}, localInputInitialized[24] = {};
+uint32_t localRawChangedAt[24] = {};
 bool relayActive[ConfigStore::MAX_RELAYS] = {};
 bool relaySiren[ConfigStore::MAX_RELAYS] = {};
 String deviceId = "acm-001", hostname = "ACM-001";
@@ -61,9 +63,21 @@ void scanInputs() {
   const uint8_t a = mcpRead(acm_hw::MCP_ACM_INPUTS, MCP_GPIOA), b = mcpRead(acm_hw::MCP_ACM_INPUTS, MCP_GPIOB);
   const uint32_t raw = (uint32_t)a | ((uint32_t)b << 8); const uint32_t now = millis();
   if (now - lastInput < 250) return; lastInput = now;
-  for (uint8_t i = 0; i < 16; ++i) { const bool open = !(raw & (1u << i)); if (open != sensors[i].open) logLocalSensor(i, open); sensors[i].open = open; if (alarmCore) alarmCore->setSensor(i, sensors[i].open); }
+  for (uint8_t i = 0; i < 16; ++i) {
+    const bool open = !(raw & (1u << i));
+    if (!localInputInitialized[i]) { localRawOpen[i] = localDebouncedOpen[i] = open; localRawChangedAt[i] = now; localInputInitialized[i] = true; }
+    if (open != localRawOpen[i]) { localRawOpen[i] = open; localRawChangedAt[i] = now; }
+    if (open != localDebouncedOpen[i] && static_cast<uint32_t>(now - localRawChangedAt[i]) >= 250) { localDebouncedOpen[i] = open; logLocalSensor(i, open); }
+    sensors[i].open = localDebouncedOpen[i]; if (alarmCore) alarmCore->setSensor(i, sensors[i].open, sensors[i].failed);
+  }
   const uint8_t c = mcpRead(acm_hw::MCP_ACM_RELAYS, MCP_GPIOA);
-  for (uint8_t i = 0; i < 8; ++i) { const bool open = !(c & (1u << i)); if (open != sensors[16 + i].open) logLocalSensor(16 + i, open); sensors[16 + i].open = open; if (alarmCore) alarmCore->setSensor(16 + i, sensors[16 + i].open); }
+  for (uint8_t i = 0; i < 8; ++i) {
+    const uint8_t index = 16 + i; const bool open = !(c & (1u << i));
+    if (!localInputInitialized[index]) { localRawOpen[index] = localDebouncedOpen[index] = open; localRawChangedAt[index] = now; localInputInitialized[index] = true; }
+    if (open != localRawOpen[index]) { localRawOpen[index] = open; localRawChangedAt[index] = now; }
+    if (open != localDebouncedOpen[index] && static_cast<uint32_t>(now - localRawChangedAt[index]) >= 250) { localDebouncedOpen[index] = open; logLocalSensor(index, open); }
+    sensors[index].open = localDebouncedOpen[index]; if (alarmCore) alarmCore->setSensor(index, sensors[index].open, sensors[index].failed);
+  }
   snapshot.open_bitmap[0] = snapshot.open_bitmap[1] = snapshot.open_bitmap[2] = 0;
   for (uint8_t i = 0; i < 24; ++i) if (sensors[i].open && !sensors[i].bypassed) snapshot.open_bitmap[i / 32] |= (1u << (i % 32));
 }

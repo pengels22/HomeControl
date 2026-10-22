@@ -12,7 +12,9 @@ enum class ConfigStatus : uint8_t { FRESH, CURRENT, MIGRATED, RECOVERY_REQUIRED 
 
 class ConfigStore {
  public:
-  static constexpr uint8_t SCHEMA_VERSION=2, MAX_AREAS=32, MAX_CHANNELS=24, MAX_RELAYS=8, MAX_KEYPADS=8, MAX_ROOMS=48;
+  // Slots 0-23 are local ACM inputs; the remaining 56 slots support seven
+  // complete eight-input keypads without exceeding AlarmCore's 80-slot pool.
+  static constexpr uint8_t SCHEMA_VERSION=2, MAX_AREAS=32, MAX_CHANNELS=24, MAX_RELAYS=8, MAX_KEYPADS=7, MAX_ROOMS=48;
   bool begin(const char* ns="acm_config");
   ConfigStatus status() const { return status_; }
   bool recoveryRequired() const { return status_ == ConfigStatus::RECOVERY_REQUIRED; }

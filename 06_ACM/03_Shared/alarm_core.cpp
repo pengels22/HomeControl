@@ -7,12 +7,12 @@ void AlarmCore::begin(uint32_t homeExitMs, uint32_t awayExitMs) {
 void AlarmCore::rebuildBitmaps() {
   snapshot_.open_bitmap[0] = snapshot_.open_bitmap[1] = snapshot_.open_bitmap[2] = 0;
   snapshot_.failed_bitmap[0] = snapshot_.failed_bitmap[1] = snapshot_.failed_bitmap[2] = 0;
-  for (uint8_t i = 0; i < MAX_LOGICAL_SENSORS; ++i) { if (!inUse_[i]) continue; if (sensors_[i].open && !sensors_[i].bypassed) snapshot_.open_bitmap[i / 32] |= 1u << (i % 32); if (sensors_[i].failed) snapshot_.failed_bitmap[i / 32] |= 1u << (i % 32); }
+  for (uint8_t i = 0; i < MAX_LOGICAL_SENSORS; ++i) { if (!inUse_[i]) continue; if (sensors_[i].open && !sensors_[i].failed && !sensors_[i].bypassed) snapshot_.open_bitmap[i / 32] |= 1u << (i % 32); if (sensors_[i].failed) snapshot_.failed_bitmap[i / 32] |= 1u << (i % 32); }
 }
 void AlarmCore::setSensor(uint8_t index, bool open, bool failed) {
   if (index >= MAX_LOGICAL_SENSORS) return; inUse_[index] = true; const bool changed = sensors_[index].open != open || sensors_[index].failed != failed;
-  sensors_[index].open = open; sensors_[index].failed = failed; if (!open) sensors_[index].bypassed = false; rebuildBitmaps(); if (changed) ++snapshot_.sequence;
-  if (snapshot_.state == AlarmState::ARMING_DELAY || !open || sensors_[index].bypassed) return;
+  sensors_[index].open = open; sensors_[index].failed = failed; if (!open) sensors_[index].bypassed = false; if (!open || failed) motionActive_[index] = false; rebuildBitmaps(); if (changed) ++snapshot_.sequence;
+  if (snapshot_.state == AlarmState::ARMING_DELAY || !open || failed || sensors_[index].bypassed) return;
   if (snapshot_.state != AlarmState::ARMED_HOME && snapshot_.state != AlarmState::ARMED_AWAY) return;
   if (sensorTypes_[index] == SensorType::MOTION) { if (snapshot_.state == AlarmState::ARMED_AWAY && !motionActive_[index]) { motionActive_[index] = true; motionStarted_[index] = millis(); } return; }
   beginEntryDelay(index, millis());
