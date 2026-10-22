@@ -12,7 +12,7 @@ class AlarmCore {
   const AlarmSnapshot& snapshot() const { return snapshot_; }
   bool masterRequired() const { return !pins_.hasMaster(); }
   bool provisionMaster(const String& pin) { const bool ok = pins_.provisionMaster(pin); if (ok && snapshot_.state == AlarmState::TROUBLE) snapshot_.state = AlarmState::DISARMED; return ok; }
-  bool addPin(const String& master, const String& pin) { return pins_.verify(master) && pins_.addPin(pin); }
+  bool addPin(const String& master, const String& pin) { return pins_.addPin(master, pin); }
   void tick(uint32_t now);
  private:
   PinStore& pins_; AlarmSnapshot snapshot_; SensorState sensors_[24] = {}; SensorType sensorTypes_[24] = {}; bool motionActive_[24] = {}; uint32_t motionStarted_[24] = {};

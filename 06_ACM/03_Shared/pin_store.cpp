@@ -2,56 +2,13 @@
 #include "mbedtls/pkcs5.h"
 #include "mbedtls/md.h"
 #include "esp_system.h"
-
-namespace { constexpr uint32_t ITERATIONS = 12000; }
-
-bool PinStore::begin(const char* ns) {
-  if (!prefs_.begin(ns, false)) return false;
-  masterConfigured_ = prefs_.getBool("master", false);
-  prefs_.getBytes("salt", salt_, sizeof(salt_));
-  prefs_.getBytes("master_hash", masterHash_, sizeof(masterHash_));
-  count_ = prefs_.getBytes("pin_hash", pinHash_, sizeof(pinHash_)) == sizeof(pinHash_) ? 1 : 0;
-  return true;
-}
-
-bool PinStore::derive(const String& pin, uint8_t out[32]) const {
-  mbedtls_md_context_t context;
-  mbedtls_md_init(&context);
-  const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-  const bool ready = info != nullptr && mbedtls_md_setup(&context, info, 1) == 0;
-  const int result = ready ? mbedtls_pkcs5_pbkdf2_hmac(&context,
-      reinterpret_cast<const unsigned char*>(pin.c_str()), pin.length(), salt_, sizeof(salt_), ITERATIONS, 32, out) : -1;
-  mbedtls_md_free(&context);
-  return result == 0;
-}
-
-bool PinStore::verifyHash(const uint8_t hash[32]) const {
-  uint8_t expected[32];
-  memcpy(expected, masterHash_, sizeof(expected));
-  return memcmp(expected, hash, sizeof(expected)) == 0 || memcmp(pinHash_, hash, sizeof(expected)) == 0;
-}
-
-bool PinStore::provisionMaster(const String& pin) {
-  if (masterConfigured_ || pin.length() < 4 || pin.length() > 12) return false;
-  esp_fill_random(salt_, sizeof(salt_));
-  if (!derive(pin, masterHash_)) return false;
-  prefs_.putBytes("salt", salt_, sizeof(salt_)); prefs_.putBytes("master_hash", masterHash_, sizeof(masterHash_));
-  prefs_.putBool("master", true); masterConfigured_ = true; return true;
-}
-
-bool PinStore::addPin(const String& pin) {
-  if (!masterConfigured_ || pin.length() < 4 || pin.length() > 12 || count_ >= 1) return false;
-  if (!derive(pin, pinHash_)) return false;
-  prefs_.putBytes("pin_hash", pinHash_, sizeof(pinHash_)); count_ = 1; return true;
-}
-
-bool PinStore::verify(const String& pin) const {
-  if (!masterConfigured_) return false;
-  uint8_t hash[32]; return derive(pin, hash) && verifyHash(hash);
-}
-
-bool PinStore::changeMaster(const String& oldPin, const String& newPin) {
-  if (!verify(oldPin) || newPin.length() < 4 || newPin.length() > 12) return false;
-  uint8_t hash[32]; if (!derive(newPin, hash)) return false;
-  memcpy(masterHash_, hash, sizeof(hash)); prefs_.putBytes("master_hash", masterHash_, sizeof(masterHash_)); return true;
-}
+namespace { constexpr uint32_t ITERATIONS=12000; constexpr uint8_t SCHEMA=2; }
+bool PinStore::begin(const char* ns){ if(!prefs_.begin(ns,false)) return false; if(prefs_.getUChar("schema",0)!=SCHEMA){count_=0;memset(enabled_,0,sizeof(enabled_));prefs_.putUChar("schema",SCHEMA);return true;} count_=prefs_.getUChar("count",0);if(count_>MAX_RECORDS)count_=MAX_RECORDS;prefs_.getBytes("salts",salts_,sizeof(salts_));prefs_.getBytes("hashes",hashes_,sizeof(hashes_));prefs_.getBytes("enabled",enabled_,sizeof(enabled_));prefs_.getBytes("roles",roles_,sizeof(roles_));for(uint8_t i=0;i<count_;++i)names_[i]=prefs_.getString((String("name")+i).c_str(),i==0?"Master PIN":"Standard PIN");return true;}
+bool PinStore::derive(const String& pin,const uint8_t salt[16],uint8_t out[32])const{mbedtls_md_context_t c;mbedtls_md_init(&c);const mbedtls_md_info_t* info=mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);const bool ready=info&&mbedtls_md_setup(&c,info,1)==0;const int r=ready?mbedtls_pkcs5_pbkdf2_hmac(&c,reinterpret_cast<const unsigned char*>(pin.c_str()),pin.length(),salt,16,ITERATIONS,32,out):-1;mbedtls_md_free(&c);return r==0;}
+PinAuthResult PinStore::authenticate(const String& pin)const{PinAuthResult r;if(!validPin(pin))return r;uint8_t candidate[32];for(uint8_t i=0;i<count_;++i)if(enabled_[i]&&derive(pin,salts_[i],candidate)&&memcmp(candidate,hashes_[i],32)==0){r.valid=true;r.pin_id=i;r.friendly_name=names_[i];r.role=roles_[i];break;}memset(candidate,0,sizeof(candidate));return r;}
+bool PinStore::isMaster(const String& pin)const{const PinAuthResult r=authenticate(pin);return r.valid&&r.role==PinRole::MASTER;}
+bool PinStore::persist(uint8_t id){(void)id;prefs_.putUChar("schema",SCHEMA);prefs_.putUChar("count",count_);prefs_.putBytes("salts",salts_,sizeof(salts_));prefs_.putBytes("hashes",hashes_,sizeof(hashes_));prefs_.putBytes("enabled",enabled_,sizeof(enabled_));prefs_.putBytes("roles",roles_,sizeof(roles_));for(uint8_t i=0;i<count_;++i)prefs_.putString((String("name")+i).c_str(),names_[i]);return true;}
+bool PinStore::provisionMaster(const String& pin,const String& name){if(hasMaster()||!validPin(pin))return false;count_=1;roles_[0]=PinRole::MASTER;enabled_[0]=true;names_[0]=name.length()?name:"Master PIN";esp_fill_random(salts_[0],16);if(!derive(pin,salts_[0],hashes_[0]))return false;return persist(0);}
+bool PinStore::addPin(const String& master,const String& pin,const String& name){if(!isMaster(master)||!validPin(pin)||count_>=MAX_RECORDS)return false;const uint8_t id=count_++;roles_[id]=PinRole::STANDARD;enabled_[id]=true;names_[id]=name.length()?name:"Standard PIN";esp_fill_random(salts_[id],16);if(!derive(pin,salts_[id],hashes_[id])){--count_;return false;}return persist(id);}
+bool PinStore::removePin(const String& master,uint8_t id){if(!isMaster(master)||id==0||id>=count_)return false;enabled_[id]=false;return persist(id);}
+bool PinStore::changeMaster(const String& oldPin,const String& newPin){if(!isMaster(oldPin)||!validPin(newPin))return false;esp_fill_random(salts_[0],16);if(!derive(newPin,salts_[0],hashes_[0]))return false;return persist(0);}
