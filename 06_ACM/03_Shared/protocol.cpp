@@ -1,6 +1,39 @@
 #include "protocol.h"
 
 namespace acm_protocol {
+void FrameParser::reset() {
+  header_used_ = 0;
+  expected_ = 0;
+  payload_ = "";
+  complete_ = false;
+  invalid_ = false;
+}
+
+bool FrameParser::feed(uint8_t byte) {
+  if (invalid_ || complete_) return false;
+  if (header_used_ < sizeof(header_)) {
+    header_[header_used_++] = byte;
+    if (header_used_ == sizeof(header_)) {
+      const uint32_t length = (static_cast<uint32_t>(header_[0]) << 24) |
+                              (static_cast<uint32_t>(header_[1]) << 16) |
+                              (static_cast<uint32_t>(header_[2]) << 8) | header_[3];
+      if (length == 0 || length > MAX_FRAME) { invalid_ = true; return false; }
+      expected_ = static_cast<uint16_t>(length);
+      payload_.reserve(expected_);
+    }
+    return false;
+  }
+  payload_ += static_cast<char>(byte);
+  if (payload_.length() >= expected_) complete_ = true;
+  return complete_;
+}
+
+String FrameParser::take() {
+  const String result = payload_;
+  reset();
+  return result;
+}
+
 const char* alarmStateName(AlarmState state) {
   switch (state) {
     case AlarmState::ARMED_HOME: return "ARMED_HOME";

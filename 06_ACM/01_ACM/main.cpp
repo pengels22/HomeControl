@@ -81,6 +81,6 @@ void loop() {
   const uint32_t now = millis(); esp_task_wdt_reset(); scanInputs(); if (alarmCore) keypadManager.tick(now); if (alarmCore) { const uint32_t trouble = snapshot.trouble_flags; alarmCore->tick(now); snapshot = alarmCore->snapshot(); snapshot.trouble_flags |= trouble; }
   if (now - lastHeartbeat >= acm_protocol::HEARTBEAT_INTERVAL_MS) { lastHeartbeat = now; connectHcm(); if (hcm.connected()) acm_protocol::sendHeartbeat(hcm, deviceId, hostname, ++snapshot.sequence); }
   if (now - lastSnapshot >= acm_protocol::SNAPSHOT_INTERVAL_MS) { lastSnapshot = now; sendStatus(true); }
-  static uint32_t previousBitmap = 0; if (snapshot.open_bitmap[0] != previousBitmap) { previousBitmap = snapshot.open_bitmap[0]; ++snapshot.sequence; sendStatus(false); }
+  static AlarmState previousState = AlarmState::TROUBLE; static uint32_t previousBitmap = 0; if (snapshot.state != previousState || snapshot.open_bitmap[0] != previousBitmap) { previousState = snapshot.state; previousBitmap = snapshot.open_bitmap[0]; ++snapshot.sequence; sendStatus(false); keypadManager.broadcastAlarmState(snapshot); }
   delay(1);
 }

@@ -6,7 +6,7 @@
 struct AreaRecord { uint16_t id=0; String name; };
 struct ChannelRecord { uint8_t index=0; String name; uint16_t area_id=0; SensorType type=SensorType::OPENING; };
 struct RelayRecord { uint8_t index=0; String name; uint16_t area_id=0; bool siren=false; };
-struct KeypadRecord { bool authorized=false; String mac; String name; String ip; uint16_t area_id=0; String firmware; String input_names[8]; };
+struct KeypadRecord { bool authorized=false; String mac; String name; String ip; uint16_t area_id=0; String firmware; String input_names[8]; SensorType input_types[8] = {}; };
 enum class ConfigStatus : uint8_t { FRESH, CURRENT, MIGRATED, RECOVERY_REQUIRED };
 
 class ConfigStore {
