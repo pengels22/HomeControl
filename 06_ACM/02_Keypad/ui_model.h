@@ -10,13 +10,12 @@ enum class KeypadPage : uint8_t {
   AREA_DETAIL,
   PASSCODE_ENTRY,
   MASTER_PROVISION,
-  FORCE_ARM_CONFIRM,
 };
 
 enum class TouchAction : uint8_t {
   NONE, NOTIFICATIONS, SETTINGS, DIGIT_0, DIGIT_1, DIGIT_2, DIGIT_3,
   DIGIT_4, DIGIT_5, DIGIT_6, DIGIT_7, DIGIT_8, DIGIT_9, BACKSPACE, ENTER,
-  ARM_HOME, ARM_AWAY, DISARM, BACK, FORCE_ARM, CANCEL,
+  ARM_HOME, ARM_AWAY, DISARM, BACK, CANCEL,
 };
 
 struct TouchRect { int16_t x; int16_t y; int16_t width; int16_t height; };
@@ -48,12 +47,6 @@ class NumericKeypadComponent {
   }
 };
 
-struct RemoteAreaSummary {
-  String name;
-  String status;
-  bool selectable = false;
-};
-
 class KeypadUiModel {
  public:
   void apply(const AlarmSnapshot& snapshot) { snapshot_ = snapshot; }
@@ -68,8 +61,6 @@ class KeypadUiModel {
   const String& triggeringSensor() const { return triggering_sensor_; }
   void setLocalArea(const String& value) { local_area_ = value; }
   const String& localArea() const { return local_area_; }
-  void setSelectedRemoteArea(const String& value) { selected_remote_area_ = value; }
-  const String& selectedRemoteArea() const { return selected_remote_area_; }
   void setAcmConnected(bool value) { acm_connected_ = value; }
   bool acmConnected() const { return acm_connected_; }
   void setPendingArmMode(AlarmState value) { pending_arm_mode_ = value; }
@@ -78,12 +69,6 @@ class KeypadUiModel {
   const String& openSensors() const { return open_sensors_; }
   void setFailedSensors(const String& value) { failed_sensors_ = value; }
   const String& failedSensors() const { return failed_sensors_; }
-  void setRemoteAreas(const RemoteAreaSummary* areas, uint8_t count) {
-    remote_count_ = count > 8 ? 8 : count;
-    for (uint8_t i = 0; i < remote_count_; ++i) remote_areas_[i] = areas[i];
-  }
-  uint8_t remoteAreaCount() const { return remote_count_; }
-  const RemoteAreaSummary& remoteArea(uint8_t index) const { return remote_areas_[index]; }
   void key(char value) {
     if (value >= '0' && value <= '9' && pin_.length() < 12) pin_ += value;
     else if (value == 'B' && pin_.length()) pin_.remove(pin_.length() - 1);
@@ -96,9 +81,7 @@ class KeypadUiModel {
   KeypadPage page_ = KeypadPage::HOME;
   AlarmSnapshot snapshot_;
   AlarmState pending_arm_mode_ = AlarmState::DISARMED;
-  String pin_, triggering_sensor_, local_area_, selected_remote_area_, open_sensors_, failed_sensors_;
-  RemoteAreaSummary remote_areas_[8];
-  uint8_t remote_count_ = 0;
+  String pin_, triggering_sensor_, local_area_, open_sensors_, failed_sensors_;
   uint32_t countdown_seconds_ = 0;
   bool acm_connected_ = false;
 };

@@ -1,0 +1,262 @@
+{
+  "schema_version": 1,
+  "areas": [
+    "House",
+    "Garage",
+    "Basement",
+    "Exterior",
+    "Shop",
+    "She Shed",
+    "Shed",
+    "Barn",
+    "Detached Garage",
+    "Utility / Mechanical"
+  ],
+  "channels": [
+    {
+      "channel": 1,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 2,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 3,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 4,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 5,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 6,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 7,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 8,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 9,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 10,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 11,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 12,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 13,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 14,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 15,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 16,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 17,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 18,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 19,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 20,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 21,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 22,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 23,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    },
+    {
+      "channel": 24,
+      "name": "",
+      "area_id": "",
+      "type": "OPENING"
+    }
+  ],
+  "relays": [
+    {
+      "relay": 1,
+      "name": "",
+      "area_id": "",
+      "siren": false
+    },
+    {
+      "relay": 2,
+      "name": "",
+      "area_id": "",
+      "siren": false
+    },
+    {
+      "relay": 3,
+      "name": "",
+      "area_id": "",
+      "siren": false
+    },
+    {
+      "relay": 4,
+      "name": "",
+      "area_id": "",
+      "siren": false
+    },
+    {
+      "relay": 5,
+      "name": "",
+      "area_id": "",
+      "siren": false
+    },
+    {
+      "relay": 6,
+      "name": "",
+      "area_id": "",
+      "siren": false
+    },
+    {
+      "relay": 7,
+      "name": "",
+      "area_id": "",
+      "siren": false
+    },
+    {
+      "relay": 8,
+      "name": "",
+      "area_id": "",
+      "siren": false
+    }
+  ],
+  "keypads": [
+    {
+      "keypad_id": "",
+      "name": "",
+      "ip": "",
+      "area_id": "",
+      "authorized": false,
+      "inputs": [
+        {
+          "channel": 1,
+          "name": ""
+        },
+        {
+          "channel": 2,
+          "name": ""
+        },
+        {
+          "channel": 3,
+          "name": ""
+        },
+        {
+          "channel": 4,
+          "name": ""
+        },
+        {
+          "channel": 5,
+          "name": ""
+        },
+        {
+          "channel": 6,
+          "name": ""
+        },
+        {
+          "channel": 7,
+          "name": ""
+        },
+        {
+          "channel": 8,
+          "name": ""
+        }
+      ]
+    }
+  ],
+  "timings": {
+    "sensor_debounce_ms": 250,
+    "motion_qualification_ms": 10000,
+    "arming_delay_ms": 30000,
+    "entry_delay_ms": 30000,
+    "keypad_heartbeat_ms": 30000,
+    "keypad_offline_misses": 3
+  }
+}

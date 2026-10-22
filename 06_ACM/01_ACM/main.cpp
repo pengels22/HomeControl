@@ -46,8 +46,11 @@ void initializeHardware() {
   Wire.begin(acm_hw::I2C_SDA, acm_hw::I2C_SCL); Wire.setClock(400000);
   mcpWrite(acm_hw::MCP_ACM_INPUTS, MCP_IODIRA, 0xff); mcpWrite(acm_hw::MCP_ACM_INPUTS, MCP_IODIRB, 0xff);
   mcpWrite(acm_hw::MCP_ACM_INPUTS, MCP_GPPUA, 0xff); mcpWrite(acm_hw::MCP_ACM_INPUTS, MCP_GPPUB, 0xff);
-  mcpWrite(acm_hw::MCP_ACM_RELAYS, MCP_IODIRA, 0xff); mcpWrite(acm_hw::MCP_ACM_RELAYS, MCP_IODIRB, 0x00);
-  mcpWrite(acm_hw::MCP_ACM_RELAYS, MCP_GPIOB, 0x00);
+  mcpWrite(acm_hw::MCP_ACM_RELAYS, MCP_IODIRA, 0xff);
+  // Relay outputs are active-low: preload HIGH while still inputs, then switch
+  // to outputs so a reboot cannot energize a relay during initialization.
+  mcpWrite(acm_hw::MCP_ACM_RELAYS, MCP_GPIOB, 0xff);
+  mcpWrite(acm_hw::MCP_ACM_RELAYS, MCP_IODIRB, 0x00);
   SPI.begin(acm_hw::ETH_SCK, acm_hw::ETH_MISO, acm_hw::ETH_MOSI, acm_hw::ETH_CS); Ethernet.init(acm_hw::ETH_CS); Ethernet.begin(macAddress);
   if (!SD.begin(acm_hw::SD_CS, SPI)) snapshot.trouble_flags |= TROUBLE_SD;
 }
@@ -64,7 +67,7 @@ void sendStatus(bool full) { if (hcm.connected()) acm_protocol::sendAlarmStatus(
 void setup() {
   Serial.begin(115200); config.begin("acm", false); deviceId = config.getString("device_id", deviceId); hostname = config.getString("hostname", hostname);
   pins.begin("alarm"); initializeHardware(); snapshot.state = pins.hasMaster() ? AlarmState::DISARMED : AlarmState::TROUBLE; logEvent("ACM_BOOT");
-  static AlarmCore core(pins); alarmCore = &core; alarmCore->begin(config.getUInt("home_exit_ms", 30000), config.getUInt("away_exit_ms", 60000)); snapshot = alarmCore->snapshot();
+  static AlarmCore core(pins); alarmCore = &core; alarmCore->begin(config.getUInt("home_exit_ms", 0), config.getUInt("away_exit_ms", 30000)); snapshot = alarmCore->snapshot();
   esp_task_wdt_init(10, true); esp_task_wdt_add(nullptr);
 }
 void loop() {

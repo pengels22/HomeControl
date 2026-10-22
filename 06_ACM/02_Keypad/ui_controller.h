@@ -40,7 +40,6 @@ class KeypadUiController {
       case TouchAction::ARM_HOME: model_.setPendingArmMode(AlarmState::ARMED_HOME); model_.page(KeypadPage::PASSCODE_ENTRY); break;
       case TouchAction::ARM_AWAY: model_.setPendingArmMode(AlarmState::ARMED_AWAY); model_.page(KeypadPage::PASSCODE_ENTRY); break;
       case TouchAction::DISARM: model_.page(KeypadPage::PASSCODE_ENTRY); break;
-      case TouchAction::FORCE_ARM: model_.page(KeypadPage::HOME); break;
       case TouchAction::BACKSPACE: model_.key('B'); break;
       case TouchAction::DIGIT_0: model_.key('0'); break; case TouchAction::DIGIT_1: model_.key('1'); break;
       case TouchAction::DIGIT_2: model_.key('2'); break; case TouchAction::DIGIT_3: model_.key('3'); break;

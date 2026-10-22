@@ -5,7 +5,7 @@ const char* alarmStateName(AlarmState state) {
   switch (state) {
     case AlarmState::ARMED_HOME: return "ARMED_HOME";
     case AlarmState::ARMED_AWAY: return "ARMED_AWAY";
-    case AlarmState::EXIT_DELAY: return "EXIT_DELAY";
+    case AlarmState::ARMING_DELAY: return "ARMING_DELAY";
     case AlarmState::ENTRY_DELAY: return "ENTRY_DELAY";
     case AlarmState::TRIGGERED: return "TRIGGERED";
     case AlarmState::TROUBLE: return "TROUBLE";
@@ -31,10 +31,8 @@ bool sendHeartbeat(Client& client, const String& deviceId, const String& hostnam
 bool sendAlarmStatus(Client& client, const String& deviceId, const String& hostname, const AlarmSnapshot& snapshot, bool full) {
   String payload = String("{\"device_id\":\"") + deviceId + "\",\"hostname\":\"" + hostname +
                    "\",\"sequence\":" + snapshot.sequence + ",\"state\":\"" + alarmStateName(snapshot.state) +
-                   "\",\"full\":" + (full ? "true" : "false") + ",\"open_bitmap\":[" + snapshot.open_bitmap[0] + "," +
-                   snapshot.open_bitmap[1] + "," + snapshot.open_bitmap[2] + "],\"failed_bitmap\":[" + snapshot.failed_bitmap[0] +
-                   "," + snapshot.failed_bitmap[1] + "," + snapshot.failed_bitmap[2] + "],\"trigger_sensor\":" + snapshot.trigger_sensor +
-                   ",\"trouble_flags\":" + snapshot.trouble_flags + "}";
+                   "\",\"countdown\":" + snapshot.countdown_seconds + ",\"trouble\":" +
+                   ((snapshot.trouble_flags != 0) ? "true" : "false") + "}";
   return sendFrame(client, "ACM_STATUS", payload);
 }
 }

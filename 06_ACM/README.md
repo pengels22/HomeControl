@@ -34,9 +34,11 @@ LCD drawing and touch scanning are the next hardware-specific layer.
 ## Alarm and configuration model
 
 The ACM is authoritative for `DISARMED`, `ARMED_HOME`, `ARMED_AWAY`,
-`EXIT_DELAY`, `ENTRY_DELAY`, `TRIGGERED`, and `TROUBLE`. Force-arm semantics
-use per-sensor bypass bits and restore monitoring independently when each input
-closes. Timers are nonblocking and use `millis()` in the production loop.
+`ARMING_DELAY`, `ENTRY_DELAY`, `TRIGGERED`, and `TROUBLE`. ARM HOME is
+immediate; ARM AWAY uses a 30-second nonblocking arming delay. Opening sensors
+start a 30-second entry delay, while motion requires 10 seconds of continuous
+activity in ARM AWAY. Sensors open at arm are bypassed until restored and then
+resume monitoring automatically.
 
 PINs are ACM-only. `PinStore` uses an ESP32 NVS namespace, a random 16-byte
 salt, and PBKDF2-HMAC-SHA256. The first accepted PIN provisions the master;
@@ -53,13 +55,11 @@ fault/restored records.
 
 ## Protocol
 
-`03_Shared/protocol.*` uses bounded big-endian length-prefixed JSON frames with a version and message
-type. Keypad intents include `PANIC` and the arm/disarm/settings family;
-production ACM responses are `AUTH_RESULT`, `ALARM_STATE`, `OPEN_SENSOR_LIST`,
-`FAILED_SENSOR_LIST`, `AREA_SUMMARY`, `COUNTDOWN`, `CONFIG`, and siren/piezo
-commands. The ACM sends `ACM_STATUS` immediately on state or bitmap changes and
-also sends a complete snapshot every 60 seconds. Open and failed state are
-three 32-bit words, supporting at least 80 sensors without repeating names.
+`03_Shared/protocol.*` uses bounded big-endian length-prefixed JSON frames with
+a version and message type. HCM `ACM_STATUS` is deliberately compact and
+contains only global state, countdown, trouble, device identity, and sequence;
+sensor truth remains owned by the ACM. The ACM sends state changes, reconnect
+state, countdown updates, and a complete snapshot every 60 seconds.
 
 The heartbeat envelope carries device ID, hostname, sequence, health, and
 status. It is intentionally separate from alarm status. HCM ACK loss never
