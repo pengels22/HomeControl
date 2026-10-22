@@ -87,8 +87,11 @@ async def database(monkeypatch):
         await conn.execute((ROOT/'09_database/019_native_primitives.sql').read_text())
         after=dict(await conn.fetchrow('SELECT * FROM logical_devices WHERE id=$1',native))
         assert {key:after[key] for key in before}==before
+        connection_lock=asyncio.Lock()
         @asynccontextmanager
-        async def acquire(): yield conn
+        async def acquire():
+            async with connection_lock:
+                yield conn
         monkeypatch.setattr(registry_mod.db,'acquire',acquire)
         yield conn
     finally:
@@ -506,7 +509,7 @@ async def test_multi_instance_identity_service_routing_and_durable_events(databa
     await contexts[0].service('test','route',Args,first,target_required=True,target_domains=('sensor',)); await contexts[1].service('test','route',Args,second,target_required=True,target_domains=('sensor',))
     for ctx,entity in zip(contexts,entities): await ctx.state(entity,1)
     assert await reg.services.invoke('internal_mock','test','route',{},target_entity_id=entities[0])=={'owner':'first'}
-    durable=await reg.events_after(0,event_type='entity.state_changed'); assert len(durable)>=2 and durable[-1]['event_id']>durable[0]['event_id']; assert all('token' not in str(row['payload']).lower() for row in durable)
+    durable=await reg.events_after(0,event_type='entity.state_changed'); assert len(durable)>=2 and durable[-1]['event_id']>durable[0]['event_id']; assert all(isinstance(row['payload'],dict) for row in durable); assert all('token' not in str(row['payload']).lower() for row in durable)
 
 
 def test_denon_and_heos_media_transport_normalization():

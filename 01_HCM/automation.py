@@ -857,12 +857,16 @@ class AutomationEngine:
             if typ=='state':
                 row=await conn.fetchrow('SELECT state,attributes FROM entities WHERE id=$1 AND enabled',int(c['entity_ref']))
                 if not row: raise LookupError('Entity not found')
-                value=(row['attributes'] or {}).get(c['attribute']) if c.get('attribute') else row['state']
+                state=json.loads(row['state']) if isinstance(row['state'],str) else row['state']
+                attributes=json.loads(row['attributes']) if isinstance(row['attributes'],str) else row['attributes']
+                value=(attributes or {}).get(c['attribute']) if c.get('attribute') else state
                 return value==c['state']
             if typ=='numeric_state':
                 row=await conn.fetchrow('SELECT state,attributes FROM entities WHERE id=$1 AND enabled',int(c['entity_ref']))
                 if not row: raise LookupError('Entity not found')
-                value=(row['attributes'] or {}).get(c['attribute']) if c.get('attribute') else row['state']
+                state=json.loads(row['state']) if isinstance(row['state'],str) else row['state']
+                attributes=json.loads(row['attributes']) if isinstance(row['attributes'],str) else row['attributes']
+                value=(attributes or {}).get(c['attribute']) if c.get('attribute') else state
                 if isinstance(value,bool): return False
                 try: n=float(value)
                 except (TypeError,ValueError): return False

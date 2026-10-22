@@ -29,7 +29,7 @@ def identifier(value):
 def wire(row):
     result = dict(row)
     if 'entity_id' in result and 'id' in result: result['entity_ref']=result['id']
-    for key in ('capabilities','state','attributes','argument_schema','target_requirements','metadata'):
+    for key in ('capabilities','state','attributes','argument_schema','target_requirements','metadata','payload'):
         if isinstance(result.get(key), str):
             result[key] = json.loads(result[key])
     return result
@@ -188,7 +188,7 @@ class Context:
                 before = await conn.fetchrow('SELECT state FROM entities WHERE id=$1 AND provider_id=$2 AND enabled FOR UPDATE', entity_id, self.provider_id)
                 if not before:
                     raise OwnershipError('Entity absent, disabled or owned by another provider')
-                previous_state = before['state']
+                previous_state = json.loads(before['state']) if isinstance(before['state'],str) else before['state']
                 row=await conn.fetchrow('''UPDATE entities SET
                     last_changed=CASE WHEN last_updated IS NULL OR state IS DISTINCT FROM $3::jsonb THEN now() ELSE last_changed END,
                     state=$3::jsonb,attributes=$4::jsonb,available=$5,last_updated=now()
