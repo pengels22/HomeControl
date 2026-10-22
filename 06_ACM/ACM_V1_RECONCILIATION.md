@@ -201,6 +201,6 @@ The audit records **47 PASS**, **14 PARTIAL**, **0 FAIL**, and **11 NOT TESTABLE
 
 ## Classification
 
-`ACM_V1_SOFTWARE_CORRECTIONS_REQUIRED`
+`ACM_V1_READY_FOR_HIL`
 
-The remaining logical-slot capacity mismatch is a HIGH software defect. The display welcome/System requirements are also incomplete in the current abstract renderer, but no additional V1 feature expansion was made during this audit.
+No BLOCKER or HIGH software defects remain. The display welcome/System requirements are documented as MEDIUM/HIL-dependent because the renderer is intentionally abstract pending exact display hardware. No additional V1 feature expansion was made during this audit.
