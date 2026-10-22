@@ -25,10 +25,27 @@ AlarmSnapshot snapshot;
 AlarmCore* alarmCore = nullptr;
 KeypadManager keypadManager;
 SensorState sensors[24];
+bool relayActive[ConfigStore::MAX_RELAYS] = {};
+bool relaySiren[ConfigStore::MAX_RELAYS] = {};
 String deviceId = "acm-001", hostname = "ACM-001";
 uint32_t lastInput = 0, lastHeartbeat = 0, lastSnapshot = 0, lastLogMonth = 0;
 
 void mcpWrite(uint8_t address, uint8_t reg, uint8_t value) { Wire.beginTransmission(address); Wire.write(reg); Wire.write(value); Wire.endTransmission(); }
+void setRelay(uint8_t index, bool active) {
+  if (index >= ConfigStore::MAX_RELAYS || relayActive[index] == active) return;
+  relayActive[index] = active;
+  uint8_t value = 0xff;
+  for (uint8_t i = 0; i < ConfigStore::MAX_RELAYS; ++i) if (relayActive[i]) value &= static_cast<uint8_t>(~(1u << i));
+  mcpWrite(acm_hw::MCP_ACM_RELAYS, MCP_GPIOB, value);
+}
+void applySirenRelays(AlarmState state) {
+  const bool triggered = state == AlarmState::TRIGGERED;
+  for (uint8_t i = 0; i < ConfigStore::MAX_RELAYS; ++i) {
+    const bool configured = configStore.relay(i).siren;
+    if (configured != relaySiren[i]) { relaySiren[i] = configured; if (!configured) setRelay(i, false); }
+    if (relaySiren[i]) setRelay(i, triggered);
+  }
+}
 uint8_t mcpRead(uint8_t address, uint8_t reg) { Wire.beginTransmission(address); Wire.write(reg); Wire.endTransmission(false); Wire.requestFrom(address, (uint8_t)1); return Wire.available() ? Wire.read() : 0xff; }
 void logEvent(const char* event, uint16_t sensor = 0xffff) {
   if (!SD.begin(acm_hw::SD_CS)) { snapshot.trouble_flags |= TROUBLE_SD; return; }
@@ -74,13 +91,13 @@ void setup() {
   static AlarmCore core(pins); alarmCore = &core; alarmCore->begin(config.getUInt("home_exit_ms", 0), config.getUInt("away_exit_ms", 30000));
   for (uint8_t i = 0; i < ConfigStore::MAX_CHANNELS; ++i) { alarmCore->setSensorInUse(i, true); alarmCore->setSensorType(i, configStore.channel(i).type); }
   keypadManager.begin(configStore, *alarmCore);
-  snapshot = alarmCore->snapshot(); if (configStore.recoveryRequired()) snapshot.trouble_flags |= TROUBLE_CONFIG;
+  snapshot = alarmCore->snapshot(); for (uint8_t i = 0; i < ConfigStore::MAX_RELAYS; ++i) relaySiren[i] = configStore.relay(i).siren; if (configStore.recoveryRequired()) snapshot.trouble_flags |= TROUBLE_CONFIG;
   esp_task_wdt_init(10, true); esp_task_wdt_add(nullptr);
 }
 void loop() {
-  const uint32_t now = millis(); esp_task_wdt_reset(); scanInputs(); if (alarmCore) keypadManager.tick(now); if (alarmCore) { const uint32_t trouble = snapshot.trouble_flags; alarmCore->tick(now); snapshot = alarmCore->snapshot(); snapshot.trouble_flags |= trouble; }
+  const uint32_t now = millis(); esp_task_wdt_reset(); scanInputs(); if (alarmCore) keypadManager.tick(now); if (alarmCore) { const uint32_t trouble = snapshot.trouble_flags; alarmCore->tick(now); snapshot = alarmCore->snapshot(); snapshot.trouble_flags |= trouble; applySirenRelays(snapshot.state); }
   if (now - lastHeartbeat >= acm_protocol::HEARTBEAT_INTERVAL_MS) { lastHeartbeat = now; connectHcm(); if (hcm.connected()) acm_protocol::sendHeartbeat(hcm, deviceId, hostname, ++snapshot.sequence); }
   if (now - lastSnapshot >= acm_protocol::SNAPSHOT_INTERVAL_MS) { lastSnapshot = now; sendStatus(true); }
-  static AlarmState previousState = AlarmState::TROUBLE; static uint32_t previousBitmap = 0; if (snapshot.state != previousState || snapshot.open_bitmap[0] != previousBitmap) { previousState = snapshot.state; previousBitmap = snapshot.open_bitmap[0]; ++snapshot.sequence; sendStatus(false); keypadManager.broadcastAlarmState(snapshot); }
+  static AlarmState previousState = AlarmState::TROUBLE; static uint32_t previousBitmap = 0; static uint32_t previousCountdown = 0xffffffff; if (snapshot.state != previousState || snapshot.open_bitmap[0] != previousBitmap || snapshot.countdown_seconds != previousCountdown) { previousState = snapshot.state; previousBitmap = snapshot.open_bitmap[0]; previousCountdown = snapshot.countdown_seconds; ++snapshot.sequence; sendStatus(false); keypadManager.broadcastAlarmState(snapshot); }
   delay(1);
 }

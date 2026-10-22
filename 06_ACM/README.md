@@ -95,3 +95,19 @@ provisioning, settings authentication, and entry-delay flows.
 The LCD and touch hardware driver is intentionally still behind the
 `KeypadDisplay`/`KeypadTouch` boundary until the exact controller and touch
 coordinates are bench confirmed.
+
+## V1 audible alarm outputs
+
+ACM relay outputs 1-8 are active-low: HIGH is inactive and LOW is active.
+Only relays whose persisted `RelayRecord.siren` flag is true are owned by the
+alarm siren policy. They activate on `TRIGGERED` and clear immediately on
+`DISARMED`; generic contact relay state is left untouched. Changes to the
+persisted siren designation are reconciled while the alarm is running.
+
+The ACM sends framed `LOCAL_SIREN_ON` and `LOCAL_SIREN_OFF` commands to every
+connected keypad. The keypad 5 V MOSFET siren is off before network
+initialization, stays continuously on only during `TRIGGERED`, and is cleared
+immediately on disarm or reconnect reconciliation. The separate 3.3 V piezo
+only provides short acknowledgement tones and one short chirp per second while
+`ARMING_DELAY` or `ENTRY_DELAY` countdown seconds change. It is stopped in all
+other alarm states and is never used as the continuous alarm sounder.

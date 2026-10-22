@@ -18,6 +18,8 @@ constexpr char SENSOR_SNAPSHOT_REQUEST[] = "SENSOR_SNAPSHOT_REQUEST";
 constexpr char SENSOR_SNAPSHOT[] = "SENSOR_SNAPSHOT";
 constexpr char SENSOR_UPDATE[] = "SENSOR_UPDATE";
 constexpr char ALARM_STATE[] = "ALARM_STATE";
+constexpr char LOCAL_SIREN_ON[] = "LOCAL_SIREN_ON";
+constexpr char LOCAL_SIREN_OFF[] = "LOCAL_SIREN_OFF";
 
 // Incremental parser for the single, bounded, big-endian length-prefixed frame
 // used by both firmware targets. It is deliberately ArduinoJson-free so the

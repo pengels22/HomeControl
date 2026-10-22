@@ -26,10 +26,13 @@ class KeypadManager {
   EthernetClient clients_[ConfigStore::MAX_KEYPADS];
   acm_protocol::FrameParser parsers_[ConfigStore::MAX_KEYPADS];
   ConfigStore* config_=nullptr; AlarmCore* core_=nullptr;
+  AlarmState alarm_state_=AlarmState::DISARMED;
   void setFault(uint8_t keypadIndex, bool fault);
   void connect(uint8_t index, uint32_t now);
   void process(uint8_t index, uint32_t now);
   void processFrame(uint8_t index, const String& frame, uint32_t now);
+  void sendSiren(uint8_t index, bool active);
+  void reconcileSiren(uint8_t index);
   static String value(const String& json, const char* key);
   static String normalizeMac(String value);
 };
