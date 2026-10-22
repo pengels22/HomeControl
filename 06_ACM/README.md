@@ -139,3 +139,10 @@ Keypads with full input editing, PIN administration, seeded/custom Room /
 Location suggestions, System telemetry, bounded Logs, and Logout pages backed by the live ConfigStore,
 PinStore, AlarmCore, KeypadManager, and EventLogger. Firmware updates remain
 USB-only; V1 does not provide OTA or HTTPS.
+
+Configuration schema 2 adds a bounded persistent Room / Location suggestion
+list through an additive schema-1 migration; existing Areas, channels, relays,
+keypads, and keypad input metadata are preserved. Legacy credential storage is
+never imported: the UI exposes a limited Master reprovision route until a new
+secure credential is created. MCP/I2C is intentionally reported as UNKNOWN
+until hardware health monitoring is validated during HIL.

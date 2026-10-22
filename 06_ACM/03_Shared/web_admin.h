@@ -28,6 +28,7 @@ class AcmWebAdmin {
   void close(); void handle(); bool parseRequest(); bool authenticated(Session*& session); Session* findSession(const String& id); Session* createSession(); void expire(Session& session);
   void response(uint16_t status,const String& type,const String& content,const String& extra=""); void redirect(const String& location,const String& extra="");
   void loginPage(const String& error=""); void page(const String& tab); void applyMutation(Session& session);
+  void reprovisionPage(const String& error="");
   String htmlEscape(const String& value) const; String field(const String& key) const; String queryField(const String& key) const; String urlDecode(const String& value) const; String token() const; String nav(const String& active) const; String statusHeader() const; String typeName(SensorType type) const; String areaName(uint16_t id) const;
   bool requireCsrf(const Session& session) const; void audit(const String& event,const String& metadata="");
 };

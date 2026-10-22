@@ -6,11 +6,12 @@ bool ConfigStore::begin(const char* ns){
   const bool hasSchema=prefs_.isKey("schema"); const uint8_t schema=prefs_.getUChar("schema",0);
   if(!hasSchema && !prefs_.isKey("area_count")){ seedDefaults(); prefs_.putUChar("schema",SCHEMA_VERSION); status_=ConfigStatus::FRESH; }
   else if(schema==SCHEMA_VERSION){ load(); status_=ConfigStatus::CURRENT; }
-  else if(schema==0 || schema==1){ load(); prefs_.putUChar("schema",SCHEMA_VERSION); status_=ConfigStatus::MIGRATED; }
+  else if(schema==0 || schema==1){ load(); if(room_count_==0)seedRooms(); prefs_.putUChar("schema",SCHEMA_VERSION); status_=ConfigStatus::MIGRATED; }
   else { load(); status_=ConfigStatus::RECOVERY_REQUIRED; }
   return true;
 }
-void ConfigStore::seedDefaults(){ area_count_=sizeof(DEFAULT_AREAS)/sizeof(DEFAULT_AREAS[0]); for(uint8_t i=0;i<area_count_;++i){areas_[i].id=i+1; areas_[i].name=DEFAULT_AREAS[i];persistArea(i);} room_count_=sizeof(DEFAULT_ROOMS)/sizeof(DEFAULT_ROOMS[0]);for(uint8_t i=0;i<room_count_;++i){rooms_[i].name=DEFAULT_ROOMS[i];rooms_[i].custom=false;prefs_.putString((String("room_name")+i).c_str(),rooms_[i].name);prefs_.putBool((String("room_custom")+i).c_str(),false);} prefs_.putUChar("room_count",room_count_); for(uint8_t i=0;i<MAX_CHANNELS;++i){channels_[i].index=i+1; channels_[i].name=String("Channel ")+String(i+1); channels_[i].area_id=0; channels_[i].type=SensorType::OPENING;persistChannel(i);} for(uint8_t i=0;i<MAX_RELAYS;++i){relays_[i].index=i+1; relays_[i].name=String("Relay ")+String(i+1); relays_[i].area_id=0; relays_[i].siren=false;persistRelay(i);} prefs_.putUChar("area_count",area_count_);}
+void ConfigStore::seedRooms(){room_count_=sizeof(DEFAULT_ROOMS)/sizeof(DEFAULT_ROOMS[0]);for(uint8_t i=0;i<room_count_;++i){rooms_[i].name=DEFAULT_ROOMS[i];rooms_[i].custom=false;prefs_.putString((String("room_name")+i).c_str(),rooms_[i].name);prefs_.putBool((String("room_custom")+i).c_str(),false);}prefs_.putUChar("room_count",room_count_);}
+void ConfigStore::seedDefaults(){ area_count_=sizeof(DEFAULT_AREAS)/sizeof(DEFAULT_AREAS[0]); for(uint8_t i=0;i<area_count_;++i){areas_[i].id=i+1; areas_[i].name=DEFAULT_AREAS[i];persistArea(i);} seedRooms(); for(uint8_t i=0;i<MAX_CHANNELS;++i){channels_[i].index=i+1; channels_[i].name=String("Channel ")+String(i+1); channels_[i].area_id=0; channels_[i].type=SensorType::OPENING;persistChannel(i);} for(uint8_t i=0;i<MAX_RELAYS;++i){relays_[i].index=i+1; relays_[i].name=String("Relay ")+String(i+1); relays_[i].area_id=0; relays_[i].siren=false;persistRelay(i);} prefs_.putUChar("area_count",area_count_);}
 void ConfigStore::load(){
  area_count_=prefs_.getUChar("area_count",0); if(area_count_>MAX_AREAS) area_count_=MAX_AREAS;
  keypad_count_=prefs_.getUChar("keypad_count",0); if(keypad_count_>MAX_KEYPADS) keypad_count_=MAX_KEYPADS;

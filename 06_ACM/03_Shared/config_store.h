@@ -12,7 +12,7 @@ enum class ConfigStatus : uint8_t { FRESH, CURRENT, MIGRATED, RECOVERY_REQUIRED 
 
 class ConfigStore {
  public:
-  static constexpr uint8_t SCHEMA_VERSION=1, MAX_AREAS=32, MAX_CHANNELS=24, MAX_RELAYS=8, MAX_KEYPADS=8, MAX_ROOMS=48;
+  static constexpr uint8_t SCHEMA_VERSION=2, MAX_AREAS=32, MAX_CHANNELS=24, MAX_RELAYS=8, MAX_KEYPADS=8, MAX_ROOMS=48;
   bool begin(const char* ns="acm_config");
   ConfigStatus status() const { return status_; }
   bool recoveryRequired() const { return status_ == ConfigStatus::RECOVERY_REQUIRED; }
@@ -30,5 +30,5 @@ class ConfigStore {
   bool addRoom(const String& name);
  private:
   Preferences prefs_; ConfigStatus status_=ConfigStatus::FRESH; uint8_t area_count_=0, keypad_count_=0, room_count_=0; AreaRecord areas_[MAX_AREAS]; ChannelRecord channels_[MAX_CHANNELS]; RelayRecord relays_[MAX_RELAYS]; KeypadRecord keypads_[MAX_KEYPADS]; RoomRecord rooms_[MAX_ROOMS];
-  void seedDefaults(); void load(); void persistArea(uint8_t i); void persistChannel(uint8_t i); void persistRelay(uint8_t i);
+  void seedDefaults(); void seedRooms(); void load(); void persistArea(uint8_t i); void persistChannel(uint8_t i); void persistRelay(uint8_t i);
 };
