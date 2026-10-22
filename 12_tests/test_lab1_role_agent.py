@@ -18,6 +18,7 @@ lab1_emergency = import_module("11_scripts.lab1_emergency")
 lab1_user_sync = import_module("11_scripts.lab1_user_sync")
 lab1_user_sync_patcher = import_module("11_scripts.lab1_user_sync_patcher")
 lab1_simulation_patcher = import_module("11_scripts.lab1_simulation_command_patcher")
+lab1_reconnect_patcher = import_module("11_scripts.lab1_reconnect_patcher")
 
 OPERATION_ID = "11111111-2222-4333-8444-555555555555"
 
@@ -70,6 +71,50 @@ def test_lab1_heartbeat_state_advertises_local_emergency_service():
         "config_path": "/config",
         "health_path": "/health",
     }
+
+
+def test_lab1_simulated_outputs_survive_disconnect_and_are_snapshotted(tmp_path):
+    path = tmp_path / "module.json"
+    state = real_lab1_state(role="LCM")
+    state["simulated_relays"] = {"A1": True, "A2": False}
+    lab1.save_state_atomic(path, state)
+    assert lab1.heartbeat_state(lab1.load_state(path), "LCM")["simulated_relays"] == {"A1": True, "A2": False}
+
+    # A local simulated override while disconnected must appear at reconnect.
+    disconnected = lab1.load_state(path)
+    disconnected["simulated_relays"]["A1"] = False
+    lab1.save_state_atomic(path, disconnected)
+    snapshot = lab1.heartbeat_state(lab1.load_state(path), "LCM")
+    assert snapshot["simulated_relays"] == {"A1": False, "A2": False}
+    assert snapshot["physical_outputs_enabled"] is False
+    assert snapshot["simulation"] is True
+
+
+def test_lab1_reconnect_patcher_is_idempotent_and_compilable(tmp_path):
+    source = '''async def session(writer):
+        apply_module_config_payload(initial_payload)
+        while True:
+            state = verified_state()
+            await send_frame(writer, "heartbeat", {
+                "state": {
+                    "commissioned_local": False,
+                },
+            })
+            while True:
+                if kind == "heartbeat_ack":
+                    break
+'''
+    path = tmp_path / "lab_agent.py"
+    path.write_text(source)
+    lab1_reconnect_patcher.apply(path)
+    patched = path.read_text()
+    lab1_reconnect_patcher.apply(path)
+    assert path.read_text() == patched
+    assert patched.count(lab1_reconnect_patcher.SNAPSHOT_MARKER) == 1
+    assert patched.index('"state": heartbeat_state(snapshot_state, active_module_type())') < patched.index('await send_frame(writer, "heartbeat", {')
+    assert 'if kind == "state_ack":' in patched
+    assert '"simulated_relays": state.get("simulated_relays", {})' in patched
+    compile(patched, str(path), "exec")
 
 
 @pytest.mark.parametrize(("role", "count"), [("RCM", 32), ("LCM", 22), ("SIM", 0), ("UNASSIGNED", 0)])

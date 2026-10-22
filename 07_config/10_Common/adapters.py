@@ -501,21 +501,25 @@ class Lab1Adapter(BaseAdapter):
     def steps(self, artifact: ReleaseArtifact, deployment_id: str | None = None) -> list[AdapterStep]:
         release_dir = self.release_dir(artifact)
         backup_dir = self._backup_dir(deployment_id or artifact.release)
+        module_release = f"/opt/homecontrol-lab/releases/{artifact.release}"
         return super().steps(artifact, deployment_id=deployment_id) + [
             AdapterStep("preflight_lab1_safety", self._lab_state_safety_command()),
             AdapterStep("backup_lab_agent_components", self._lab1_backup_command(backup_dir), changes_system=True),
+            AdapterStep("stage_module_source", f"sudo install -d -m 0755 {module_release} && sudo cp -a {release_dir}/. {module_release}/ && sudo test -f {module_release}/08_servises/common/agent.py && sudo test -f {module_release}/03_LCM/main.py && sudo test -f {module_release}/04_RCM/main.py", changes_system=True, timeout=120),
             AdapterStep("install_role_helper", f"sudo install -m 0755 {release_dir}/11_scripts/lab1_role_agent.py /opt/homecontrol-lab/lab1_role_agent.py", changes_system=True),
             AdapterStep("install_module_config_support", f"sudo install -m 0644 {release_dir}/08_servises/common/module_infra.py /opt/homecontrol-lab/module_infra.py", changes_system=True),
             AdapterStep("install_simulation_command_support", f"sudo install -m 0755 {release_dir}/11_scripts/lab1_simulation_command_patcher.py /opt/homecontrol-lab/lab1_simulation_command_patcher.py && sudo /usr/bin/python3 /opt/homecontrol-lab/lab1_simulation_command_patcher.py", changes_system=True),
             AdapterStep("install_emergency_ui", self._lab1_emergency_install_command(release_dir), changes_system=True),
             AdapterStep("install_emergency_advertisement", f"sudo install -m 0755 {release_dir}/11_scripts/lab1_emergency_advertisement.py /opt/homecontrol-lab/lab1_emergency_advertisement.py && sudo /usr/bin/python3 /opt/homecontrol-lab/lab1_emergency_advertisement.py", changes_system=True),
             AdapterStep("install_user_sync", f"sudo install -m 0755 {release_dir}/11_scripts/lab1_user_sync.py /opt/homecontrol-lab/lab1_user_sync.py && sudo install -m 0755 {release_dir}/11_scripts/lab1_user_sync_patcher.py /opt/homecontrol-lab/lab1_user_sync_patcher.py && sudo /usr/bin/python3 /opt/homecontrol-lab/lab1_user_sync_patcher.py", changes_system=True),
+            AdapterStep("install_reconnect_snapshot", f"sudo install -m 0755 {release_dir}/11_scripts/lab1_reconnect_patcher.py /opt/homecontrol-lab/lab1_reconnect_patcher.py && sudo /usr/bin/python3 /opt/homecontrol-lab/lab1_reconnect_patcher.py && sudo /usr/bin/python3 -m py_compile /opt/homecontrol-lab/lab_agent.py", changes_system=True),
             AdapterStep("restart_lab_agent", "sudo systemctl restart homecontrol-lab.service", changes_system=True, timeout=60),
             AdapterStep("restart_emergency_ui", "sudo systemctl daemon-reload && sudo systemctl enable homecontrol-lab-emergency.service && sudo systemctl restart homecontrol-lab-emergency.service", changes_system=True, timeout=60),
             AdapterStep("verify_lab_state_safety", self._lab_state_safety_command(backup_dir), timeout=60),
             AdapterStep("verify_lab_services", self._lab_services_command(), timeout=60),
             AdapterStep("verify_emergency_ui", self._lab1_emergency_verify_command(), timeout=60),
             AdapterStep("verify_lab_heartbeat_client", self._lab_heartbeat_client_command(), timeout=60),
+            AdapterStep("verify_reconnect_snapshot", "sudo -n python3 - <<'PY'\nfrom pathlib import Path\nsource=Path('/opt/homecontrol-lab/lab_agent.py').read_text()\nassert source.count('await send_frame(writer, \"state\", {') == 1\nassert 'if kind == \"state_ack\"' in source\nassert '\"simulated_relays\": state.get(\"simulated_relays\", {})' in source\nprint('lab1_reconnect_snapshot=installed physical_outputs_enabled=false')\nPY"),
             AdapterStep("record_release", f"printf '%s\n' {artifact.release} | sudo tee {self.release_marker()} >/dev/null", changes_system=True),
         ]
 
@@ -593,7 +597,7 @@ class Lab1Adapter(BaseAdapter):
             "install -d -m 0755 \"$b\"; "
             "cp -a /opt/homecontrol-lab/lab1_role_agent.py \"$b/lab1_role_agent.py\"; "
             "cp -a /opt/homecontrol-lab/lab_agent.py \"$b/lab_agent.py\"; "
-            "for f in /opt/homecontrol-lab/lab1_user_sync.py /opt/homecontrol-lab/lab1_user_sync_patcher.py /opt/homecontrol-lab/lab1_simulation_command_patcher.py; do if [ -e \"$f\" ]; then cp -a \"$f\" \"$b/$(basename \"$f\")\"; fi; done; "
+            "for f in /opt/homecontrol-lab/lab1_user_sync.py /opt/homecontrol-lab/lab1_user_sync_patcher.py /opt/homecontrol-lab/lab1_simulation_command_patcher.py /opt/homecontrol-lab/lab1_reconnect_patcher.py; do if [ -e \"$f\" ]; then cp -a \"$f\" \"$b/$(basename \"$f\")\"; fi; done; "
             "for f in /opt/homecontrol-lab/lab1_emergency.py /etc/systemd/system/homecontrol-lab-emergency.service; do if [ -e \"$f\" ]; then cp -a \"$f\" \"$b/$(basename \"$f\")\"; fi; done; "
             "if [ -f /opt/homecontrol-lab/module_infra.py ]; then cp -a /opt/homecontrol-lab/module_infra.py \"$b/module_infra.py\"; fi; "
             "if [ -d /opt/homecontrol-lab/state/homecontrol ]; then cp -a /opt/homecontrol-lab/state/homecontrol \"$b/homecontrol\"; fi; "
@@ -660,6 +664,7 @@ class Lab1Adapter(BaseAdapter):
             "cp -a \"$b/lab_agent.py\" /opt/homecontrol-lab/lab_agent.py; "
             "if [ -f \"$b/lab1_user_sync.py\" ]; then cp -a \"$b/lab1_user_sync.py\" /opt/homecontrol-lab/lab1_user_sync.py; else rm -f /opt/homecontrol-lab/lab1_user_sync.py; fi; "
             "if [ -f \"$b/lab1_user_sync_patcher.py\" ]; then cp -a \"$b/lab1_user_sync_patcher.py\" /opt/homecontrol-lab/lab1_user_sync_patcher.py; else rm -f /opt/homecontrol-lab/lab1_user_sync_patcher.py; fi; "
+            "if [ -f \"$b/lab1_reconnect_patcher.py\" ]; then cp -a \"$b/lab1_reconnect_patcher.py\" /opt/homecontrol-lab/lab1_reconnect_patcher.py; else rm -f /opt/homecontrol-lab/lab1_reconnect_patcher.py; fi; "
             "if [ -f \"$b/lab1_emergency.py\" ]; then cp -a \"$b/lab1_emergency.py\" /opt/homecontrol-lab/lab1_emergency.py; else rm -f /opt/homecontrol-lab/lab1_emergency.py; fi; "
             "if [ -f \"$b/homecontrol-lab-emergency.service\" ]; then cp -a \"$b/homecontrol-lab-emergency.service\" /etc/systemd/system/homecontrol-lab-emergency.service; else rm -f /etc/systemd/system/homecontrol-lab-emergency.service; fi; "
             "if [ -f \"$b/module_infra.py\" ]; then cp -a \"$b/module_infra.py\" /opt/homecontrol-lab/module_infra.py; else rm -f /opt/homecontrol-lab/module_infra.py; fi; "

@@ -195,12 +195,20 @@ def handle_command_file(state_path: Path, payload_path: Path) -> dict[str, Any]:
 
 
 def heartbeat_state(state: dict[str, Any], registered_module_type: str) -> dict[str, Any]:
+    _validate_safe_state(state)
+    simulated_relays = state.get("simulated_relays") or {}
+    if not isinstance(simulated_relays, dict) or any(
+        not isinstance(channel, str) or not isinstance(value, bool)
+        for channel, value in simulated_relays.items()
+    ):
+        raise RoleCommandError("invalid simulated relay state")
     return {
         "lab_role": state.get("role", "UNASSIGNED"),
         "registered_module_type": registered_module_type,
         "simulation": True,
         "physical_outputs_enabled": False,
         "commissioned_local": bool(state.get("commissioned", False)),
+        "simulated_relays": dict(simulated_relays),
         "emergency_ui": {
             "enabled": True,
             "available": True,

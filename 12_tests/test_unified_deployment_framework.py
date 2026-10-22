@@ -674,6 +674,10 @@ def test_lab1_post_install_verifies_safety_services_and_heartbeat_before_marker(
     assert names.index("verify_lab_state_safety") < names.index("verify_lab_services")
     assert names.index("verify_lab_services") < names.index("verify_lab_heartbeat_client")
     assert names.index("verify_lab_heartbeat_client") < names.index("record_release")
+    assert names.index("backup_lab_agent_components") < names.index("stage_module_source")
+    assert names.index("stage_module_source") < names.index("install_reconnect_snapshot")
+    assert names.index("install_reconnect_snapshot") < names.index("restart_lab_agent")
+    assert names.index("verify_reconnect_snapshot") < names.index("record_release")
 
 
 def test_lab1_deployment_uses_release_specific_backup_and_restores_marker():
