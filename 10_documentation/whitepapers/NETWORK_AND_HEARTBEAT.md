@@ -215,6 +215,12 @@ Purpose:
 - module state update;
 - HCM registry online state.
 
+When this HCM session is lost, modules retain their last output states;
+RCM local overrides remain available. A reconnect sends the current module
+state immediately, and HCM defers new energizing commands until it records that
+state. Explicit deenergizing safety commands remain available. The reported state remains commanded/device state, not proof of
+physical load state.
+
 ### Unified Heartbeat V3
 
 Purpose:

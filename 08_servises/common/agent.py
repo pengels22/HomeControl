@@ -58,6 +58,7 @@ class ModuleAgent:
         self.hcm_api_url = self.web.get('hcm_api_url', f'http://{self.hcm_host}:8080/api/v1').rstrip('/')
         self.hcm_connected = False
         self.last_valid_ack_ts: float | None = None
+        self.hcm_state_reconciled = False
         self.start_time = time.time()
         heartbeat_cfg = config.get('heartbeat_v3', {})
         self.heartbeat_socket_path = heartbeat_cfg.get(
@@ -184,7 +185,7 @@ class ModuleAgent:
 
     async def web_status(self) -> dict[str, Any]:
         active_faults = self.peripherals.active_faults()
-        heartbeat_ack_current = self.last_valid_ack_ts is not None and (time.time() - self.last_valid_ack_ts) <= max(self.heartbeat_s * 3, 15)
+        heartbeat_ack_current = self.hcm_connected and self.last_valid_ack_ts is not None and (time.time() - self.last_valid_ack_ts) <= max(self.heartbeat_s * 3, 15)
         return {
             'module_type': self.module_type,
             'identity': self.identity,
@@ -200,6 +201,8 @@ class ModuleAgent:
                 'connected': self.hcm_connected,
                 'last_valid_ack_ts': self.last_valid_ack_ts,
                 'ack_current': heartbeat_ack_current,
+                'state_reconciled': self.hcm_state_reconciled,
+                'output_policy_on_hcm_loss': 'hold_last_state_with_local_overrides',
             },
             'component_health': self.peripherals.grouped(),
             'active_faults': active_faults,
@@ -665,30 +668,57 @@ $('login-form').addEventListener('submit',login);$('refresh').addEventListener('
             server_hostname=server_hostname,
         )
         self.hcm_connected = True
-        await self.heartbeat_status('hcm_tcp_session', 'connected')
-        await self.heartbeat_fault('hcm_tcp_session', None)
-        await self.heartbeat_status(self.heartbeat_status_name, 'running')
-        await write_frame(writer, {
-            'type': 'identify',
-            'payload': {
-                **self.identity,
-                'reported_hostname': socket.gethostname(),
-                'software_version': self.config.get('software_version', '0.1.0'),
-                'capabilities': self.config.get('capabilities', []),
-            }
-        })
-        reply = await read_frame(reader)
-        if reply.get('type') == 'assignment':
-            ack = await self.apply_assignment(reply.get('payload', {}))
-            await write_frame(writer, {'type': 'command_ack', 'payload': ack, 'request_id': reply.get('request_id')})
-            # Commissioning requires the module to return using its permanent identity.
-            # The installer may replace this reconnect with a real OS hostname/IP update + reboot.
+        self.last_valid_ack_ts = None
+        self.hcm_state_reconciled = False
+        try:
+            await self.heartbeat_status('hcm_tcp_session', 'connected')
+            await self.heartbeat_fault('hcm_tcp_session', None)
+            await self.heartbeat_status(self.heartbeat_status_name, 'running')
+            await write_frame(writer, {
+                'type': 'identify',
+                'payload': {
+                    **self.identity,
+                    'reported_hostname': socket.gethostname(),
+                    'software_version': self.config.get('software_version', '0.1.0'),
+                    'capabilities': self.config.get('capabilities', []),
+                }
+            })
+            reply = await read_frame(reader)
+            if reply.get('type') == 'assignment':
+                ack = await self.apply_assignment(reply.get('payload', {}))
+                await write_frame(writer, {'type': 'command_ack', 'payload': ack, 'request_id': reply.get('request_id')})
+                # Commissioning requires the module to return using its permanent identity.
+                # The installer may replace this reconnect with a real OS hostname/IP update + reboot.
+                self.hcm_connected = False
+                writer.close()
+                await writer.wait_closed()
+                return
+            if reply.get('type') == 'config':
+                ack = await self.apply_config(reply.get('payload', {}))
+                await write_frame(writer, {'type': 'command_ack', 'payload': ack, 'request_id': reply.get('request_id')})
+
+            # Send the current module state immediately after identify/config. A
+            # local override may have changed outputs while HCM was unavailable.
+            await write_frame(writer, {
+                'type': 'state',
+                'request_id': str(uuid.uuid4()),
+                'payload': {
+                    'module_uuid': self.identity['module_uuid'],
+                    'device_id': self.identity.get('device_id'),
+                    'hostname': self.identity['hostname'],
+                    'ts': time.time(),
+                    'state': await self.collect_state(),
+                    'faults': self.faults,
+                    'config_sync': dict(self.config_sync),
+                },
+            })
+
+        except BaseException:
+            self.hcm_connected = False
+            self.hcm_state_reconciled = False
             writer.close()
             await writer.wait_closed()
-            return
-        if reply.get('type') == 'config':
-            ack = await self.apply_config(reply.get('payload', {}))
-            await write_frame(writer, {'type': 'command_ack', 'payload': ack, 'request_id': reply.get('request_id')})
+            raise
 
         async def heartbeat_loop():
             while self.running:
@@ -719,6 +749,10 @@ $('login-form').addEventListener('submit',login);$('refresh').addEventListener('
                 typ = msg.get('type')
                 if typ == 'heartbeat_ack':
                     self.last_valid_ack_ts = time.time()
+                    self.hcm_state_reconciled = True
+                    continue
+                if typ == 'state_ack':
+                    self.hcm_state_reconciled = True
                     continue
                 if typ == 'log_ack':
                     payload = msg.get('payload') or {}
@@ -734,6 +768,7 @@ $('login-form').addEventListener('submit',login);$('refresh').addEventListener('
                     await write_frame(writer, {'type': 'command_ack', 'payload': result, 'request_id': msg.get('request_id')})
         finally:
             self.hcm_connected = False
+            self.hcm_state_reconciled = False
             await self.heartbeat_status('hcm_tcp_session', 'disconnected')
             await self.heartbeat_fault('hcm_tcp_session', 'module TCP session disconnected')
             hb.cancel()

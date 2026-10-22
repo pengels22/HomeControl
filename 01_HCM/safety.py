@@ -48,6 +48,11 @@ class SafetyController:
         self.globals = globals_ or global_config.load_global_config('HCM')
         self.hvac = hvac
         self.fire_active = False
+        self._fire_hvac_complete = False
+        self._fire_metadata_complete = False
+        self._fire_lights_complete: set[str] = set()
+        self._fire_lighting_complete = False
+        self._fire_event_recorded = False
         self.alarm_contact_active = False
         self.alarm_contact_fault = True
         self.ac_power_present: bool | None = None
@@ -101,13 +106,24 @@ class SafetyController:
         sample = self.fire_input.sample(level, now)
         self.fire_input_fault = bool(sample.fault)
         if sample.fault:
-            await self.heartbeat.status('fire_alarm_s', 'unknown')
-            await self.heartbeat.fault('fire_input_fault', 'fire input unknown or disconnected')
+            for report in (self.heartbeat.status('fire_alarm_s', 'unknown'), self.heartbeat.fault('fire_input_fault', 'fire input unknown or disconnected')):
+                try:
+                    await report
+                except Exception:
+                    log.exception('fire input heartbeat reporting failed')
         else:
-            await self.heartbeat.fault('fire_input_fault', None)
-        if not sample.fault and self.fire_active != sample.fire_active:
-            await self.heartbeat.status('fire_alarm_s', 'active' if sample.fire_active else 'normal')
-            await self.set_fire(sample.fire_active, source='physical')
+            try:
+                await self.heartbeat.fault('fire_input_fault', None)
+            except Exception:
+                log.exception('fire input heartbeat reporting failed')
+        if not sample.fault:
+            if self.fire_active != sample.fire_active:
+                try:
+                    await self.heartbeat.status('fire_alarm_s', 'active' if sample.fire_active else 'normal')
+                except Exception:
+                    log.exception('fire input heartbeat reporting failed')
+            if self.fire_active != sample.fire_active or (self.fire_active and not (self._fire_hvac_complete and self._fire_metadata_complete and self._fire_lighting_complete and self._fire_event_recorded)):
+                await self.set_fire(sample.fire_active, source='physical')
         return sample
 
     async def sample_alarm_contact(self, level: bool | None, now: float | None = None):
@@ -188,8 +204,15 @@ class SafetyController:
         return {'state': 'present' if present else 'absent', 'fault': False, 'changed': changed, 'sampled_at': sample_time}
 
     async def set_maintenance_lockout(self, active: bool):
+        was_active = self.maintenance_lockout_active
         self.maintenance_lockout_active = bool(active)
-        await self.heartbeat.status('maintenance_lockout', 'active' if active else 'inactive')
+        try:
+            await self.heartbeat.status('maintenance_lockout', 'active' if active else 'inactive')
+        except Exception:
+            log.exception('maintenance lockout heartbeat reporting failed')
+        if was_active and not active and self.fire_active:
+            self._fire_lighting_complete = False
+            await self.set_fire(True, source='physical' if self.physical_fire_input_authoritative() else 'software')
 
     def physical_fire_input_authoritative(self) -> bool:
         return bool(getattr(self.safety_relays and self.safety_relays.backend, 'physical_input_authoritative', False))
@@ -197,34 +220,50 @@ class SafetyController:
     async def set_fire(self, active: bool, *, source: str = 'software'):
         if self.physical_fire_input_authoritative() and source != 'physical':
             raise PermissionError('physical fire input is authoritative')
-        if active == self.fire_active:
+        changed = active != self.fire_active
+        if not changed and not active:
             return
         self.fire_active = active
-        async with db.acquire() as conn:
-            await conn.execute('INSERT INTO safety_events(event_type,active,details) VALUES($1,$2,$3::jsonb)', 'fire', active, '{}')
-        await self.heartbeat.status('fire_alarm', 'active' if active else 'inactive')
-        await self.heartbeat.fault('fire_alarm_active', 'fire alarm active' if active else None)
+        if changed:
+            self._fire_event_recorded = False
         if active:
-            hvac_result = await self.hvac.force_off()
+            if changed:
+                self._fire_hvac_complete = False
+                self._fire_metadata_complete = False
+                self._fire_lights_complete.clear()
+                self._fire_lighting_complete = False
+            if not self._fire_hvac_complete:
+                try:
+                    hvac_result = await self.hvac.force_off()
+                    self._fire_hvac_complete = not isinstance(hvac_result, dict) or hvac_result.get('ok', True)
+                    if not self._fire_hvac_complete:
+                        log.error('life-safety HVAC shutdown had output failures: %s', hvac_result.get('failures'))
+                except Exception:
+                    log.exception('life-safety HVAC shutdown failed')
             from .channel_registry import fire_shutdown
-            try:
-                metadata_failures = await fire_shutdown()
-                if metadata_failures:
-                    log.error('Metadata HVAC safety shutdown failures: %s', metadata_failures)
-            except Exception:
-                log.exception('Metadata HVAC safety shutdown failed')
-            if isinstance(hvac_result, dict) and not hvac_result.get('ok', True):
-                log.error('life-safety HVAC shutdown had output failures: %s', hvac_result.get('failures'))
-            await notifications.send(Notification(title='Fire alarm', body='Fire alarm active. HVAC shutdown initiated. Emergency lighting actions initiated where permitted.', priority='critical', category='life_safety'))
+            if not self._fire_metadata_complete:
+                try:
+                    metadata_failures = await fire_shutdown()
+                    self._fire_metadata_complete = not metadata_failures
+                    if metadata_failures:
+                        log.error('Metadata HVAC safety shutdown failures: %s', metadata_failures)
+                except Exception:
+                    log.exception('Metadata HVAC safety shutdown failed')
             if self.maintenance_lockout_active:
                 rows = []
-                await self.heartbeat.fault('output_command_inhibited', 'fire emergency lighting inhibited by maintenance lockout')
+                self._fire_lighting_complete = True
+                try:
+                    await self.heartbeat.fault('output_command_inhibited', 'fire emergency lighting inhibited by maintenance lockout')
+                except Exception:
+                    log.exception('fire lockout heartbeat reporting failed')
             else:
-                async with db.acquire() as conn:
-                    if self.emergency_lighting_logical_names:
-                        rows = [{'logical_name': name} for name in self.emergency_lighting_logical_names]
-                    else:
-                        rows = await conn.fetch("""
+                if self.emergency_lighting_logical_names:
+                    rows = [{'logical_name': name} for name in self.emergency_lighting_logical_names]
+                    self._fire_lighting_complete = True
+                else:
+                    try:
+                        async with db.acquire() as conn:
+                            rows = await conn.fetch("""
                             SELECT DISTINCT d.logical_name
                             FROM logical_devices d
                             LEFT JOIN device_bindings b ON b.logical_device_id=d.id AND b.enabled
@@ -233,19 +272,57 @@ class SafetyController:
                                 (c.id IS NOT NULL AND c.enabled AND c.purpose='LIGHTING' AND c.emergency)
                                 OR (c.id IS NULL AND d.device_class='light' AND COALESCE((d.metadata->>'emergency_lighting')::boolean,false)))
                         """)
+                        self._fire_lighting_complete = True
+                    except Exception:
+                        rows = []
+                        self._fire_lighting_complete = False
+                        log.exception('fire emergency-light lookup failed')
             for r in rows:
+                if r['logical_name'] in self._fire_lights_complete:
+                    continue
                 try:
-                    await command_logical(
+                    result = await command_logical(
                         r['logical_name'],
                         {'op':'light','percent':100,'value':True},
                         source=OutputSource.LIFE_SAFETY,
                         safety_conditions={arbiter_mod.SafetyCondition.FIRE_ACTIVE.value},
                     )
+                    if not isinstance(result, dict) or result.get('ok', True):
+                        self._fire_lights_complete.add(r['logical_name'])
+                    else:
+                        self._fire_lighting_complete = False
+                        log.error('life-safety light command rejected: %s: %s', r['logical_name'], result)
                 except Exception:
+                    self._fire_lighting_complete = False
                     log.exception('failed life-safety light command: %s', r['logical_name'])
+            if changed:
+                try:
+                    await notifications.send(Notification(title='Fire alarm', body='Fire alarm active. HVAC shutdown initiated. Emergency lighting actions initiated where permitted.', priority='critical', category='life_safety'))
+                except Exception:
+                    log.exception('fire notification failed')
         else:
+            self._fire_hvac_complete = False
+            self._fire_metadata_complete = False
+            self._fire_lights_complete.clear()
+            self._fire_lighting_complete = False
             for logical_device_id in await clear_source(OutputSource.LIFE_SAFETY):
                 try:
                     await apply_active_intent(logical_device_id)
                 except Exception:
                     log.exception('failed restoring output after life-safety clear: %s', logical_device_id)
+        if changed or not self._fire_event_recorded:
+            try:
+                async with db.acquire() as conn:
+                    await conn.execute('INSERT INTO safety_events(event_type,active,details) VALUES($1,$2,$3::jsonb)', 'fire', active, '{}')
+                self._fire_event_recorded = True
+            except Exception:
+                log.exception('fire safety event persistence failed')
+        if changed:
+            for report in (
+                self.heartbeat.status('fire_alarm', 'active' if active else 'inactive'),
+                self.heartbeat.fault('fire_alarm_active', 'fire alarm active' if active else None),
+            ):
+                try:
+                    await report
+                except Exception:
+                    log.exception('fire heartbeat reporting failed')

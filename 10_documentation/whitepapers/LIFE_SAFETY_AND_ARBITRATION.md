@@ -141,9 +141,19 @@ Relevant safety conditions include:
 
 - maintenance lockout;
 - fire-input fault;
-- communication loss;
+- an explicit communication-loss safety condition delivered while HCM control is available;
 - arbiter fault;
 - explicit all-off.
+
+Loss of the HCM control session by itself uses a hold-last-state policy for
+module-controlled outputs. It does not synthesize a `communication_loss` safety
+condition or switch outputs off. Qualified RCM local overrides continue to
+operate under the existing safety and commissioning gates. On reconnection,
+the module reports its current commanded state before HCM accepts new output
+commands for that session; explicit deenergizing safety commands may proceed
+during reconciliation. This is a software state report, not physical
+contact or load feedback. Fire and maintenance safety actions already
+received by a module retain their normal priority.
 
 The software attempts all outputs and records failures rather than stopping after the first error.
 

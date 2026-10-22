@@ -143,6 +143,87 @@ async def test_repeated_fire_state_is_idempotent(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_fire_shutdown_survives_database_failure_and_retries_missing_action(monkeypatch):
+    class FailedAcquire:
+        async def __aenter__(self):
+            raise OSError('database unavailable')
+
+        async def __aexit__(self, *_):
+            return False
+
+    hvac = FakeHVAC()
+    commands = []
+    monkeypatch.setattr(safety_mod.db, 'acquire', lambda: FailedAcquire())
+
+    async def command_logical(name, command, **kwargs):
+        commands.append(name)
+        return {'ok': True}
+
+    async def send(_notification):
+        return None
+
+    monkeypatch.setattr(safety_mod, 'command_logical', command_logical)
+    monkeypatch.setattr(safety_mod.notifications, 'send', send)
+    controller = SafetyController(hvac, emergency_lighting_logical_names=['Hall Light'])
+    await controller.set_fire(True)
+    assert controller.fire_active is True
+    assert hvac.force_off_count == 1
+    assert commands == ['Hall Light']
+    await controller.set_fire(True)
+    assert hvac.force_off_count == 1
+    assert commands == ['Hall Light']
+
+
+@pytest.mark.asyncio
+async def test_physical_fire_sample_continues_when_heartbeat_reporting_fails(monkeypatch):
+    class FailedHeartbeat:
+        async def status(self, *_):
+            raise OSError('heartbeat unavailable')
+
+        async def fault(self, *_):
+            raise OSError('heartbeat unavailable')
+
+    conn = FakeConn()
+    monkeypatch.setattr(safety_mod.db, 'acquire', lambda: FakeAcquire(conn))
+    monkeypatch.setattr(safety_mod.notifications, 'send', lambda _: asyncio.sleep(0))
+    controller = SafetyController(FakeHVAC(), heartbeat=FailedHeartbeat(), emergency_lighting_logical_names=[])
+    controller.fire_input.debounce_seconds = 0
+    await controller.sample_fire_input(False, 0)
+    await controller.sample_fire_input(True, 1)
+    await controller.sample_fire_input(True, 2)
+    assert controller.fire_active is True
+    assert controller.hvac.force_off_count == 1
+
+
+@pytest.mark.asyncio
+async def test_persistent_high_retries_failed_hvac_without_repeating_completed_lights(monkeypatch):
+    class FlakyHVAC(FakeHVAC):
+        async def force_off(self):
+            self.force_off_count += 1
+            return {'ok': self.force_off_count > 1, 'failures': ['fan'] if self.force_off_count == 1 else []}
+
+    conn = FakeConn()
+    lights = []
+    monkeypatch.setattr(safety_mod.db, 'acquire', lambda: FakeAcquire(conn))
+    monkeypatch.setattr(safety_mod.notifications, 'send', lambda _: asyncio.sleep(0))
+
+    async def command_light(name, *_args, **_kwargs):
+        lights.append(name)
+        return {'ok': True}
+
+    monkeypatch.setattr(safety_mod, 'command_logical', command_light)
+    controller = SafetyController(FlakyHVAC(), emergency_lighting_logical_names=['Hall Light'])
+    controller.fire_input.debounce_seconds = 0
+    await controller.sample_fire_input(False, 0)
+    await controller.sample_fire_input(True, 1)
+    await controller.sample_fire_input(True, 2)
+    await controller.sample_fire_input(True, 3)
+    assert controller.hvac.force_off_count == 2
+    assert lights == ['Hall Light']
+    assert len([item for item in conn.executed if item[1] == 'fire']) == 1
+
+
+@pytest.mark.asyncio
 async def test_fire_detection_logs_but_does_not_command_lights_during_lockout(monkeypatch):
     conn = FakeConn()
     hvac = FakeHVAC()

@@ -77,12 +77,34 @@ async def test_module_agent_persists_heartbeat_supervisor_config(tmp_path):
 @pytest.mark.asyncio
 async def test_module_web_status_tracks_valid_heartbeat_ack():
     agent = agent_mod.ModuleAgent('LCM', {'web': {'enabled': True}, 'heartbeat_seconds': 5})
+    agent.hcm_connected = True
     agent.last_valid_ack_ts = __import__('time').time()
 
     status = await agent.web_status()
 
     assert status['hcm_heartbeat_health']['ack_current'] is True
     assert status['led_state']['LINK'] is True
+
+
+@pytest.mark.asyncio
+async def test_stale_hcm_ack_reports_hold_policy_without_changing_outputs(tmp_path):
+    lcm_mod = import_module('03_LCM.main')
+    agent = lcm_mod.LCMAgent({
+        'identity_path': str(tmp_path / 'identity.json'),
+        'runtime_root': str(tmp_path / 'runtime'),
+        'io_mode': 'simulated',
+        'mock_hardware': True,
+        'heartbeat_seconds': 5,
+    })
+    agent.relays.set('A1', True)
+    agent.hcm_connected = True
+    agent.last_valid_ack_ts = time.time() - 60
+
+    status = await agent.web_status()
+
+    assert status['hcm_heartbeat_health']['ack_current'] is False
+    assert status['hcm_heartbeat_health']['output_policy_on_hcm_loss'] == 'hold_last_state_with_local_overrides'
+    assert agent.relays.get('A1') is True
 
 
 @pytest.mark.asyncio

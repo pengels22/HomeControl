@@ -294,18 +294,14 @@ async def _normal_login_rate_check(conn, username: str) -> None:
 
 
 async def _normal_login_failure(conn, username: str) -> None:
-    row = await conn.fetchrow(
-        "SELECT failed_attempts FROM auth_login_rate_limits WHERE scope=$1 FOR UPDATE",
-        username,
-    )
-    attempts = int(row["failed_attempts"] if row else 0) + 1
     await conn.execute(
         """INSERT INTO auth_login_rate_limits(scope, failed_attempts, next_allowed_at, last_failed_at, updated_at)
-           VALUES($1,$2,CASE WHEN $2 >= 5 THEN now() + interval '5 minutes' ELSE NULL END,now(),now())
-           ON CONFLICT(scope) DO UPDATE SET failed_attempts=$2,
-           next_allowed_at=CASE WHEN $2 >= 5 THEN now() + interval '5 minutes' ELSE NULL END,
+           VALUES($1,1,NULL,now(),now())
+           ON CONFLICT(scope) DO UPDATE SET failed_attempts=auth_login_rate_limits.failed_attempts + 1,
+           next_allowed_at=CASE WHEN auth_login_rate_limits.failed_attempts + 1 >= 5
+                                THEN now() + interval '5 minutes' ELSE NULL END,
            last_failed_at=now(), updated_at=now()""",
-        username, attempts,
+        username,
     )
 
 

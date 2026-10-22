@@ -180,7 +180,11 @@ class RCMBankController:
                 else:
                     self._high_since[index] = None
                 continue
-            if on == off:
+            if on and off:
+                self.override_states[index] = OverrideState.WAIT_FOR_RELEASE
+                self._high_since[index] = None
+                continue
+            if not on and not off:
                 continue
             value = on
             channel = (self.active_bank - 1) * 8 + index
@@ -190,6 +194,24 @@ class RCMBankController:
             self._high_since[index] = None
             operations.append({"override": index + 1, "channel_index": channel, "value": value, "bank": self.active_bank, "generation": self.selection_generation})
         return operations
+
+    def invalidate_inputs(self) -> None:
+        """Discard a bank selection and require a fresh all-released sample sequence."""
+        self.active_bank = 0
+        self.selector_conflict = False
+        self._start_selection_interlock()
+        self._selector_initialized = False
+        self._override_initialized = False
+        self._startup_release_required = True
+
+    def inputs_requalified(self, now_ms: int) -> bool:
+        return (
+            not self._startup_release_required
+            and not any(self._selector_raw)
+            and not any(self._override_on_raw)
+            and not any(self._override_off_raw)
+            and all(self._elapsed(now_ms, changed) >= self.debounce_ms for changed in self._selector_changed_at)
+        )
 
     def sample(self, selector_asserted: int, override_on_asserted: int, override_off_asserted: int, now_ms: int) -> dict[str, Any]:
         now = int(now_ms) & 0xFFFFFFFF

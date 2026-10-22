@@ -8,6 +8,12 @@ network:
         vlan: 20
         subnet: 192.168.20.0/24
         hcm_address: 192.168.20.27
+        reserved_addresses:
+          - 192.168.20.24  # Conflict Wi-Fi
+          - 192.168.20.25  # HCM Wi-Fi
+          - 192.168.20.26  # Conflict Ethernet
+          - 192.168.20.27  # HCM Ethernet
+          - 192.168.20.36  # LAB1
         assignment_enabled: true
         pools:
           RCM: {start: 192.168.20.20, end: 192.168.20.29}

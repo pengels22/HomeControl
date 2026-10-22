@@ -1,4 +1,5 @@
 from importlib import import_module
+import asyncio
 
 import pytest
 from fastapi import HTTPException
@@ -37,7 +38,8 @@ class FakeAuthConn:
             if query.startswith('DELETE'):
                 self.login_limits.pop(args[0], None)
             else:
-                self.login_limits[args[0]] = {'failed_attempts': args[1], 'next_allowed_at': object() if args[1] >= 5 else None}
+                attempts = self.login_limits.get(args[0], {}).get('failed_attempts', 0) + 1
+                self.login_limits[args[0]] = {'failed_attempts': attempts, 'next_allowed_at': object() if attempts >= 5 else None}
             return
         raise AssertionError(f'unexpected execute: {query}')
 
@@ -202,6 +204,25 @@ async def test_password_login_locks_after_five_failures_and_clears_on_success(mo
     conn.login_limits['patrick']['next_allowed_at'] = None
     token = await auth.login_password('patrick', 'correct horse battery staple')
     assert token and 'patrick' not in conn.login_limits
+
+
+@pytest.mark.asyncio
+async def test_login_failure_uses_database_atomic_increment():
+    class ConcurrentConn(FakeAuthConn):
+        reads = 0
+
+        async def fetchrow(self, query, *args):
+            if 'FOR UPDATE' in query and 'auth_login_rate_limits' in query:
+                self.reads += 1
+                await asyncio.sleep(0)
+                return None
+            return await super().fetchrow(query, *args)
+
+    conn = ConcurrentConn()
+    await asyncio.gather(*(auth._normal_login_failure(conn, 'patrick') for _ in range(6)))
+    assert conn.login_limits['patrick']['failed_attempts'] == 6
+    assert conn.login_limits['patrick']['next_allowed_at'] is not None
+    assert conn.reads == 0
 
 
 @pytest.mark.asyncio

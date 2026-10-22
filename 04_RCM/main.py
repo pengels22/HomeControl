@@ -158,10 +158,13 @@ class RCMAgent(common_agent.ModuleAgent):
             return
         try:
             ports = self.driver_bundle['rcm_inputs'].read_ports()
+            now_ms = int(time.monotonic() * 1000) & 0xFFFFFFFF
             status = self.bank_controller.update_from_raw(
                 ports['mcp2_gpa'], ports['mcp1_gpa'], ports['mcp1_gpb'],
-                int(time.monotonic() * 1000) & 0xFFFFFFFF,
+                now_ms,
             )
+            if self.bank_controller.inputs_requalified(now_ms):
+                self.faults.pop('front_panel_inputs', None)
             pending = list(self._pending_override_operations)
             self._pending_override_operations.clear()
             for channel_index, value in pending:
@@ -176,6 +179,9 @@ class RCMAgent(common_agent.ModuleAgent):
             self.state['bank_selector'] = status
         except Exception as exc:
             logging.getLogger(__name__).exception('RCM front-panel input poll failed')
+            self._pending_override_operations.clear()
+            self.bank_controller.invalidate_inputs()
+            self.state['bank_selector'] = self.bank_controller.status(int(time.monotonic() * 1000) & 0xFFFFFFFF)
             self.faults['front_panel_inputs'] = {'error': str(exc)}
 
     async def apply_command(self, payload):

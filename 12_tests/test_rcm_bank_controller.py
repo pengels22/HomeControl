@@ -1,7 +1,10 @@
 from importlib import import_module
+import pytest
+from types import SimpleNamespace
 
 
 infra = import_module("08_servises.common.module_infra")
+rcm = import_module("04_RCM.main")
 
 
 def select(controller, bank, start=0):
@@ -121,6 +124,92 @@ def test_off_throw_dispatches_false_and_maps_eighth_override():
     controller.sample(8, 0, 0b10000000, 1000)
     controller.sample(8, 0, 0b10000000, 1250)
     assert operations == [(31, False)]
+
+
+def test_conflicting_override_requires_both_contacts_released_before_rearm():
+    operations = []
+    controller = infra.RCMBankController(lambda channel, value: operations.append((channel, value)))
+    select(controller, 1)
+    controller.sample(1, 0, 0, 500)
+    controller.sample(1, 0, 0, 750)
+    controller.sample(1, 1, 1, 1000)
+    controller.sample(1, 1, 1, 1250)
+    controller.sample(1, 0, 1, 1500)
+    controller.sample(1, 0, 1, 1750)
+    controller.sample(1, 0, 1, 3000)
+    assert operations == []
+    controller.sample(1, 0, 0, 3250)
+    controller.sample(1, 0, 0, 3500)
+    controller.sample(1, 0, 0, 3750)
+    controller.sample(1, 1, 0, 4000)
+    controller.sample(1, 1, 0, 4250)
+    assert operations == [(0, True)]
+
+
+def test_input_invalidation_requires_full_release_and_new_selection():
+    operations = []
+    controller = infra.RCMBankController(lambda channel, value: operations.append((channel, value)))
+    select(controller, 1)
+    controller.sample(1, 0, 0, 500)
+    controller.sample(1, 0, 0, 750)
+    controller.invalidate_inputs()
+    for now in (1000, 1250, 1500):
+        controller.sample(1, 1, 0, now)
+    assert controller.active_bank == 0
+    assert operations == []
+    controller.sample(0, 0, 0, 1750)
+    controller.sample(0, 0, 0, 2000)
+    controller.sample(0, 0, 0, 2250)
+    assert controller.inputs_requalified(2250)
+    select(controller, 1, 2500)
+    assert controller.active_bank == 1
+
+
+@pytest.mark.asyncio
+async def test_poll_read_failure_clears_bank_and_fault_only_after_requalification(monkeypatch):
+    class Inputs:
+        failed = True
+        ports = {'mcp2_gpa': 0b1110, 'mcp1_gpa': 0b11111110, 'mcp1_gpb': 0xFF}
+
+        def read_ports(self):
+            if self.failed:
+                raise OSError('MCP unavailable')
+            return self.ports
+
+    inputs = Inputs()
+    agent = rcm.RCMAgent.__new__(rcm.RCMAgent)
+    agent.driver_bundle = {'rcm_inputs': inputs}
+    agent.bank_controller = infra.RCMBankController(agent._queue_override)
+    agent._pending_override_operations = []
+    agent.state = {}
+    agent.faults = {}
+    agent.io_mode = 'simulated'
+    times = iter([0.0, 0.001, 0.251, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25])
+    monkeypatch.setattr(rcm, 'time', SimpleNamespace(monotonic=lambda: next(times)))
+    calls = []
+
+    async def apply(payload):
+        calls.append(payload)
+        return {'ok': True}
+
+    agent.apply_command = apply
+    inputs.failed = False
+    inputs.ports = {'mcp2_gpa': 0x0F, 'mcp1_gpa': 0xFF, 'mcp1_gpb': 0xFF}
+    await agent.poll_local_inputs()
+    inputs.ports['mcp2_gpa'] = 0b1110
+    await agent.poll_local_inputs()
+    await agent.poll_local_inputs()
+    assert agent.bank_controller.active_bank == 1
+    inputs.failed = True
+    await agent.poll_local_inputs()
+    assert agent.bank_controller.active_bank == 0
+    assert 'front_panel_inputs' in agent.faults
+    inputs.failed = False
+    inputs.ports['mcp1_gpa'] = 0b11111110
+    await agent.poll_local_inputs()
+    await agent.poll_local_inputs()
+    assert agent.bank_controller.active_bank == 0
+    assert calls == []
 
 
 def test_timeout_disables_dispatch_without_changing_relay_state():

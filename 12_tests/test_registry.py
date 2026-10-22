@@ -64,16 +64,17 @@ class FakeRegistryConn:
                         'module_uuid': key if key != row.get('device_id') else row.get('module_uuid'),
                     })
             return rows
-        if 'SELECT ip_address FROM modules WHERE module_type=$1' in query:
+        if 'SELECT ip_address FROM modules' in query:
             return [
                 {'ip_address': row['ip_address']}
                 for row in self.modules.values()
-                if row['module_type'] == args[0]
             ]
         raise AssertionError(f'unexpected fetch: {query}')
 
     async def execute(self, query, *args):
         self.executed.append((query, args))
+        if 'pg_advisory_xact_lock' in query:
+            return
         if 'INSERT INTO modules' in query:
             device_id, module_uuid, identity_interface, module_type, hostname, ip_address, software_version = args
             key = module_uuid or device_id
@@ -95,6 +96,11 @@ class FakeRegistryConn:
                 row['last_state'] = state
                 row['online'] = True
                 row['control_session_online'] = True
+        elif 'SET last_state=$3::jsonb' in query:
+            device_id, module_uuid, state = args
+            row = self._find(device_id, module_uuid)
+            if row:
+                row['last_state'] = state
         elif 'SET online=true' in query:
             device_id, module_uuid = args[:2]
             row = self._find(device_id, module_uuid)
@@ -191,6 +197,36 @@ async def test_assign_uses_configured_development_control_network(monkeypatch):
     assert first == {'hostname': 'RCM01', 'ip_address': '192.168.20.20', 'reboot_required': True}
     assert second == {'hostname': 'RCM02', 'ip_address': '192.168.20.21', 'reboot_required': True}
     assert lcm == {'hostname': 'LCM01', 'ip_address': '192.168.20.30', 'reboot_required': True}
+
+
+@pytest.mark.asyncio
+async def test_rcm_assignment_excludes_reserved_infrastructure_addresses(monkeypatch):
+    conn = FakeRegistryConn()
+    monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
+    monkeypatch.setattr(registry_mod.settings, 'commissioning_enabled', True)
+    reg = registry_mod.ModuleRegistry()
+    assigned = [await reg._assign({'module_type': 'RCM', 'module_uuid': f'rcm-{i}'}) for i in range(6)]
+    assert {item['ip_address'] for item in assigned} == {
+        '192.168.20.20', '192.168.20.21', '192.168.20.22',
+        '192.168.20.23', '192.168.20.28', '192.168.20.29',
+    }
+    with pytest.raises(RuntimeError, match='no addresses left'):
+        await reg._assign({'module_type': 'RCM', 'module_uuid': 'rcm-7'})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('method', ['command', 'config'])
+async def test_request_send_failure_clears_pending(method):
+    conn = registry_mod.ModuleConnection(None, None)
+    conn.reconciled = True
+
+    async def fail_send(*_):
+        raise OSError('transport failed')
+
+    conn.send = fail_send
+    with pytest.raises(OSError):
+        await getattr(conn, method)({'test': True})
+    assert conn.pending == {}
 
 
 @pytest.mark.asyncio
@@ -706,6 +742,53 @@ async def test_registered_module_receives_config_and_heartbeat_ack(monkeypatch):
     assert reply == {'type': 'config', 'payload': {'version': 7, 'config': {'module_type': 'RCM'}}}
     assert ack['type'] == 'heartbeat_ack'
     assert conn.modules['rcm-a']['last_state'] == '{"module_uuid": "rcm-a", "state": {"relays": {}}}'
+
+
+@pytest.mark.asyncio
+async def test_reconnected_module_state_is_recorded_before_commands_are_accepted(monkeypatch):
+    conn = FakeRegistryConn()
+    conn.modules['rcm-a'] = {
+        'device_id': None, 'module_type': 'RCM', 'hostname': 'RCM01',
+        'ip_address': '192.168.20.20', 'online': False,
+    }
+    monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
+    reg = registry_mod.ModuleRegistry()
+
+    async def base_config(module_type):
+        return {'version': 1, 'config': {'module_type': module_type}}
+
+    monkeypatch.setattr(reg, '_base_config', base_config)
+    server = await asyncio.start_server(reg.handle_client, '127.0.0.1', 0)
+    reader, writer = await asyncio.open_connection('127.0.0.1', server.sockets[0].getsockname()[1])
+    try:
+        await protocol.write_frame(writer, {'type': 'identify', 'payload': {
+            'module_type': 'RCM', 'module_uuid': 'rcm-a',
+            'hostname': 'RCM01', 'assigned_ip': '192.168.20.20',
+        }})
+        assert (await protocol.read_frame(reader))['type'] == 'config'
+        with pytest.raises(ConnectionError, match='state reconciliation'):
+            await reg.command_by_hostname('RCM01', {'op': 'set_relay', 'channel': 'A1', 'value': True})
+        with pytest.raises(ConnectionError, match='state reconciliation'):
+            await reg.command_by_hostname('RCM01', {'op': 'safety_state', 'conditions': {}})
+        off_task = asyncio.create_task(reg.command_by_hostname('RCM01', {'op': 'all_off'}))
+        off_request = await protocol.read_frame(reader)
+        assert off_request['type'] == 'command'
+        assert off_request['payload'] == {'op': 'all_off'}
+        await protocol.write_frame(writer, {'type': 'command_ack', 'request_id': off_request['request_id'], 'payload': {'ok': True}})
+        assert await off_task == {'ok': True}
+        await protocol.write_frame(writer, {'type': 'state', 'request_id': 'snapshot-1', 'payload': {
+            'state': {'relays': {'A1': False}}, 'faults': {},
+        }})
+        ack = await protocol.read_frame(reader)
+        assert ack['type'] == 'state_ack'
+        assert ack['request_id'] == 'snapshot-1'
+        assert json.loads(conn.modules['rcm-a']['last_state'])['state']['relays']['A1'] is False
+        assert reg.connections['rcm-a'].reconciled is True
+    finally:
+        writer.close()
+        await writer.wait_closed()
+        server.close()
+        await server.wait_closed()
 
 
 @pytest.mark.asyncio

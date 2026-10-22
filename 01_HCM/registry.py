@@ -41,6 +41,9 @@ class ControlNetworkPlan:
         self.vlan = data.get('vlan')
         self.subnet = data.get('subnet')
         self.pools = data.get('pools') or {}
+        self.reserved_addresses = {str(ipaddress.ip_address(address)) for address in data.get('reserved_addresses') or []}
+        if data.get('hcm_address'):
+            self.reserved_addresses.add(str(ipaddress.ip_address(data['hcm_address'])))
         self.require_explicit_subnet = bool(data.get('require_explicit_subnet', False))
         self.assignment_enabled = data.get('assignment_enabled', True)
         if self.assignment_enabled is None:
@@ -67,7 +70,8 @@ class ControlNetworkPlan:
             raise RuntimeError(f'{module_type} control pool is outside {self.profile_name} subnet')
         if self.network.network_address in (start, end) or self.network.broadcast_address in (start, end):
             raise RuntimeError(f'{module_type} control pool uses reserved subnet address')
-        return [str(ipaddress.ip_address(value)) for value in range(int(start), int(end) + 1)]
+        return [address for value in range(int(start), int(end) + 1)
+                if (address := str(ipaddress.ip_address(value))) not in self.reserved_addresses]
 
 def load_control_network_plan() -> ControlNetworkPlan:
     path = Path(settings.config_root) / '01_HCM' / 'hcm.yaml'
@@ -94,30 +98,54 @@ class ModuleConnection:
         self.connection_key: str | None = None
         self.hostname: str | None = None
         self.last_heartbeat = 0.0
+        self.reconciled = False
         self.pending: dict[str, asyncio.Future] = {}
 
     async def send(self, typ: str, payload: dict[str, Any], request_id: str | None = None):
         await protocol.write_frame(self.writer, {'type': typ, 'payload': payload, **({'request_id': request_id} if request_id else {})})
 
+    @staticmethod
+    def _safe_before_reconciliation(payload: dict[str, Any]) -> bool:
+        if payload.get('op') in {'all_off', 'metadata_hvac_off'}:
+            return True
+        if payload.get('op') == 'safety_state':
+            return any(bool(value) for value in (payload.get('conditions') or {}).values())
+        if payload.get('op') not in {'set_relay', 'set_channel', 'set_dimmer', 'light'}:
+            return False
+        if payload.get('value') is True:
+            return False
+        try:
+            if 'percent' in payload:
+                return float(payload['percent']) <= 0
+            return payload.get('value') is False
+        except (TypeError, ValueError):
+            return False
+
     async def command(self, payload: dict[str, Any], timeout: float = 10.0, request_id: str | None = None) -> dict[str, Any]:
+        if not self.reconciled and not self._safe_before_reconciliation(payload):
+            raise ConnectionError('module state reconciliation pending')
         rid = request_id or str(uuid.uuid4())
         fut = asyncio.get_running_loop().create_future()
         self.pending[rid] = fut
-        await self.send('command', payload, rid)
         try:
+            await self.send('command', payload, rid)
             return await asyncio.wait_for(fut, timeout)
         finally:
             self.pending.pop(rid, None)
+            if not fut.done():
+                fut.cancel()
 
     async def config(self, payload: dict[str, Any], timeout: float = 10.0, request_id: str | None = None) -> dict[str, Any]:
         rid = request_id or str(uuid.uuid4())
         fut = asyncio.get_running_loop().create_future()
         self.pending[rid] = fut
-        await self.send('config', payload, rid)
         try:
+            await self.send('config', payload, rid)
             return await asyncio.wait_for(fut, timeout)
         finally:
             self.pending.pop(rid, None)
+            if not fut.done():
+                fut.cancel()
 
 class ModuleRegistry:
     def __init__(self):
@@ -260,6 +288,10 @@ class ModuleRegistry:
             raise ValueError(f'LAB1 does not support simulated role {typ}')
         async with db.acquire() as conn:
             async with _transaction(conn):
+                # Serialize all module allocations across HCM processes before
+                # reading leases. PostgreSQL releases this lock at transaction end.
+                if getattr(conn, 'transaction', None) is not None:
+                    await conn.execute('SELECT pg_advisory_xact_lock($1)', 0x48434D41)
                 rows = await conn.fetch('''
                     SELECT id, hostname, ip_address, device_id, module_uuid::text AS module_uuid
                     FROM modules
@@ -314,7 +346,7 @@ class ModuleRegistry:
                     }
                 plan = load_control_network_plan()
                 addresses = plan.addresses_for(typ)
-                used = {str(r['ip_address']) for r in await conn.fetch('SELECT ip_address FROM modules WHERE module_type=$1', typ)}
+                used = {str(r['ip_address']) for r in await conn.fetch('SELECT ip_address FROM modules')}
                 used.add(settings.lab1_ip_address)
                 ip = next((candidate for candidate in addresses if candidate not in used), None)
                 if ip is None:
@@ -613,6 +645,7 @@ class ModuleRegistry:
                                OR ($2::text IS NOT NULL AND module_uuid::text=$2)
                         ''', conn.device_id, conn.module_uuid, json.dumps(payload))
                     await role_switching.confirm_from_state(conn.device_id, payload)
+                    conn.reconciled = True
                     await conn.send('heartbeat_ack', {'ts': time.time()})
                 elif typ == 'state':
                     async with db.acquire() as dbc:
@@ -624,6 +657,8 @@ class ModuleRegistry:
                                OR ($2::text IS NOT NULL AND module_uuid::text=$2)
                         ''', conn.device_id, conn.module_uuid, json.dumps(payload))
                     await role_switching.confirm_from_state(conn.device_id, payload)
+                    conn.reconciled = True
+                    await conn.send('state_ack', {'ts': time.time()}, msg.get('request_id'))
                 elif typ == 'fault':
                     async with db.acquire() as dbc:
                         await dbc.execute('''INSERT INTO faults(device_id,module_uuid,code,severity,details) VALUES($1,$2,$3,$4,$5::jsonb)''', conn.device_id, conn.module_uuid, payload.get('code','unknown'), payload.get('severity','warning'), json.dumps(payload))
@@ -645,6 +680,10 @@ class ModuleRegistry:
         except Exception:
             log.exception('module connection error from %s', peer)
         finally:
+            for fut in conn.pending.values():
+                if not fut.done():
+                    fut.set_exception(ConnectionError('module connection closed'))
+            conn.pending.clear()
             if conn.connection_key:
                 try:
                     await self._mark_offline_if_current(conn)
