@@ -69,7 +69,9 @@ void sendStatus(bool full) { if (hcm.connected()) acm_protocol::sendAlarmStatus(
 void setup() {
   Serial.begin(115200); config.begin("acm", false); deviceId = config.getString("device_id", deviceId); hostname = config.getString("hostname", hostname);
   pins.begin("alarm"); configStore.begin(); initializeHardware(); snapshot.state = pins.hasMaster() ? AlarmState::DISARMED : AlarmState::TROUBLE; logEvent("ACM_BOOT");
-  static AlarmCore core(pins); alarmCore = &core; alarmCore->begin(config.getUInt("home_exit_ms", 0), config.getUInt("away_exit_ms", 30000)); snapshot = alarmCore->snapshot();
+  static AlarmCore core(pins); alarmCore = &core; alarmCore->begin(config.getUInt("home_exit_ms", 0), config.getUInt("away_exit_ms", 30000));
+  for (uint8_t i = 0; i < ConfigStore::MAX_CHANNELS; ++i) alarmCore->setSensorType(i, configStore.channel(i).type);
+  snapshot = alarmCore->snapshot(); if (configStore.recoveryRequired()) snapshot.trouble_flags |= TROUBLE_CONFIG;
   esp_task_wdt_init(10, true); esp_task_wdt_add(nullptr);
 }
 void loop() {
