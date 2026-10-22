@@ -127,3 +127,14 @@ minimal. SD initialization is centralized in the logger with retry backoff;
 SD loss sets trouble state but does not stop sensors, networking, alarm logic,
 or sirens. HCM and keypad communication, sensor, alarm, siren, fault, and time
 transitions are logged once at their transition boundaries.
+
+## Embedded administration UI
+
+The ACM serves a local HTTP administration interface on port 80 over the
+trusted management network. It uses Master-PIN-only login, an ephemeral
+server-side session with a five-minute idle timeout, an HttpOnly/SameSite
+cookie, CSRF-protected configuration POSTs, bounded request parsing, and
+escaped HTML rendering. The interface provides Channels, Outputs, Areas,
+Keypads, PINs, System, Logs, and Logout pages backed by the live ConfigStore,
+PinStore, AlarmCore, KeypadManager, and EventLogger. Firmware updates remain
+USB-only; V1 does not provide OTA or HTTPS.

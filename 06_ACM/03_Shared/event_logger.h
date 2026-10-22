@@ -16,6 +16,7 @@ class EventLogger {
   bool takeTimeLost();
   bool takeTimeRestored();
   bool sdFailed() const { return sd_failed_; }
+  String recentLines(uint16_t max_lines = 100);
  private:
   uint8_t cs_pin_;
   bool started_=false, sd_ready_=false, sd_failed_=false, had_sd_failure_=false, time_synced_=false;

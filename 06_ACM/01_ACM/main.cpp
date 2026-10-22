@@ -13,6 +13,7 @@
 #include "config_store.h"
 #include "keypad_manager.h"
 #include "event_logger.h"
+#include "web_admin.h"
 
 namespace {
 constexpr uint8_t MCP_IODIRA = 0x00, MCP_IODIRB = 0x01, MCP_GPPUA = 0x0c, MCP_GPPUB = 0x0d, MCP_GPIOA = 0x12, MCP_GPIOB = 0x13;
@@ -26,6 +27,7 @@ AlarmSnapshot snapshot;
 AlarmCore* alarmCore = nullptr;
 KeypadManager keypadManager;
 EventLogger eventLogger(acm_hw::SD_CS);
+AcmWebAdmin webAdmin;
 acm_protocol::FrameParser hcmParser;
 bool hcmWasConnected=false;
 uint32_t lastTimeRequest=0;
@@ -94,11 +96,12 @@ void setup() {
   static AlarmCore core(pins); alarmCore = &core; alarmCore->begin(config.getUInt("home_exit_ms", 0), config.getUInt("away_exit_ms", 30000));
   for (uint8_t i = 0; i < ConfigStore::MAX_CHANNELS; ++i) { alarmCore->setSensorInUse(i, true); alarmCore->setSensorType(i, configStore.channel(i).type); }
   keypadManager.begin(configStore, *alarmCore, &eventLogger);
+  webAdmin.begin(configStore, pins, *alarmCore, keypadManager, eventLogger, hostname, deviceId);
   snapshot = alarmCore->snapshot(); for (uint8_t i = 0; i < ConfigStore::MAX_RELAYS; ++i) relaySiren[i] = configStore.relay(i).siren; if (configStore.recoveryRequired()) snapshot.trouble_flags |= TROUBLE_CONFIG;
   esp_task_wdt_init(10, true); esp_task_wdt_add(nullptr);
 }
 void loop() {
-  const uint32_t now = millis(); esp_task_wdt_reset(); eventLogger.tick(now); if(eventLogger.takeTimeLost()){eventLogger.log("TIME_SYNC_LOST");keypadManager.setTimeSync(false,0);} scanInputs(); if (alarmCore) keypadManager.tick(now); if (alarmCore) { const uint32_t trouble = snapshot.trouble_flags; alarmCore->tick(now); snapshot = alarmCore->snapshot(); snapshot.trouble_flags |= trouble; applySirenRelays(snapshot.state); }
+  const uint32_t now = millis(); esp_task_wdt_reset(); webAdmin.tick(now); eventLogger.tick(now); if(eventLogger.takeTimeLost()){eventLogger.log("TIME_SYNC_LOST");keypadManager.setTimeSync(false,0);} scanInputs(); if (alarmCore) keypadManager.tick(now); if (alarmCore) { const uint32_t trouble = snapshot.trouble_flags; alarmCore->tick(now); snapshot = alarmCore->snapshot(); snapshot.trouble_flags |= trouble; applySirenRelays(snapshot.state); }
   const bool connectedBefore=hcm.connected(); if (now - lastHeartbeat >= acm_protocol::HEARTBEAT_INTERVAL_MS) { lastHeartbeat = now; connectHcm(); if (hcm.connected()) acm_protocol::sendHeartbeat(hcm, deviceId, hostname, ++snapshot.sequence); }
   const bool connected=hcm.connected(); if(connected&&!hcmWasConnected){eventLogger.log("HCM_COMMS_RESTORED");hcmWasConnected=true;hcmParser.reset();lastTimeRequest=0;} if(!connected&&hcmWasConnected){eventLogger.log("HCM_COMMS_LOST");hcmWasConnected=false;} if(connected) { requestHcmTime(now); processHcmFrames(now); } (void)connectedBefore;
   if (now - lastSnapshot >= acm_protocol::SNAPSHOT_INTERVAL_MS) { lastSnapshot = now; sendStatus(true); }
