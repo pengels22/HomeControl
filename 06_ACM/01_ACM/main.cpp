@@ -10,6 +10,7 @@
 #include "protocol.h"
 #include "pin_store.h"
 #include "alarm_core.h"
+#include "config_store.h"
 
 namespace {
 constexpr uint8_t MCP_IODIRA = 0x00, MCP_IODIRB = 0x01, MCP_GPPUA = 0x0c, MCP_GPPUB = 0x0d, MCP_GPIOA = 0x12, MCP_GPIOB = 0x13;
@@ -18,6 +19,7 @@ byte macAddress[6] = {0x02, 0x41, 0x43, 0x4d, 0x00, 0x01};
 EthernetClient hcm;
 PinStore pins;
 Preferences config;
+ConfigStore configStore;
 AlarmSnapshot snapshot;
 AlarmCore* alarmCore = nullptr;
 SensorState sensors[24];
@@ -66,7 +68,7 @@ void sendStatus(bool full) { if (hcm.connected()) acm_protocol::sendAlarmStatus(
 
 void setup() {
   Serial.begin(115200); config.begin("acm", false); deviceId = config.getString("device_id", deviceId); hostname = config.getString("hostname", hostname);
-  pins.begin("alarm"); initializeHardware(); snapshot.state = pins.hasMaster() ? AlarmState::DISARMED : AlarmState::TROUBLE; logEvent("ACM_BOOT");
+  pins.begin("alarm"); configStore.begin(); initializeHardware(); snapshot.state = pins.hasMaster() ? AlarmState::DISARMED : AlarmState::TROUBLE; logEvent("ACM_BOOT");
   static AlarmCore core(pins); alarmCore = &core; alarmCore->begin(config.getUInt("home_exit_ms", 0), config.getUInt("away_exit_ms", 30000)); snapshot = alarmCore->snapshot();
   esp_task_wdt_init(10, true); esp_task_wdt_add(nullptr);
 }

@@ -10,7 +10,7 @@ class AlarmCore {
   void setSensorType(uint8_t index, SensorType type) { if (index < 24) sensorTypes_[index] = type; }
   bool request(RequestType request, const String& pin = "");
   const AlarmSnapshot& snapshot() const { return snapshot_; }
-  bool masterRequired() const { return !pins_.hasMaster(); }
+  bool masterRequired() const { return !pins_.hasMaster(); } bool credentialReprovisionRequired() const { return pins_.credentialReprovisionRequired(); }
   bool provisionMaster(const String& pin) { const bool ok = pins_.provisionMaster(pin); if (ok && snapshot_.state == AlarmState::TROUBLE) snapshot_.state = AlarmState::DISARMED; return ok; }
   bool addPin(const String& master, const String& pin) { return pins_.addPin(master, pin); }
   void tick(uint32_t now);
