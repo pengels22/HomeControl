@@ -20,14 +20,40 @@ def stable_id(row):
 def representation(row, bridge):
     if not row['enabled'] or not row[f'{bridge}_enabled']:
         return None, 'Exposure disabled'
-    if row['purpose'] == 'LIGHTING':
-        if row['channel_kind'] == 'relay':
-            return 'light', None
-        if row['channel_kind'] in {'lv_dimmer', 'hv_dimmer'}:
-            return 'dimmer', None
+    entity = channel_entity(row)
+    capability = entity['capability']
+    # This registry is the single semantic boundary used by adapters.  A
+    # relay remains a light only when HCM explicitly classified it as lighting.
+    if capability == 'light' and row['purpose'] == 'LIGHTING':
+        return 'light', None
+    if capability == 'dimmable_light':
+        return 'dimmer', None
     if bridge == 'mqtt' and row['channel_kind'] == 'relay' and row['purpose'] in {'GENERAL', 'LANDSCAPE', 'OTHER', 'SECURITY'}:
         return 'switch', None
     return None, 'No supported semantic device type'
+
+
+MATTER_CAPABILITY_MAPPERS = {
+    'light': 'on_off_light',
+    'dimmable_light': 'dimmable_light',
+    'temperature_sensor': 'temperature_sensor',
+    'humidity_sensor': 'humidity_sensor',
+    'illuminance_sensor': 'illuminance_sensor',
+    'occupancy_sensor': 'occupancy_sensor',
+    'motion_sensor': 'occupancy_sensor',
+    'contact_sensor': 'contact_sensor',
+}
+
+
+def matter_mapper(entity):
+    """Return the Matter device mapping for a canonical entity.
+
+    Unsupported capabilities stay internal.  The bridge never guesses a
+    device type for generic relays, analog values, faults, or future types.
+    """
+    if not entity.get('matter_exposed') or not entity.get('writable', True) and entity.get('capability') in {'analog_value', 'fault_state'}:
+        return None
+    return MATTER_CAPABILITY_MAPPERS.get(entity.get('capability'))
 
 
 def projection(rows, bridge):
@@ -35,11 +61,15 @@ def projection(rows, bridge):
     for row in rows:
         kind, reason = representation(row, bridge)
         entity = channel_entity(row)
+        if bridge == 'matter' and matter_mapper(entity) is None:
+            kind, reason = None, reason or 'No supported canonical Matter mapping'
         result.append({
             'channel_id': row['id'], 'stable_id': stable_id(row),
+            'entity_id': entity['entity_id'], 'capability': entity['capability'],
             'name': entity['name'], 'room': entity['room'], 'area': entity['area'],
             'kind': kind, 'reason': reason, 'endpoint': row.get('endpoint'),
-            'reported_state': entity['state'], 'available': entity['available'],
+            'reported_state': entity['state'], 'current_state': entity['current_state'],
+            'availability': entity['availability'], 'available': entity['available'],
         })
     return result
 

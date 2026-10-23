@@ -68,3 +68,76 @@ Focused tests: **67 passed** before the final mapping correction; affected focus
 - Migration 025 must be backed up, tested on an installed-database clone, applied deliberately, and verified before any HCM image containing this change is deployed. The live Jetson database has not been modified.
 - Matter retry behavior is software-tested with a fake child; real process restart, commissioning persistence, controller behavior, and IPv6/mDNS remain to be validated in a controlled deployment.
 - Phase A: extend canonical adapters for SIM/RMC sensor and future module capabilities without changing control authority. Phase B: expand semantically valid Matter mappings and prove stable identity. Phase C: native time service. Phase D: native NWS service and alert cache. Phase E: admin UI refocus. Phase F: dependency-led legacy integration retirement. Docker rollback retention and full HIL acceptance remain separate work.
+
+## Checkpoint 2 — Canonical Entity/Capability Layer
+
+Phase A completed on 2026-10-23. The entity layer remains a read-only projection over PostgreSQL channel metadata and the latest HCM module state report.
+
+### Implementation
+
+- `01_HCM/entities.py` normalizes RCM/LCM output channels and established SIM/RMC telemetry. Output capabilities include `relay`, `binary_switch`, `light`, and `dimmable_light`. RMC/SIM values map only when their source keys are present: temperature, humidity, illuminance, presence/occupancy, motion, contact, and generic analog inputs. Unknown channel or sensor sources remain internally representable with an explicit capability or `unknown`; they are not guessed into Matter types.
+- Canonical entities include stable `entity_id`, module ID/type, source/channel, name, capability and capability list, Room/Area, current reported state, availability classification (`available`, `unavailable`, `faulted`, `unknown`, or `stale`), fault state, writable flag, Matter exposure preference, and source metadata. Sensor entities are always read-only. No live values are persisted by this layer.
+- SIM/RMC state comes from the existing `modules.last_state` JSON updated by the module registry. A disconnected module produces unavailable entities while preserving its physical output behavior and last-known state in the existing module record. RMC sensor fault arrays and stale flags remain attached to the projected entity.
+- `GET /api/v1/entities` supports filtering by module, Room, Area, capability, and availability. `GET /api/v1/entities/{entity_id}` retrieves one projection. Both are authenticated read-only API paths. They do not command modules; command routing remains in the existing logical device and safety arbitration path.
+- Existing HCM Areas and nullable Room `area_id` are included in applicable projections. ACM alarm Areas are not queried, copied, or exposed as generic entities. PNL remains a consumer of the existing Room/lighting projection.
+
+### Mapping boundaries
+
+RCM exposes relay channel entities; LCM exposes relay and dimmer entities. SIM exposes established Hexa analog values and RMC telemetry received through its CAN state. RMC is represented through SIM's existing `rmc_nodes` state boundary. PNL exposes room control metadata and is not a physical sensor source. ACM remains an autonomous alarm controller; its internal sensors, alarm state machine, keypads, and relays are not generic writable HCM entities. HVAC remains on its existing semantic controller path; no new thermostat command path was added.
+
+### Tests and validation
+
+Added regression coverage for stable identities across rename/location changes, RCM/LCM output capability lists, SIM/RMC sensor units and source metadata, stale versus faulted state, unknown future channels, read-only sensor behavior, module and availability filtering, entity detail lookup, existing Rooms without Areas, and the absence of a projection command path. Focused entity/database tests pass: **64 passed**. Final Phase A full validation: **853 passed, 1 skipped, 1 warning**.
+
+### Deferred work and limitations
+
+Matter mappings for sensors, fault entities, thermostat state, and future capabilities are intentionally deferred to Phase B. Current sensor discovery is limited to established keys in SIM/RMC state; no semantics are invented for arbitrary CAN frames or ACM internals. Module capability registration remains the existing extensibility path and does not create entities until a source state mapping is defined. No live host deployment, database migration, hardware validation, or Matter commissioning was performed for Phase A.
+
+## Checkpoint 3 — Matter Bridge
+
+Phase B completed on 2026-10-23. Matter remains an adapter over canonical HCM projections. The bridge does not query module sockets, GPIO, or live-state tables directly.
+
+### Architecture and mappings
+
+- `01_HCM/bridges.py` now exposes a capability mapper registry consumed by the Matter projection. Lighting and dimming map to On/Off Light and Dimmable Light. Temperature, humidity, illuminance, occupancy/presence, motion, and contact have explicit mapper names for the Matter adapter. Generic relays, analog values, fault-only entities, unknown capabilities, and unsupported HVAC semantics remain internal unless a future semantic mapper is added.
+- `08_servises/matter_bridge/bridge.mjs` consumes canonical `entity_id`, capability, state, availability, and endpoint fields. Sensor values are converted at the adapter boundary: Fahrenheit to Matter hundredths of Celsius, relative humidity to hundredths of a percent, and lux to the Matter logarithmic illuminance encoding. Sensor entities are read-only. Commands retain the existing channel ID only as an HCM command-path reference.
+- HCM-to-Matter synchronization is driven by every registry refresh, so module reports, local overrides, admin commands, safety actions, and reconnect reconciliation flow through the canonical projection before Matter attributes are updated. Matter commands still call `external_command`, logical-device arbitration, and the existing safety checks.
+
+### Identity, lifecycle, and persistence
+
+- Existing `matter_endpoints` allocation remains the endpoint source of truth. It is keyed to the stable channel entity identity (`channel_<channel_metadata.id>`) and allocates monotonically; endpoint numbers are not derived from enumeration order. Rename, Room/Area changes, reconnects, restarts, and unrelated additions therefore do not renumber existing endpoints.
+- Existing endpoint tombstones remain reserved when a channel is deleted (`ON DELETE SET NULL`); the allocator never reuses those numbers. Sensor endpoint persistence is intentionally not enabled by default because Phase A sensor entities have no administrative Matter exposure flag or endpoint allocation record yet.
+- Existing Matter.js storage is still selected by `HCM_MATTER_STORAGE`, with the stable server ID `homecontrol`. Fabric/commissioning data is therefore host-mounted and survives bridge/HCM restart and software replacement when that directory is retained. It is not returned by HCM APIs or normal logs. Backup of that directory remains an operator responsibility.
+- The Python bridge lifecycle retains disabled, not-configured, starting, running, unexpected-exit, bounded retry, repeated failure, and intentional-stop states. Exponential retry is capped at five minutes and intentional stop/disabled configuration suppresses relaunch.
+
+### Files and tests
+
+Changed `01_HCM/bridges.py`, `08_servises/matter_bridge/bridge.mjs`, `12_tests/test_channel_metadata.py`, and this audit. Added mapper registry tests for supported capabilities and explicit unsupported analog/generic relay behavior. Matter validate-only startup now instantiates light, dimmable-light, and temperature sensor mappings.
+
+Phase B focused validation: **73 passed**; full pytest: **862 passed, 1 skipped, 1 warning**; Matter `npm run check` passed; Matter validate-only startup passed with light, dimmable-light, temperature, humidity, illuminance, occupancy, and contact mappings; Python compileall, JavaScript syntax validation, active configuration safety checks, and `git diff --check` passed.
+
+### Known limitations and remaining HIL
+
+Sensor administrative exposure and persistent sensor endpoint allocation remain deferred because the current database exposure setting is channel-only. Contact polarity is taken from canonical HCM state and is not inferred from GPIO. True Matter controller interoperability, multi-fabric commissioning, bridge/HCM restart with an already commissioned controller, mDNS/IPv6 behavior, physical sensor transitions, safety override observation, and reconnect hardware behavior still require controlled HIL testing. Time, NWS, UI refocus, and legacy integration retirement were not started.
+
+## Checkpoint 4 — Native Time Service
+
+Phase C completed on 2026-10-23. The repository audit found direct wall-clock calls across module telemetry, heartbeat, management, safety, integrations, scripts, and legacy provider code; existing monotonic timers remain in safety, HVAC, retry, heartbeat, and UI paths. HCM already had a narrow ACM `TIME_REQUEST`/`TIME_RESPONSE` exchange, while automation and primitives separately accepted configured timezone names. No shared HCM time API or synchronization-health model existed.
+
+### Service architecture
+
+- `01_HCM/time_service.py` provides the canonical application interface: timezone-aware `now_utc()`, `now_local()`, `local_date()`, configured `timezone()`, UTC offset, DST state, and a monotonic helper. It uses the host clock and never maintains or advances a software clock. An injected clock and synchronization probe make wall-clock tests deterministic.
+- The configured timezone is sourced from `HCM_TIMEZONE` through `settings.timezone`, with the installation default `America/Detroit`. `zoneinfo.ZoneInfo` performs EST/EDT conversion and date-boundary handling; persisted machine timestamps remain governed by their existing UTC/database semantics.
+- Synchronization health is best-effort and cached for 30 seconds. The service probes Linux `timedatectl` for NTP synchronization when available and returns `synchronized`, `unsynchronized`, or `unknown`. Probe failure never removes access to system time and never exposes raw shell output.
+- `GET /api/v1/time` is an authenticated, read-only administrative endpoint exposing UTC, local timestamp, timezone, offset, DST, synchronization state, source/detail, and health check time. Internal components use the Python service directly rather than the HTTP endpoint.
+- ACM time bootstrap now obtains UTC through the canonical service while preserving the existing `TIME_RESPONSE` wire format and the HCM→ACM→keypad authority chain. No ACM state machine, keypad behavior, module protocol, or safety timing was changed.
+
+### Files and validation
+
+Changed `01_HCM/time_service.py`, `01_HCM/settings.py`, `01_HCM/api.py`, `01_HCM/registry.py`, `12_tests/test_time_service.py`, `12_tests/test_api.py`, and this audit. Tests cover injected UTC, EST and EDT conversion, local date boundaries, sync states and caching, unknown telemetry, aware API output, invalid zones, and the administrative API.
+
+Focused time/API tests: **23 passed**. Full pytest: **868 passed, 1 skipped, 1 warning**. Python compileall, JavaScript syntax validation, Matter bridge validation, Matter validate-only startup, active configuration safety checks, and `git diff --check` passed.
+
+### Known limitations and deployment/HIL
+
+The service reports host synchronization telemetry only when the deployed Linux image provides usable `timedatectl` output; otherwise it reports `unknown` while continuing to provide system time. Existing direct time calls were intentionally not mass-refactored, and protected safety/heartbeat timing remains unchanged. ACM live time exchange, host NTP status, reboot behavior, and installed keypad display behavior still require deployment/HIL verification. NWS, frontend refocus, and legacy integration retirement were not started.

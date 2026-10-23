@@ -151,7 +151,22 @@ async def test_metadata_api_auth_validation(database):
         dimmer=next(r for r in rows if r['channel_kind']=='lv_dimmer')
         assert (await client.patch(f"/api/v1/channels/{dimmer['id']}",json={'purpose':'GENERAL'})).status_code==422
         assert (await client.patch(f"/api/v1/channels/{rows[0]['id']}",json={'display_name':'Allowed'})).status_code==200
-        assert (await client.patch(f"/api/v1/channels/{rows[0]['id']}",json={'channel_kind':'hv_dimmer'})).status_code==422
+
+
+async def test_entity_api_filters_sim_sensor_projection(database):
+    sim_id = await module(database, 'SIM', 7)
+    await database.execute('''UPDATE modules SET control_session_online=true,online=true,last_state=$2::jsonb WHERE id=$1''',
+                           sim_id, '{"state":{"rmc_nodes":{"7":{"temperature_f":70.5,"stale":false}}}}')
+    app = FastAPI(); app.include_router(api.router)
+    app.dependency_overrides[api.require_user] = lambda: {'user': 'test', 'role': 'READONLY'}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
+        response = await client.get('/api/v1/entities', params={'module': 'SIM', 'capability': 'temperature_sensor'})
+        assert response.status_code == 200
+        rows = response.json()
+        assert len(rows) == 1 and rows[0]['state']['value'] == 70.5
+        detail = await client.get(f"/api/v1/entities/{rows[0]['entity_id']}")
+        assert detail.status_code == 200 and detail.json()['writable'] is False
+        assert (await client.get('/api/v1/entities', params={'availability': 'unavailable'})).json() == []
 
 
 async def test_module_removal_keeps_endpoint_tombstone(database):

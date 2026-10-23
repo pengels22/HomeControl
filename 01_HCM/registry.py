@@ -593,11 +593,12 @@ class ModuleRegistry:
             # that has no HCM module certificate yet to obtain authoritative
             # UTC time over its configured HCM connection.
             if first.get('type') in ('TIME_REQUEST', 'time_request'):
-                await conn.send('TIME_RESPONSE', {'unix': int(time.time())})
+                from . import api as hcm_api
+                await conn.send('TIME_RESPONSE', {'unix': int(hcm_api.time_service.now_utc().timestamp())})
                 while True:
                     request = await protocol.read_frame(reader)
                     if request.get('type') in ('TIME_REQUEST', 'time_request'):
-                        await conn.send('TIME_RESPONSE', {'unix': int(time.time())})
+                        await conn.send('TIME_RESPONSE', {'unix': int(hcm_api.time_service.now_utc().timestamp())})
                 return
             if first.get('type') != 'identify':
                 raise protocol.ProtocolError('first message must be identify')

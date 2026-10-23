@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     integration_show_test_providers: bool = False
     api_host: str = '0.0.0.0'
     api_port: int = hcm_globals.API_HCM_Port
-    timezone: str = 'UTC'
+    timezone: str = 'America/Detroit'
     latitude: float | None = None
     longitude: float | None = None
     module_host: str = '0.0.0.0'

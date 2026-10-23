@@ -41,6 +41,19 @@ async def test_dev_session_available_when_dev_mode_enabled(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_time_api_is_read_only_and_exposes_canonical_clock(monkeypatch):
+    class Clock:
+        def as_payload(self):
+            return {'utc': '2026-07-01T03:30:00Z', 'local': '2026-06-30T23:30:00-04:00',
+                    'timezone': 'America/Detroit', 'utc_offset_seconds': -14400,
+                    'dst': True, 'sync_status': 'unknown', 'checked_at': '2026-07-01T03:30:00Z'}
+    monkeypatch.setattr(api, 'time_service', Clock())
+    payload = await api.system_time({'user': 'reader', 'role': 'READONLY'})
+    assert payload['timezone'] == 'America/Detroit'
+    assert payload['sync_status'] == 'unknown'
+
+
+@pytest.mark.asyncio
 async def test_fire_api_rejects_manual_changes_when_physical_input_is_authoritative(monkeypatch):
     class PhysicalSafety:
         fire_active = True

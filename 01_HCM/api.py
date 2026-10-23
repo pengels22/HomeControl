@@ -69,11 +69,13 @@ from . import storage
 from .updater import updater
 from .registry import registry
 from . import command_events
+from .time_service import build_time_service
 
 router = APIRouter(prefix='/api/v1')
 hvac = None
 safety = None
 safety_relays = None
+time_service = build_time_service(settings.timezone)
 
 @router.get('/version')
 async def version():
@@ -93,6 +95,11 @@ async def health():
         payload['fire_life_safety'] = {'status': 'Unavailable', 'source': 'hcm_safety_controller'}
         payload['safety_inputs'] = {'fire_alarm_s': {'state': 'unknown'}, 'fire_alarm_P': {'state': 'unknown'}}
     return payload
+
+@router.get('/time')
+async def system_time(user=Depends(require_user)):
+    """Administrative clock view; OS synchronization remains authoritative."""
+    return time_service.as_payload()
 
 @router.post('/commands')
 async def ingest_command(body: CommandIn, user=Depends(require_user)):

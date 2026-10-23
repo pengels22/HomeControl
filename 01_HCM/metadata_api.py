@@ -130,9 +130,25 @@ async def channels(identifier: str | None = None, user=Depends(require_user)):
 
 
 @router.get('/entities')
-async def entities(identifier: str | None = None, user=Depends(require_user)):
+async def entities(identifier: str | None = None, module: str | None = None,
+                   room: str | None = None, area: str | None = None,
+                   capability: str | None = None, availability: str | None = None,
+                   user=Depends(require_user)):
     from .entities import list_channel_entities
-    return await list_channel_entities(identifier)
+    from .entities import filter_entities
+    rows = await list_channel_entities(identifier)
+    return filter_entities(rows, module=module, room=room, area=area,
+                           capability=capability, availability=availability)
+
+
+@router.get('/entities/{entity_id}')
+async def entity(entity_id: str, user=Depends(require_user)):
+    from .entities import list_channel_entities
+    rows = await list_channel_entities()
+    match = next((row for row in rows if row['entity_id'] == entity_id), None)
+    if match is None:
+        raise HTTPException(404, 'Entity not found')
+    return match
 
 
 @router.patch('/channels/{channel_id}')

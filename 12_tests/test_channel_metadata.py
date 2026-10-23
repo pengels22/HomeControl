@@ -67,6 +67,21 @@ def test_unsupported_matter_semantics_truthful():
     assert kind is None and 'supported' in reason
 
 
+@pytest.mark.parametrize('capability,expected', [
+    ('light', 'on_off_light'), ('dimmable_light', 'dimmable_light'),
+    ('temperature_sensor', 'temperature_sensor'), ('humidity_sensor', 'humidity_sensor'),
+    ('illuminance_sensor', 'illuminance_sensor'), ('occupancy_sensor', 'occupancy_sensor'),
+    ('motion_sensor', 'occupancy_sensor'), ('contact_sensor', 'contact_sensor'),
+])
+def test_matter_mapper_is_capability_registry(capability, expected):
+    assert bridges.matter_mapper({'capability': capability, 'matter_exposed': True, 'writable': False}) == expected
+
+
+def test_matter_mapper_keeps_analog_and_generic_relays_internal():
+    assert bridges.matter_mapper({'capability': 'analog_value', 'matter_exposed': True, 'writable': False}) is None
+    assert bridges.matter_mapper({'capability': 'relay', 'matter_exposed': True, 'writable': True}) is None
+
+
 def test_canonical_entity_is_stable_across_name_and_area_changes():
     original = row(module_id=7, module_type='LCM', room_id=9, room_name='Kitchen', area_id=3,
                    area_name='Main Floor', logical_name='Kitchen Light',
@@ -99,6 +114,52 @@ def test_future_channel_capability_remains_visible_without_state_decoder():
     assert entity['current_state'] is None and entity['writable'] is False
     assert entity['available'] is True
     assert bridges.representation(future, 'matter')[0] is None
+
+
+def test_sensor_projection_preserves_source_units_and_is_read_only():
+    module = {
+        'id': 12, 'device_id': '020000000012', 'module_type': 'SIM',
+        'control_session_online': True,
+        'last_state': {'state': {'rmc_nodes': {'7': {
+            'temperature_f': 71.5, 'humidity_pct': 42, 'lux': 120,
+            'presence': True, 'sensor_faults': [], 'stale': False,
+        }}, 'hexa_board': {'aio': {'analog_inputs': {
+            'a1': {'value': 3.3, 'unit': 'V', 'source': 'ADS1115'},
+        }}}}},
+    }
+    sensors = entities._sensor_entities(module)
+    by_capability = {item['capability']: item for item in sensors}
+    assert by_capability['temperature_sensor']['state'] == {'value': 71.5, 'unit': '°F'}
+    assert by_capability['humidity_sensor']['writable'] is False
+    assert by_capability['occupancy_sensor']['state']['value'] is True
+    assert by_capability['analog_value']['metadata']['source_detail'] == 'ADS1115'
+    assert all(item['matter_exposed'] is False for item in sensors)
+
+
+def test_sensor_fault_and_stale_state_are_distinct():
+    module = {'id': 13, 'device_id': '020000000013', 'module_type': 'SIM',
+              'control_session_online': True,
+              'last_state': {'state': {'rmc_nodes': {'8': {
+                  'temperature_f': 70, 'stale': True, 'sensor_faults': ['temperature'],
+              }}}}}
+    entity = next(item for item in entities._sensor_entities(module) if item['capability'] == 'temperature_sensor')
+    assert entity['availability'] == 'faulted'
+    assert entity['fault_state'] == ['temperature']
+    module['last_state']['state']['rmc_nodes']['8']['sensor_faults'] = []
+    entity = next(item for item in entities._sensor_entities(module) if item['capability'] == 'temperature_sensor')
+    assert entity['availability'] == 'stale' and entity['available'] is False
+
+
+def test_entity_filters_do_not_mutate_or_command_projection():
+    rows = [entities.channel_entity(row(id=1, module_id=2, device_id='020000000002', module_type='RCM',
+                                        control_session_online=True, logical_enabled=True)),
+            entities.channel_entity(row(id=2, module_id=3, device_id='020000000003', module_type='LCM',
+                                        channel_id='10-1', channel_kind='lv_dimmer', purpose='LIGHTING',
+                                        control_session_online=True, logical_enabled=True))]
+    assert [item['entity_id'] for item in entities.filter_entities(rows, module='LCM')] == ['channel_2']
+    assert entities.filter_entities(rows, capability='dimmable_light')[0]['entity_id'] == 'channel_2'
+    assert entities.filter_entities(rows, availability='unknown') == rows
+    assert all(item['writable'] for item in rows)
 
 
 @pytest.mark.parametrize('roles', [['G', 'Y1'], ['G', 'Y1', 'Y2'], ['G', 'W1'], ['G', 'W1', 'W2']])
