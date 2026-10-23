@@ -1,12 +1,12 @@
 # HCM Phase G Deployment Readiness
 
-Audit date: 2026-10-23 16:21 UTC
+Audit date: 2026-10-23 16:50 UTC
 Recommendation: **NO-GO for live deployment**
 
 ## Candidate
 
-- Candidate commit: `5f1228e655a8b1583bccfcb583620157d5faa312`
-- Candidate image tag: `homecontrol-hcm:5f1228e655a8b1583bccfcb583620157d5faa312`
+- Candidate runtime commit: `c48f2e7991e16b2eb5fb9428fcbf815f9b8102ce`
+- Candidate image tag: `homecontrol-hcm:c48f2e7991e16b2eb5fb9428fcbf815f9b8102ce`
 - Candidate source tree was clean before this readiness record was added.
 - The candidate image was built on the target-compatible Jetson ARM64 Docker environment and passed the image SHA verification step.
 
@@ -18,18 +18,20 @@ The software candidate is the verified Matter-centric rebuild through Phase F. T
 |---|---|---|
 | Source commit | PASS | Full candidate SHA recorded above; current branch was clean at audit start. |
 | Python, JavaScript, Matter, and repository checks | PASS | `873 passed, 1 skipped`; Python compileall passed; both JavaScript syntax checks and Matter `npm run check` passed; Matter validate-only exited 0; `git diff --check` passed. |
-| Docker image build | PASS | Built on Jetson ARM64 as `homecontrol-hcm:5f1228e655a8b1583bccfcb583620157d5faa312`; image ID `sha256:7a390d24dbac6de440a54ffad493efc3ccee019c3b06148d0cf5a8f22885ea78`, 495,772,700 bytes. |
+| Docker image build | PASS | Built on Jetson ARM64 as `homecontrol-hcm:c48f2e7991e16b2eb5fb9428fcbf815f9b8102ce`; image ID `sha256:bca167f5af236e92684e66dd7da59e8d8689bf480a8ca5138899802429f1347f`, 495,776,147 bytes. Build-time SHA verification passed. |
 | Jetson inventory | PASS | Host `jetson`, Ubuntu 18.04.6, kernel `4.9.253-tegra`, arm64, uptime 12 days 23 hours at collection. No extra active HCM container was found. |
 | Current/rollback image | PASS | Running `hcm-test` is `homecontrol-hcm:b1ef32db2ac870278f93a8371308818df9a4f379`; rollback is `homecontrol-hcm:bd549fe15ca70f30346336d00ed42883f25bbf9f` in `hcm-rollback-hc-20261022T234445Z-cd2e59bc`. |
 | Database migration level | PASS | Live `homecontrol` is at migration 024; migration 025 is pending. Database size is 12 MB. |
 | Database backup and restore test | PASS | `/srv/hcm-data/backups/homecontrol-20261023T161520Z-migration024.dump`, custom format, 239,240 bytes, SHA-256 `f730f34de929bf615dd18825eb844074e2ca05694c5487fecf03a4b156047018`; `pg_restore --list` succeeded and isolated PostgreSQL restore succeeded. |
 | Clone migration 025 | PASS | Candidate migration runner applied `[25]` to the restored clone. `hcm_areas` and `rooms.area_id` were present; sampled Rooms, users, modules, channel metadata, logical devices, and Matter endpoint tables survived. |
-| Matter storage backup | BLOCKED | Running container has no `HCM_MATTER_STORAGE`, no Matter bridge process, and no Matter storage path under `/srv/hcm-data` or `/etc/hcm`. There is no live Matter state to back up, but this is a deployment blocker for the Matter-centric candidate. |
+| Matter storage | PASS | Host `/srv/hcm-data/matter`, container `/var/lib/homecontrol-matter`, UID/GID 10001:10001, mode 700. Deployment helper now injects the bind and `HCM_MATTER_STORAGE` into every replacement HCM container. |
+| Matter historical fabric backup | NOT APPLICABLE | Matter has never been commissioned; no historical fabric state exists to preserve. |
+| Matter backup/restore procedure | PASS | Pre-commissioning archive `/srv/hcm-data/backups/matter-20261023T164138Z-precommissioning.tar.gz`, 1,370 bytes, SHA-256 `30db84de46f08c46a1cff5e530ce990e196b06a454f182b4681c3214dfafe90f`; restore into a separate directory and validate-only initialization both succeeded. |
 | Application/config backup | PASS | `/srv/hcm-data/backups/hcm-config-20261023T161638Z.tar.gz`, 2,628 bytes, mode 600, SHA-256 `1746817c2003a32f5876d7c9f451fc91418bc23c61ea21c75ade0cb1e914397f`; contains non-secret HCM config/state, service unit, safety config, release marker, and redacted container inventory. |
-| Disk capacity | PASS WITH RISK | Jetson root has 4.9 GiB free of 14 GiB (63% used); `/srv/hcm-data` has 14 GiB free of 15 GiB (1% used). Docker reports 1.772 GB images, 477 kB containers, 151.1 MB unused volumes, and no build cache. Nothing was pruned. |
+| Disk capacity | PASS WITH RISK | After the final build, Jetson root has 4.5 GiB free of 14 GiB (66% used); `/srv/hcm-data` has 14 GiB free of 15 GiB (1% used). Docker reports 1.968 GB images, 477 kB containers, 255.4 MB unused volumes, and no build cache. Nothing was pruned. |
 | Hardware/HIL | NOT RUN | GPIO, physical relays, TLS on deployed modules, and production hardware behavior remain unverified and require an authorized HIL window. |
 | Candidate validate-only start | DEFERRED | The image's build-time `hcm_verify` passed and migration runner was exercised against the clone. A full app container start was deferred to avoid introducing another listener/configuration while the live deployment remains active. |
-| Rollback compatibility | NOT PROVEN | The 024 backup restored and 025 clone migration passed, but the old rollback image has not been run against a migrated clone. Until that test is approved, rollback after migration requires restoring the 024 database backup. |
+| Rollback compatibility | PASS | Existing production HCM image `b1ef32db2ac870278f93a8371308818df9a4f379` started, connected, served health, and served version against an isolated schema-025 clone with simulated safety and loopback-only module binding. |
 
 ## Migration and rollback assessment
 
@@ -74,4 +76,11 @@ The repository contains ordered migrations 001 through 025; 025 creates `hcm_are
 - A failed short-tag build left one inactive Docker build container named `elastic_lovelace`; it is not an active HCM container and was intentionally not removed during this no-cleanup phase.
 - Matter is not configured in the current deployment. The candidate cannot receive a GO decision until an approved persistent Matter storage path and backup/restore plan exist, or the deployment architecture is explicitly re-baselined to omit Matter.
 
-Until the Matter persistence blocker is resolved and authorized HIL/acceptance checks are complete, the candidate is not ready for live rollout.
+## Phase I findings
+
+- Matter.js persisted its file-backed `homecontrol` store under `/var/lib/homecontrol-matter/homecontrol`; the same host-backed directory survived candidate container recreation and reopened successfully.
+- The bridge was run twice with validate-only mode against the same storage and once against a restored archive. No commissioning or production port was used.
+- The retained production image is compatible with schema 025 in the isolated test. The rollback model is therefore **application rollback with migration 025 left in place**; no down-migration is required. A pre-migration database backup remains available for emergency recovery if a future rollback reveals an unrelated incompatibility.
+- The deployment helper change is runtime code, so the earlier `5f1228e` image is stale for deployment. The final candidate was rebuilt from the exact runtime commit above.
+
+The only remaining deployment gates are the final ARM64 build from `c48f2e7…`, full post-change validation, authorized HIL/acceptance testing, and controlled deployment approval. Matter commissioning remains deferred until after deployment acceptance.
