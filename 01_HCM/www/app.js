@@ -813,6 +813,68 @@ async function renderDevices() {
     </section>`;
 }
 
+function adminStatusCard(label, value, detail = "") {
+  return `<article class="summary dashboard-card"><span>${esc(label)}</span><strong>${esc(value ?? "Unknown")}</strong><p>${esc(detail)}</p></article>`;
+}
+
+function entityState(item) {
+  if (item.state == null) return "Unknown";
+  if (typeof item.state === "object") return item.state.state || (item.state.value == null ? "Unknown" : `${item.state.value}${item.state.unit ? ` ${item.state.unit}` : ""}`);
+  return String(item.state);
+}
+
+async function renderEntities() {
+  setTitle("Engineering", "Entities / Channels");
+  $("content").innerHTML = `<div class="loading">Loading canonical entities...</div>`;
+  const entities = await api("/entities");
+  const rows = Array.isArray(entities) ? entities : [];
+  $("content").innerHTML = `<section class="panel"><div class="panel-head"><h3>Canonical HCM Entities</h3><span class="muted">${rows.length} projected entities</span></div>
+    ${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Entity</th><th>Module / Source</th><th>Capability</th><th>Room / Area</th><th>State</th><th>Availability</th><th>Access</th><th>Matter</th></tr></thead><tbody>${rows.map((item) => `<tr><td><strong>${esc(item.name)}</strong><br><code>${esc(item.entity_id)}</code></td><td>${esc(item.module_type || "-")} / ${esc(item.channel ?? item.channel_id ?? "-")}</td><td>${esc(item.capability)}</td><td>${esc(item.room || "-")} / ${esc(item.area || "-")}</td><td>${esc(entityState(item))}</td><td>${statusPill(item.available, item.availability || "unknown")}</td><td>${item.writable ? "Writable" : "Read-only"}</td><td>${item.matter_exposed ? "Exposed" : "Internal"}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">No canonical entities are available.</div>`}</section>`;
+}
+
+async function renderLocations() {
+  setTitle("Configuration", "Rooms / Areas");
+  $("content").innerHTML = `<div class="loading">Loading HCM location model...</div>`;
+  const [areasResult, roomsResult] = await Promise.allSettled([api("/areas"), api("/rooms")]);
+  const areas = areasResult.status === "fulfilled" ? areasResult.value : [];
+  const rooms = roomsResult.status === "fulfilled" ? roomsResult.value : [];
+  $("content").innerHTML = `<section class="summary-grid">${adminStatusCard("Areas", areas.length, "HCM location groups")}${adminStatusCard("Rooms", rooms.length, "Rooms may remain without an Area")}</section><section class="panel"><div class="panel-head"><h3>Areas</h3><span class="muted">ACM alarm Areas remain separate</span></div>${areas.length ? `<div class="detail-list">${areas.map((area) => `<article class="detail-item"><strong>${esc(area.name)}</strong><div class="detail-fields">${detailField("ID", area.id)}${detailField("Status", area.enabled ? "Enabled" : "Disabled")}${detailField("Rooms", rooms.filter((room) => room.area_id === area.id).length)}</div></article>`).join("")}</div>` : `<div class="empty">No HCM Areas configured.</div>`}</section><section class="panel"><div class="panel-head"><h3>Rooms</h3></div>${rooms.length ? `<div class="table-wrap"><table><thead><tr><th>Room</th><th>Area</th><th>Status</th></tr></thead><tbody>${rooms.map((room) => `<tr><td>${esc(room.name)}</td><td>${esc(room.area_name || "Unassigned")}</td><td>${esc(room.enabled ? "Enabled" : "Disabled")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">No Rooms configured.</div>`}</section>`;
+}
+
+async function renderMatterAdmin() {
+  setTitle("Engineering", "Matter");
+  $("content").innerHTML = `<div class="loading">Loading Matter bridge status...</div>`;
+  const data = await api("/bridges");
+  const matter = data.matter || {};
+  const channels = matter.channels || [];
+  const mapped = channels.filter((item) => item.kind).length;
+  const unsupported = channels.filter((item) => !item.kind && item.reason !== "Exposure disabled").length;
+  $("content").innerHTML = `<section class="summary-grid">${adminStatusCard("Bridge", matter.status || "Unknown", "Process lifecycle")}${adminStatusCard("Mapped entities", mapped, "Canonical entities exposed")}${adminStatusCard("Unsupported", unsupported, "Retained internally")}${adminStatusCard("Endpoints", channels.filter((item) => item.endpoint).length, "Persistent allocation")}</section><section class="panel"><div class="panel-head"><h3>Exposed Matter entities</h3><span class="muted">Fabric secrets are not shown</span></div>${channels.length ? `<div class="detail-list">${channels.map((item) => `<article class="detail-item"><strong>${esc(item.name)}</strong><div class="detail-fields">${detailField("Entity", item.entity_id || item.stable_id)}${detailField("Mapping", item.kind || item.reason)}${detailField("Endpoint", item.endpoint || "Reserved / none")}${detailField("Availability", item.availability || (item.available ? "available" : "unavailable"))}</div></article>`).join("")}</div>` : `<div class="empty">No Matter channel projections are configured.</div>`}</section>`;
+}
+
+async function renderWeatherAdmin() {
+  setTitle("Environmental", "Weather");
+  $("content").innerHTML = `<div class="loading">Loading native NWS status...</div>`;
+  const results = await Promise.allSettled([api("/weather"), api("/weather/current"), api("/weather/hourly"), api("/weather/forecast"), api("/weather/alerts"), api("/weather/health")]);
+  const summary = settledValue(results[0], {}), current = settledValue(results[1], null), hourly = settledValue(results[2], []), daily = settledValue(results[3], []), alerts = settledValue(results[4], []), health = settledValue(results[5], {});
+  $("content").innerHTML = `<section class="summary-grid">${adminStatusCard("Service", health.status || summary.health || "Unknown", health.last_error || "Native HCM NWS service")}${adminStatusCard("Current", current ? `${current.temperature ?? "Unknown"} ${current.temperature_unit || ""}` : "Unavailable", current?.description || "No observation")}${adminStatusCard("Active alerts", alerts.length, summary.highest_alert_severity || "None")}${adminStatusCard("Cache age", health.cache_age_seconds == null ? "Unknown" : `${Math.round(health.cache_age_seconds)}s`, health.last_attempted || "Never attempted")}</section><section class="panel"><div class="panel-head"><h3>Active NWS Alerts</h3></div>${alerts.length ? `<div class="detail-list">${alerts.map((alert) => `<article class="detail-item"><strong>${esc(alert.event || alert.headline || alert.alert_id)}</strong><div class="detail-fields">${detailField("Severity", alert.severity)}${detailField("Urgency", alert.urgency)}${detailField("Certainty", alert.certainty)}${detailField("Expires", alert.expires)}</div></article>`).join("")}</div>` : `<div class="empty">No active NWS alerts.</div>`}</section><section class="panel"><div class="panel-head"><h3>Forecast availability</h3></div><div class="detail-fields">${detailField("Hourly periods", hourly.length)}${detailField("Daily periods", daily.length)}${detailField("Last current update", health.last_successful_current)}${detailField("Last daily update", health.last_successful_daily)}</div></section>`;
+}
+
+async function renderTimeAdmin() {
+  setTitle("System", "Time");
+  $("content").innerHTML = `<div class="loading">Loading native HCM time service...</div>`;
+  const data = await api("/time");
+  $("content").innerHTML = `<section class="summary-grid">${adminStatusCard("Local time", data.local, data.timezone)}${adminStatusCard("UTC", data.utc, "System clock")}${adminStatusCard("Synchronization", data.sync_status, data.sync_detail || "Host telemetry")}${adminStatusCard("Offset", `${data.utc_offset_seconds} seconds`, data.dst ? "DST active" : "Standard time")}</section><section class="panel"><h3>Time Service</h3><div class="detail-fields">${detailField("Timezone", data.timezone)}${detailField("Checked at", data.checked_at)}${detailField("UTC offset", data.utc_offset_seconds)}${detailField("DST", data.dst ? "Active" : "Inactive")}</div></section>`;
+}
+
+async function renderSafetyAdmin() {
+  setTitle("Safety", "Safety Status");
+  $("content").innerHTML = `<div class="loading">Loading safety status...</div>`;
+  const result = await Promise.allSettled([api("/safety/status"), api("/health")]);
+  const safety = settledValue(result[0], null), health = settledValue(result[1], {});
+  $("content").innerHTML = `<section class="summary-grid">${adminStatusCard("Fire state", safety?.status || "Unavailable", safety?.physical_input_authoritative ? "Physical input authoritative" : "Status source unavailable")}${adminStatusCard("Maintenance lockout", safety?.maintenance_lockout_active ? "Active" : safety ? "Inactive" : "Unknown", "Output arbitration")}${adminStatusCard("HCM", health.ok ? "Healthy" : "Unavailable", "Backend health")}</section><section class="panel"><h3>Read-only safety information</h3><div class="detail-fields">${detailField("Fire alarm", safety?.fire_alarm_s?.state)}${detailField("Alarm contact", safety?.alarm_contact?.state)}${detailField("HVAC safety", safety?.hvac_safety_state || safety?.status)}${detailField("Source", safety?.physical_input_authoritative ? "Physical input" : "Unknown")}</div><p class="muted">Safety authority and controls remain in the existing protected backend.</p></section>`;
+}
+
 function identityBlock(device) {
   const module = device.module;
   const sync = device.config_sync;
@@ -1743,12 +1805,19 @@ async function renderRoute() {
     const parts = routeParts();
     if (parts[0] === "devices" && parts[1]) return await renderDeviceDetail(decodeURIComponent(parts.slice(1).join("/")));
     if (parts[0] === "devices") return await renderDevices();
+    if (parts[0] === "entities") return await renderEntities();
+    if (parts[0] === "locations") return await renderLocations();
+    if (parts[0] === "matter") return await renderMatterAdmin();
+    if (parts[0] === "weather") return await renderWeatherAdmin();
+    if (parts[0] === "time") return await renderTimeAdmin();
+    if (parts[0] === "safety") return await renderSafetyAdmin();
     if (parts[0] === "devices-services") return await renderDevicesServices();
     if (parts[0] === "automations" && parts[1] === "staged" && parts[2]) return await renderAutomationDetailPage("staged", parts[2], parts[3] === "edit");
     if (parts[0] === "automations" && parts[1] === "native" && parts[2]) return await renderAutomationDetailPage("native", parts[2], parts[3] === "edit");
     if (parts[0] === "automations") return await renderAutomations();
     if (parts[0] === "helpers") return await renderHelpers();
-    if (parts[0] === "service") return go("/dashboard");
+    if (parts[0] === "service") return go("/diagnostics");
+    if (parts[0] === "diagnostics") return await renderService();
     if (parts[0] === "settings") return await renderSettings();
     if (parts[0] === "ha-mappings") return await renderHaMappings();
     if (parts[0] === "users") return await renderUsers();

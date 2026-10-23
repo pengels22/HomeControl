@@ -66,11 +66,15 @@ async def lifespan(app: FastAPI):
     storage.ensure_storage_layout()
     await hvac.load_from_db()
     await registry.start()
+    await api.weather_service.start()
     from .bridges import bridge
     await bridge.start()
     from .integrations.runtime import runtime as integrations
     from .integrations.mock import MockProvider
-    from .integrations import nws, owm, openai_provider, google, smartthings, denon, heos, ibeacon
+    # Native NWS is authoritative.  The legacy consumer providers remain
+    # importable for migration/rollback compatibility but are not loaded into
+    # the active provider registry during normal HCM startup.
+    from .integrations import nws, ibeacon
     from . import bluetooth
     await bluetooth.scanner.start()
     from .integrations.factory import provider_factory
@@ -107,6 +111,7 @@ async def lifespan(app: FastAPI):
     await integrations.stop()
     await bluetooth.scanner.stop()
     await bridge.stop()
+    await api.weather_service.stop()
     await storage.git_sync_manager.stop()
     await safety_relays.shutdown()
     await registry.stop(); await db.close()
@@ -165,9 +170,16 @@ async def web_index():
 @app.get('/devices')
 @app.get('/devices/{path:path}')
 @app.get('/service')
+@app.get('/diagnostics')
 @app.get('/settings')
 @app.get('/ha-mappings')
 @app.get('/users')
+@app.get('/entities')
+@app.get('/locations')
+@app.get('/matter')
+@app.get('/weather')
+@app.get('/time')
+@app.get('/safety')
 async def web_app_routes():
     return FileResponse(WEB_ROOT / 'index.html')
 

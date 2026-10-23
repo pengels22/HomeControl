@@ -141,3 +141,84 @@ Focused time/API tests: **23 passed**. Full pytest: **868 passed, 1 skipped, 1 w
 ### Known limitations and deployment/HIL
 
 The service reports host synchronization telemetry only when the deployed Linux image provides usable `timedatectl` output; otherwise it reports `unknown` while continuing to provide system time. Existing direct time calls were intentionally not mass-refactored, and protected safety/heartbeat timing remains unchanged. ACM live time exchange, host NTP status, reboot behavior, and installed keypad display behavior still require deployment/HIL verification. NWS, frontend refocus, and legacy integration retirement were not started.
+
+## Checkpoint 5 — Native NWS Weather Service
+
+Phase D completed on 2026-10-23. The previous NWS implementation was a generic provider-runtime instance that published a limited forecast and alert count through provider entities. Its point metadata was process-memory only, current observations were not fetched separately, forecast periods were bounded but not split into native hourly/daily resources, and no native weather health/cache API existed. Existing provider registration and compatibility paths remain in place.
+
+### Native architecture
+
+- `01_HCM/weather_service.py` is a standalone, failure-isolated NWS service using the Phase C `TimeService` for all timestamps, age calculations, UTC normalization, and expiration-safe comparisons. It uses configured HCM latitude/longitude and never replaces physical HCM sensor entities.
+- Point lookup resolves and caches forecast office, grid coordinates, forecast URLs, county/zone, and observation-station collection links. A bounded JSON cache under the configured HCM storage root survives process restarts without persisting raw unbounded NWS responses.
+- Current observations are normalized separately from forecasts, retaining observation time, temperature and unit, humidity, dew point, wind, pressure, visibility, description, station, and data age. Hourly and daily NWS periods remain separate timezone-aware normalized records with start/end, temperature, precipitation probability, wind, descriptions, and day/night state.
+- Active alerts retain NWS identity and supplied event, headline, severity, urgency, certainty, status, message type, timestamps, area, description, instructions, sender, response, and parameters. Repeated alerts are deduplicated; new, changed, and removed alerts emit `weather.alert.new`, `weather.alert.updated`, and `weather.alert.expired` through the optional HCM event sink.
+- Resource refreshes are independent. Point, current, daily, hourly, and alerts failures are isolated; cached values remain visible with explicit `healthy`, `degraded`, or `unavailable` health and last-success/attempt/error metadata. Startup launches the service task without waiting for Internet, DNS, or NWS availability. Polling is bounded by configured intervals and HTTP timeout behavior.
+
+### API and compatibility
+
+Authenticated read-only APIs are provided at `/api/v1/weather`, `/current`, `/hourly`, `/forecast`, `/alerts`, and `/health`. The top-level summary includes condition, temperature, humidity, active alert count, highest NWS severity, health, and update time. The old `NWSProvider` and provider runtime remain registered for existing automation/provider consumers; retirement or redirection is deferred to the legacy-integration phase. Existing `SunCalculator` remains local and independent of NWS.
+
+### Files and validation
+
+Changed `01_HCM/api.py`, `01_HCM/main.py`, `01_HCM/weather_service.py`, `12_tests/test_weather_service.py`, and this audit. Focused weather/API tests: **23 passed**. Full pytest: **873 passed, 1 skipped, 1 warning**. Python compileall, JavaScript syntax validation, Matter bridge validation, Matter validate-only startup, active configuration safety checks, and `git diff --check` passed.
+
+### Known limitations and deployment requirements
+
+No weather database migration was added; the bounded cache is filesystem-backed and may be unavailable until the configured storage root is writable. NWS unit fields are preserved as source units rather than globally converted. No live NWS calls, Internet dependency, frontend work, notification UI, weather Matter accessory, or production deployment was performed. Live NWS rate-limit behavior, station selection, cache recovery after reboot, and installed-host filesystem permissions require deployment verification. Fire/life-safety, ACM, module protocols, heartbeat, Matter mappings, and Time Service semantics were not changed.
+
+## Checkpoint 6 — Admin UI Refocus
+
+Phase E completed on 2026-10-23. The former primary navigation presented Dashboard, Devices & Services, Automations, Helpers, Settings, and Users, with consumer/provider-oriented surfaces mixed into the main path. The frontend already contained useful module commissioning, safety, bridge, room, and diagnostics views, so this phase refocused navigation and added native engineering views without deleting legacy backend or UI compatibility paths.
+
+### New information architecture
+
+Primary navigation now centers on System Overview, Modules, Entities / Channels, Rooms / Areas, Matter, Weather, Time, Safety, Diagnostics, and Administration. Automations, legacy Devices & Services, and Users remain accessible as secondary administration links. Existing device detail, module role, channel configuration, safety, bridge settings, update, authentication, HA mapping, and automation routes remain available.
+
+### Native admin surfaces
+
+- Entities / Channels uses `/api/v1/entities` and presents canonical entity identity, module/source, capability, Room/Area, state, availability, writable/read-only status, and Matter exposure.
+- Rooms / Areas uses `/api/v1/areas` and `/api/v1/rooms`, explicitly preserves Rooms without Areas, and distinguishes HCM Areas from ACM alarm Areas.
+- Matter uses `/api/v1/bridges` to show bridge lifecycle, mapped/unsupported counts, persistent endpoints, and exposure status without fabric secrets.
+- Weather uses the native `/api/v1/weather*` APIs for service health, current conditions, cache age, forecast availability, and NWS alert severity/urgency/certainty. It does not use provider entities as its authority.
+- Time uses `/api/v1/time` for UTC/local time, timezone, offset, DST, and synchronization status.
+- Safety remains read-only in the new page and uses existing `/api/v1/safety/status` and `/api/v1/health` data. No unsafe convenience controls were added. Diagnostics retains existing live HCM service and safety relay status.
+
+### Compatibility and validation
+
+Changed `01_HCM/www/index.html`, `01_HCM/www/app.js`, `01_HCM/main.py`, and this audit. Existing legacy integrations, provider pages, HA mapping, automation backend, and module communication remain present and are not removed in Phase E. Frontend error handling continues to show unavailable/degraded states rather than inventing fresh values. Full pytest: **873 passed, 1 skipped, 1 warning**. Preview/frontend route tests: **38 passed**. JavaScript syntax validation, Python compileall, Matter bridge validation, Matter validate-only startup, active configuration safety checks, and `git diff --check` passed.
+
+### Known limitations
+
+The new admin pages are observability and commissioning views; advanced inline editing remains on the existing Settings and module pages. Overview still retains selected existing HCM diagnostics cards, while the new pages provide the native service-specific status views. Legacy UI surfaces are de-emphasized but not deleted pending Phase F dependency review. No browser/device HIL, production deployment, or external Matter/NWS connectivity was performed.
+
+## Checkpoint 7 — Dependency-Led Legacy Integration Retirement
+
+Phase F completed on 2026-10-23 after an import and runtime-reference audit. Retirement was deliberately staged because the generic integration runtime still hosts core HCM functionality.
+
+### Classification
+
+| Component | Classification | Reason |
+|---|---|---|
+| `integrations/runtime.py`, `registry.py`, `services.py`, `events.py` | CORE DEPENDENCY | Automation, zones, device events, native primitives, notifications, and service declarations still use these modules. |
+| `integrations/http.py`, secrets/auth primitives | KEEP | Native NWS and administrative infrastructure use bounded HTTP or authentication primitives. |
+| Native `01_HCM/weather_service.py` | KEEP | Authoritative weather service. |
+| Old `integrations/nws.py` | COMPATIBILITY-ONLY | Existing provider consumers/tests may still import it; native NWS is now authoritative. |
+| OWM, Google, SmartThings, OpenAI, Denon, HEOS providers | COMPATIBILITY-ONLY | Retained importable for historical data, direct tests, and rollback compatibility, but no longer loaded by normal HCM startup. |
+| `integrations/oauth.py` and provider credential storage | COMPATIBILITY-ONLY | Only consumer-provider configuration paths use these; HCM user authentication is separate and retained. |
+| HA importer/staging/mapping modules and migration tables | COMPATIBILITY-ONLY | Historical migration records and review APIs remain available; no runtime execution path was removed blindly. |
+| Existing integrations API/config API and legacy UI routes | COMPATIBILITY-ONLY | Existing callers and historical configuration remain supported while Phase F establishes a safe retirement boundary. |
+| Module registry, canonical entities, Rooms/Areas, safety, Matter, Time, weather, automation/policy | KEEP / CORE DEPENDENCY | Protected HCM operation. |
+
+### Change made
+
+`01_HCM/main.py` no longer imports or registers consumer providers (OWM, Google, SmartThings, OpenAI, Denon, HEOS) during normal startup. Native NWS and the local iBeacon provider remain available where explicitly required. Existing provider source files, database rows, OAuth records, HA migration data, APIs, and tests remain intact for compatibility and rollback; they are not foundational to the active HCM startup path.
+
+The Phase E legacy UI links remain secondary rather than being deleted because their backend compatibility surfaces still exist. No provider-owned entities were merged into canonical HCM entities. The automation engine, event bus, notification hooks, and service declarations were preserved because core code still depends on them. No fire/life-safety, module protocol, heartbeat, Matter, Time, Weather, or database migration semantics were changed.
+
+### Validation
+
+Full pytest: **873 passed, 1 skipped, 1 warning**. Preview/frontend tests: **38 passed**. Python compileall, JavaScript syntax validation, Matter bridge validation, Matter validate-only startup, active configuration safety checks, and `git diff --check` passed.
+
+### Remaining retirement work
+
+Provider modules can be deleted only after a separate dependency review confirms no rollback, direct API, migration, or operator tooling requires them. HA migration tables should remain for historical provenance. Generic runtime extraction, provider-owned entity retirement, and legacy UI deletion remain follow-up work; this checkpoint does not claim the consumer framework is fully removed.

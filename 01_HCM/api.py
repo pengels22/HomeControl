@@ -70,12 +70,15 @@ from .updater import updater
 from .registry import registry
 from . import command_events
 from .time_service import build_time_service
+from .weather_service import NWSWeatherService
 
 router = APIRouter(prefix='/api/v1')
 hvac = None
 safety = None
 safety_relays = None
 time_service = build_time_service(settings.timezone)
+weather_service = NWSWeatherService(time_service, settings.latitude, settings.longitude,
+                                    cache_path=settings.storage_root / 'weather' / 'nws-cache.json')
 
 @router.get('/version')
 async def version():
@@ -100,6 +103,30 @@ async def health():
 async def system_time(user=Depends(require_user)):
     """Administrative clock view; OS synchronization remains authoritative."""
     return time_service.as_payload()
+
+@router.get('/weather')
+async def weather_summary(user=Depends(require_user)):
+    return weather_service.summary()
+
+@router.get('/weather/current')
+async def weather_current(user=Depends(require_user)):
+    return weather_service.snapshot()['current']
+
+@router.get('/weather/hourly')
+async def weather_hourly(user=Depends(require_user)):
+    return weather_service.snapshot()['hourly']
+
+@router.get('/weather/forecast')
+async def weather_forecast(user=Depends(require_user)):
+    return weather_service.snapshot()['forecast']
+
+@router.get('/weather/alerts')
+async def weather_alerts(user=Depends(require_user)):
+    return weather_service.snapshot()['alerts']
+
+@router.get('/weather/health')
+async def weather_health(user=Depends(require_user)):
+    return weather_service.snapshot()['health']
 
 @router.post('/commands')
 async def ingest_command(body: CommandIn, user=Depends(require_user)):
