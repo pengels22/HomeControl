@@ -4,8 +4,10 @@ import json
 import logging
 import os
 import ssl
+import time
 from pathlib import Path
 from . import db, channel_registry
+from .entities import channel_entity, reported_state
 
 log = logging.getLogger(__name__)
 
@@ -19,41 +21,25 @@ def representation(row, bridge):
     if not row['enabled'] or not row[f'{bridge}_enabled']:
         return None, 'Exposure disabled'
     if row['purpose'] == 'LIGHTING':
-        return ('light' if row['channel_kind'] == 'relay' else 'dimmer'), None
+        if row['channel_kind'] == 'relay':
+            return 'light', None
+        if row['channel_kind'] in {'lv_dimmer', 'hv_dimmer'}:
+            return 'dimmer', None
     if bridge == 'mqtt' and row['channel_kind'] == 'relay' and row['purpose'] in {'GENERAL', 'LANDSCAPE', 'OTHER', 'SECURITY'}:
         return 'switch', None
     return None, 'No supported semantic device type'
-
-
-def reported_state(row):
-    state = row.get('last_state') or {}
-    if isinstance(state, str):
-        state = json.loads(state)
-    state = state.get('state', state)
-    key = {'relay': 'relays', 'lv_dimmer': 'lv_dimmers', 'hv_dimmer': 'hv_dimmers'}[row['channel_kind']]
-    value = state.get(key, {}).get(row['channel_id'])
-    if value is None:
-        return None
-    if row['channel_kind'] == 'relay':
-        if not isinstance(value, bool):
-            return None
-        return {'state': 'ON' if value else 'OFF'}
-    level = value.get('percent') if isinstance(value, dict) else value
-    if not isinstance(level, (float, int)) or not 0 <= level <= 100:
-        return None
-    return {'state': 'ON' if level > 0 else 'OFF', 'brightness': level}
 
 
 def projection(rows, bridge):
     result = []
     for row in rows:
         kind, reason = representation(row, bridge)
+        entity = channel_entity(row)
         result.append({
             'channel_id': row['id'], 'stable_id': stable_id(row),
-            'name': row['display_name'] or row.get('logical_name') or f"{row['hostname']} {row['channel_id']}",
-            'room': row.get('room_name'), 'kind': kind, 'reason': reason,
-            'endpoint': row.get('endpoint'), 'reported_state': reported_state(row),
-            'available': bool(row.get('control_session_online') and row.get('logical_enabled') and not row.get('maintenance_locked')),
+            'name': entity['name'], 'room': entity['room'], 'area': entity['area'],
+            'kind': kind, 'reason': reason, 'endpoint': row.get('endpoint'),
+            'reported_state': entity['state'], 'available': entity['available'],
         })
     return result
 
@@ -94,6 +80,10 @@ class RegistryBridge:
         self.module_revisions = {}
         self.mqtt_state = 'disabled'
         self.matter_state = 'disabled'
+        self.matter_failures = 0
+        self.matter_next_retry = 0.0
+        self.matter_stopping = False
+        self.matter_started_at = 0.0
         self.sync_error = None
         self.rows = []
         self.settings = {}
@@ -113,6 +103,7 @@ class RegistryBridge:
 
 
     async def stop(self):
+        self.matter_stopping = True
         if self.client:
             try:
                 await self.client.publish('homecontrol/status', 'offline', qos=1, retain=True)
@@ -125,6 +116,7 @@ class RegistryBridge:
         if self.matter and self.matter.returncode is None:
             self.matter.terminate()
             await self.matter.wait()
+        self.matter_state = 'stopped intentionally'
 
     async def status(self):
         rows = await channel_registry.channels()
@@ -160,16 +152,38 @@ class RegistryBridge:
             self.mqtt_state = 'disabled'
             if configured['mqtt']['enabled']:
                 self.mqtt_task = asyncio.create_task(self.run_mqtt(configured['mqtt']))
-        if configured.get('matter') != self.settings.get('matter'):
+        matter_changed = configured.get('matter') != self.settings.get('matter')
+        if matter_changed:
+            self.matter_stopping = True
             if self.matter and self.matter.returncode is None:
                 self.matter.terminate()
                 await self.matter.wait()
-                self.matter = None
+            if self.matter_reader:
+                await asyncio.gather(self.matter_reader, return_exceptions=True)
+                self.matter_reader = None
+            self.matter = None
+            self.matter_stopping = False
+            self.matter_failures = 0
+            self.matter_next_retry = 0.0
             self.matter_state = 'disabled'
-            if configured['matter']['enabled']:
-                if not os.getenv('HCM_MATTER_STORAGE') or not os.getenv('HCM_MATTER_PASSCODE'):
-                    self.matter_state = 'unavailable: persistent storage and pairing code must be provisioned on host'
-                else:
+        if configured['matter']['enabled'] and (not os.getenv('HCM_MATTER_STORAGE') or not os.getenv('HCM_MATTER_PASSCODE')):
+            self.matter_state = 'not configured: persistent storage and pairing code are required'
+        elif configured['matter']['enabled']:
+            if self.matter and self.matter_reader and self.matter_reader.done() and self.matter.returncode is None:
+                self.matter.terminate()
+                await self.matter.wait()
+                if not self.matter_next_retry:
+                    self._matter_failure('adapter reader stopped')
+            if self.matter and self.matter.returncode is None and self.matter_state.startswith('running') and time.monotonic() - self.matter_started_at >= 60:
+                self.matter_failures = 0
+                self.matter_next_retry = 0.0
+            if self.matter is None or self.matter.returncode is not None:
+                # Wait for the reader to record an unexpected exit and its backoff.
+                if self.matter_reader:
+                    await asyncio.gather(self.matter_reader, return_exceptions=True)
+                    self.matter_reader = None
+                self.matter = None
+                if time.monotonic() >= self.matter_next_retry:
                     await self.start_matter()
         self.settings = configured
 
@@ -303,9 +317,15 @@ class RegistryBridge:
         try:
             self.matter_state = 'starting'
             self.matter = await asyncio.create_subprocess_exec('node', str(path), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
+            self.matter_started_at = time.monotonic()
             self.matter_reader = asyncio.create_task(self.read_matter())
         except OSError:
-            self.matter_state = 'unavailable: Node runtime missing'
+            self._matter_failure('Node runtime missing')
+
+    def _matter_failure(self, reason):
+        self.matter_failures += 1
+        self.matter_next_retry = time.monotonic() + min(300, 5 * 2 ** min(self.matter_failures - 1, 6))
+        self.matter_state = ('failed repeatedly' if self.matter_failures >= 3 else 'exited unexpectedly') + f': {reason}'
 
     async def send_matter(self, message):
         self.matter.stdin.write((json.dumps(message) + '\n').encode())
@@ -329,7 +349,8 @@ class RegistryBridge:
                     await self.send_matter(reply)
             except (ValueError, KeyError):
                 log.warning('Invalid Matter adapter response')
-        self.matter_state = 'unavailable: adapter exited'
+        if not self.matter_stopping:
+            self._matter_failure('adapter exited')
 
 
 bridge = RegistryBridge()

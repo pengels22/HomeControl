@@ -2297,6 +2297,9 @@ function metadataOptions(values, selected) {
 function roomOptions(rooms, selected) {
   return '<option value="">Unassigned</option>' + rooms.filter(r => r.enabled || r.id === selected).map(r => `<option value="${r.id}" ${r.id === selected ? 'selected' : ''}>${esc(r.name)}${r.enabled ? '' : ' (disabled)'}</option>`).join('');
 }
+function areaOptions(areas, selected) {
+  return '<option value="">No Area</option>' + areas.filter(a => a.enabled || a.id === selected).map(a => `<option value="${a.id}" ${a.id === selected ? 'selected' : ''}>${esc(a.name)}${a.enabled ? '' : ' (disabled)'}</option>`).join('');
+}
 async function renderChannelMetadata(identifier) {
   const [channels, rooms] = await Promise.all([api(`/channels?identifier=${encodeURIComponent(identifier)}`), api('/rooms')]);
   const section = document.createElement('section');
@@ -2348,13 +2351,16 @@ async function renderChannelMetadata(identifier) {
   }
 }
 async function renderRegistrySettings() {
-  const [rooms, bridges] = await Promise.all([api('/rooms'), api('/bridges')]);
+  const [areas, rooms, bridges] = await Promise.all([api('/areas'), api('/rooms'), api('/bridges')]);
   const section = document.createElement('section');
   section.className = 'panel';
   const disabled = currentUser?.role === 'ADMIN' ? '' : 'disabled';
-  section.innerHTML = `<h3>Rooms</h3><p>Room assignments remain intact when a room is renamed or disabled.</p>
-    ${rooms.map(r => `<form data-room-id="${r.id}"><fieldset ${disabled}><input name="name" aria-label="Room name" required maxlength="120" value="${esc(r.name)}"><label><input name="enabled" type="checkbox" ${r.enabled ? 'checked' : ''}> Enabled</label><button>Save Room</button><span role="status"></span></fieldset></form>`).join('')}
-    <form data-new-room><fieldset ${disabled}><input name="name" placeholder="New room name" required maxlength="120"><button>Add Room</button><span role="status"></span></fieldset></form>
+  section.innerHTML = `<h3>Areas</h3><p>HCM Areas organize Rooms. ACM alarm Areas remain separate.</p>
+    ${areas.map(a => `<form data-area-id="${a.id}"><fieldset ${disabled}><input name="name" aria-label="Area name" required maxlength="120" value="${esc(a.name)}"><label><input name="enabled" type="checkbox" ${a.enabled ? 'checked' : ''}> Enabled</label><button>Save Area</button><span role="status"></span></fieldset></form>`).join('')}
+    <form data-new-area><fieldset ${disabled}><input name="name" placeholder="New Area name" required maxlength="120"><button>Add Area</button><span role="status"></span></fieldset></form>
+    <h3>Rooms</h3><p>Room assignments remain intact when a room is renamed or disabled.</p>
+    ${rooms.map(r => `<form data-room-id="${r.id}"><fieldset ${disabled}><input name="name" aria-label="Room name" required maxlength="120" value="${esc(r.name)}"><label>Area <select name="area_id">${areaOptions(areas, r.area_id)}</select></label><label><input name="enabled" type="checkbox" ${r.enabled ? 'checked' : ''}> Enabled</label><button>Save Room</button><span role="status"></span></fieldset></form>`).join('')}
+    <form data-new-room><fieldset ${disabled}><input name="name" placeholder="New room name" required maxlength="120"><label>Area <select name="area_id">${areaOptions(areas, null)}</select></label><button>Add Room</button><span role="status"></span></fieldset></form>
     ${['mqtt', 'matter'].map(b => `<h3>${b.toUpperCase()} Bridge</h3><p>${esc(bridges[b].status)}</p><form data-bridge-name="${b}"><fieldset ${disabled}>
       <label><input name="enabled" type="checkbox" ${bridges.settings[b].enabled ? 'checked' : ''}> Enabled</label>
       ${b === 'mqtt' ? `<label>Broker <input name="host" value="${esc(bridges.settings.mqtt.host)}"></label><label>Port <input name="port" type="number" min="1" max="65535" value="${bridges.settings.mqtt.port}"></label><label><input name="tls" type="checkbox" ${bridges.settings.mqtt.tls ? 'checked' : ''}> TLS</label>` : '<p>Pairing code and persistent fabric storage are provisioned on HCM.</p>'}
@@ -2370,8 +2376,13 @@ async function renderRegistrySettings() {
         await api(`/bridges/${form.dataset.bridgeName}/settings`, {method: 'PUT', body: JSON.stringify(body)});
         await renderSettings(); return;
       }
+      const areaId = form.dataset.areaId;
+      if (areaId || form.hasAttribute('data-new-area')) {
+        await api(areaId ? `/areas/${areaId}` : '/areas', {method: areaId ? 'PUT' : 'POST', body: JSON.stringify({name: form.elements.name.value, enabled: areaId ? form.elements.enabled.checked : true})});
+        await renderSettings(); return;
+      }
       const roomId = form.dataset.roomId;
-      await api(roomId ? `/rooms/${roomId}` : '/rooms', {method: roomId ? 'PUT' : 'POST', body: JSON.stringify({name: form.elements.name.value, enabled: roomId ? form.elements.enabled.checked : true})});
+      await api(roomId ? `/rooms/${roomId}` : '/rooms', {method: roomId ? 'PUT' : 'POST', body: JSON.stringify({name: form.elements.name.value, enabled: roomId ? form.elements.enabled.checked : true, area_id: Number(form.elements.area_id.value) || null})});
       await renderSettings();
     } catch (error) { form.querySelector('[role=status]').textContent = error.message; }
   });

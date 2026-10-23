@@ -6,12 +6,14 @@ contract = import_module('08_servises.common.channel_metadata')
 FIELDS = tuple(contract.ChannelMetadata.model_fields)
 SELECT = '''
 SELECT c.*, m.device_id, m.hostname, m.module_type, m.control_session_online, m.last_state,
-       r.name AS room_name, r.enabled AS room_enabled,
+       r.name AS room_name, r.enabled AS room_enabled, r.area_id,
+       a.name AS area_name,
        d.id AS logical_device_id, d.logical_name,
        d.enabled AS logical_enabled, d.maintenance_locked,
        e.endpoint
 FROM channel_metadata c JOIN modules m ON m.id=c.module_id
 LEFT JOIN rooms r ON r.id=c.room_id
+LEFT JOIN hcm_areas a ON a.id=r.area_id
 LEFT JOIN device_bindings b ON b.module_id=c.module_id AND b.channel=c.channel_id AND b.enabled
 LEFT JOIN logical_devices d ON d.id=b.logical_device_id
 LEFT JOIN matter_endpoints e ON e.channel_id=c.id
@@ -44,7 +46,13 @@ async def update_channel(channel_id, values, actor):
 
 async def room_list():
     async with db.acquire() as conn:
-        return [dict(r) for r in await conn.fetch('SELECT * FROM rooms ORDER BY name,id')]
+        return [dict(r) for r in await conn.fetch('''SELECT r.*,a.name AS area_name
+            FROM rooms r LEFT JOIN hcm_areas a ON a.id=r.area_id ORDER BY r.name,r.id''')]
+
+
+async def area_list():
+    async with db.acquire() as conn:
+        return [dict(r) for r in await conn.fetch('SELECT * FROM hcm_areas ORDER BY name,id')]
 
 
 async def pnl_controls(identifier):

@@ -1,9 +1,12 @@
 from importlib import import_module
-from unittest.mock import AsyncMock
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 import pytest
 
 contract = import_module('08_servises.common.channel_metadata')
 bridges = import_module('01_HCM.bridges')
+entities = import_module('01_HCM.entities')
 registry = import_module('01_HCM.channel_registry')
 hvac = import_module('01_HCM.hvac')
 rcm = import_module('04_RCM.main')
@@ -62,6 +65,40 @@ def test_matter_representation(kind, expected):
 def test_unsupported_matter_semantics_truthful():
     kind, reason = bridges.representation(row(purpose='HVAC', matter_enabled=True), 'matter')
     assert kind is None and 'supported' in reason
+
+
+def test_canonical_entity_is_stable_across_name_and_area_changes():
+    original = row(module_id=7, module_type='LCM', room_id=9, room_name='Kitchen', area_id=3,
+                   area_name='Main Floor', logical_name='Kitchen Light',
+                   last_state={'state': {'relays': {'A1': True}}},
+                   control_session_online=True, logical_enabled=True)
+    before = entities.channel_entity(original)
+    after = entities.channel_entity({**original, 'display_name': 'Ceiling Light',
+                                     'room_name': 'Dining', 'area_name': 'Ground Floor'})
+    assert before['entity_id'] == after['entity_id'] == 'channel_1'
+    assert before['capability'] == 'light' and before['state'] == {'state': 'ON'}
+    assert before['area'] == 'Main Floor' and after['area'] == 'Ground Floor'
+    assert before['available'] and before['writable']
+    assert before['module_type'] == 'LCM' and before['channel'] == 'A1'
+
+
+def test_canonical_entity_keeps_unsupported_channel_internally():
+    entity = entities.channel_entity(row(purpose='HVAC', channel_kind='relay',
+                                         matter_enabled=True, control_session_online=False))
+    assert entity['capability'] == 'relay'
+    assert not entity['available'] and not entity['state_known']
+    assert entity['fault_state'] is None
+    assert bridges.representation(row(purpose='HVAC', matter_enabled=True), 'matter')[0] is None
+
+
+def test_future_channel_capability_remains_visible_without_state_decoder():
+    future = row(channel_kind='future_sensor', capability='humidity_sensor',
+                 purpose='LIGHTING', matter_enabled=True, control_session_online=True)
+    entity = entities.channel_entity(future)
+    assert entity['capability'] == 'humidity_sensor'
+    assert entity['current_state'] is None and entity['writable'] is False
+    assert entity['available'] is True
+    assert bridges.representation(future, 'matter')[0] is None
 
 
 @pytest.mark.parametrize('roles', [['G', 'Y1'], ['G', 'Y1', 'Y2'], ['G', 'W1'], ['G', 'W1', 'W2']])
@@ -191,6 +228,59 @@ async def test_mqtt_discovery_removal_and_metadata_changes(monkeypatch):
 def test_reported_state_never_invents_feedback():
     assert bridges.reported_state(row()) is None
     assert bridges.reported_state(row(last_state={'state':{'relays':{'A1':False}}})) == {'state':'OFF'}
+
+
+async def test_matter_child_exit_restarts_on_registry_reconciliation(monkeypatch):
+    bridge = bridges.RegistryBridge()
+    bridge.settings = {'mqtt': {'enabled': False}, 'matter': {'enabled': True}}
+    bridge.matter = SimpleNamespace(returncode=1)
+    bridge.matter_reader = asyncio.create_task(asyncio.sleep(0))
+    monkeypatch.setattr(bridge, 'load_settings', AsyncMock(return_value=bridge.settings))
+    monkeypatch.setenv('HCM_MATTER_STORAGE', '/tmp/hcm-matter-test')
+    monkeypatch.setenv('HCM_MATTER_PASSCODE', '12345678')
+
+    async def start():
+        bridge.matter = SimpleNamespace(returncode=None)
+    starter = AsyncMock(side_effect=start)
+    monkeypatch.setattr(bridge, 'start_matter', starter)
+
+    await bridge.configure()
+    starter.assert_awaited_once()
+    assert bridge.matter_reader is None
+    await bridge.configure()
+    starter.assert_awaited_once()
+
+
+async def test_matter_failures_back_off_and_disabled_setting_does_not_restart(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(bridges.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setenv('HCM_MATTER_STORAGE', '/tmp/hcm-matter-test')
+    monkeypatch.setenv('HCM_MATTER_PASSCODE', '12345678')
+    bridge = bridges.RegistryBridge()
+    enabled = {'mqtt': {'enabled': False}, 'matter': {'enabled': True}}
+    bridge.settings = enabled
+    bridge._matter_failure('adapter exited')
+    assert bridge.matter_next_retry == 105
+    bridge._matter_failure('adapter exited')
+    assert bridge.matter_next_retry == 110
+    bridge._matter_failure('adapter exited')
+    assert bridge.matter_next_retry == 120 and bridge.matter_state.startswith('failed repeatedly')
+    monkeypatch.setattr(bridge, 'load_settings', AsyncMock(return_value=enabled))
+    starter = AsyncMock(side_effect=lambda: setattr(bridge, 'matter', SimpleNamespace(returncode=None)))
+    monkeypatch.setattr(bridge, 'start_matter', starter)
+    await bridge.configure()
+    starter.assert_not_awaited()
+    clock[0] = 120
+    await bridge.configure()
+    starter.assert_awaited_once()
+
+    bridge.matter = SimpleNamespace(returncode=None, terminate=Mock(), wait=AsyncMock())
+    bridge.matter_reader = asyncio.create_task(asyncio.sleep(0))
+    monkeypatch.setattr(bridge, 'load_settings', AsyncMock(return_value={'mqtt': enabled['mqtt'], 'matter': {'enabled': False}}))
+    await bridge.configure()
+    assert bridge.matter_state == 'disabled'
+    await bridge.configure()
+    starter.assert_awaited_once()
 
 
 async def test_hcm_cross_module_interlock_rejects_active_cooling(monkeypatch):

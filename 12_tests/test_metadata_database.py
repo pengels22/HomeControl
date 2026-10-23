@@ -31,6 +31,7 @@ async def database(monkeypatch):
         await conn.execute("INSERT INTO room_hvac(room_id,temperature_f) VALUES(901,70)")
         await conn.execute("INSERT INTO users(username,role,password_hash) VALUES('preserve','ADMIN','test-verifier')")
         await conn.execute((ROOT / '09_database/008_channel_metadata.sql').read_text())
+        await conn.execute((ROOT / '09_database/025_hcm_areas.sql').read_text())
         @asynccontextmanager
         async def acquire():
             yield conn
@@ -81,6 +82,21 @@ async def test_rooms_panel_membership_and_rename(database):
     assert await registry.pnl_controls('PNL2')==[]
 
 
+async def test_hcm_areas_preserve_room_and_channel_identity(database):
+    await module(database, 'LCM', 1)
+    channel = (await registry.channels())[0]
+    await registry.update_channel(channel['id'], {'room_id': 901}, 'test')
+    area_id = await database.fetchval("INSERT INTO hcm_areas(name) VALUES('First Floor') RETURNING id")
+    await database.execute('UPDATE rooms SET area_id=$1 WHERE id=901', area_id)
+    before = (await registry.channels())[0]
+    assert before['area_id'] == area_id and before['area_name'] == 'First Floor'
+    await database.execute("UPDATE hcm_areas SET name='Main Floor' WHERE id=$1", area_id)
+    after = (await registry.channels())[0]
+    assert after['id'] == before['id'] and after['area_name'] == 'Main Floor'
+    assert (await registry.room_list())[0]['area_name'] == 'Main Floor'
+    assert await database.fetchval('SELECT temperature_f FROM room_hvac WHERE room_id=901') == 70
+
+
 async def test_emergency_and_hvac_fields_transactional(database):
     await module(database,'RCM',1)
     c=(await registry.channels())[0]
@@ -117,11 +133,21 @@ async def test_metadata_api_auth_validation(database):
     app.dependency_overrides[api.require_user]=lambda:identity
     async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client:
         assert (await client.get('/api/v1/rooms')).status_code==200
+        assert (await client.get('/api/v1/areas')).status_code==200
         rows=(await client.get('/api/v1/channels')).json()
+        entity_rows=(await client.get('/api/v1/entities')).json()
+        assert entity_rows[0]['entity_id']==f"channel_{rows[0]['id']}"
         assert (await client.post('/api/v1/rooms',json={'name':'Denied'})).status_code==403
+        assert (await client.post('/api/v1/areas',json={'name':'Denied'})).status_code==403
         assert (await client.patch(f"/api/v1/channels/{rows[0]['id']}",json={'display_name':'Denied'})).status_code==403
         identity['role']='ADMIN'
-        assert (await client.post('/api/v1/rooms',json={'name':'Allowed'})).status_code==200
+        area = (await client.post('/api/v1/areas',json={'name':'Main Floor'})).json()
+        created = await client.post('/api/v1/rooms',json={'name':'Allowed','area_id':area['id']})
+        assert created.status_code==200 and created.json()['area_id']==area['id']
+        assert (await client.put(f"/api/v1/rooms/{created.json()['id']}",json={'name':'Renamed'})).json()['area_id']==area['id']
+        assert (await client.put(f"/api/v1/areas/{area['id']}",json={'name':'Ground Floor'})).status_code==200
+        assert (await client.delete(f"/api/v1/areas/{area['id']}")).json()['enabled'] is False
+        assert (await client.post('/api/v1/rooms',json={'name':'Invalid','area_id':999999})).status_code==422
         dimmer=next(r for r in rows if r['channel_kind']=='lv_dimmer')
         assert (await client.patch(f"/api/v1/channels/{dimmer['id']}",json={'purpose':'GENERAL'})).status_code==422
         assert (await client.patch(f"/api/v1/channels/{rows[0]['id']}",json={'display_name':'Allowed'})).status_code==200

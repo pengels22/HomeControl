@@ -18,12 +18,59 @@ class RoomIn(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
     name: str = Field(min_length=1, max_length=120)
     enabled: bool = True
+    area_id: int | None = Field(default=None, ge=1)
+
+
+class AreaIn(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    name: str = Field(min_length=1, max_length=120)
+    enabled: bool = True
 
 
 class PanelRooms(BaseModel):
     model_config = ConfigDict(extra='forbid')
     room_ids: list[int] = Field(default_factory=list, max_length=100)
     primary_room_id: int | None = None
+
+
+@router.get('/areas')
+async def areas(user=Depends(require_user)):
+    return await registry.area_list()
+
+
+@router.post('/areas')
+async def create_area(body: AreaIn, user=Depends(admin)):
+    try:
+        async with db.acquire() as conn:
+            return dict(await conn.fetchrow('INSERT INTO hcm_areas(name,enabled) VALUES($1,$2) RETURNING *', body.name, body.enabled))
+    except asyncpg.UniqueViolationError:
+        raise HTTPException(409, 'Area name already exists') from None
+    except asyncpg.CheckViolationError:
+        raise HTTPException(422, 'Invalid Area name') from None
+
+
+@router.put('/areas/{area_id}')
+async def update_area(area_id: int, body: AreaIn, user=Depends(admin)):
+    try:
+        async with db.acquire() as conn:
+            row = await conn.fetchrow('UPDATE hcm_areas SET name=$2,enabled=$3 WHERE id=$1 RETURNING *', area_id, body.name, body.enabled)
+        if not row:
+            raise HTTPException(404)
+        return dict(row)
+    except asyncpg.UniqueViolationError:
+        raise HTTPException(409, 'Area name already exists') from None
+    except asyncpg.CheckViolationError:
+        raise HTTPException(422, 'Invalid Area name') from None
+
+
+@router.delete('/areas/{area_id}')
+async def delete_area(area_id: int, user=Depends(admin)):
+    # Preserve room associations and stable Area identity.
+    async with db.acquire() as conn:
+        row = await conn.fetchrow('UPDATE hcm_areas SET enabled=false WHERE id=$1 RETURNING *', area_id)
+    if not row:
+        raise HTTPException(404)
+    return dict(row)
 
 
 @router.get('/rooms')
@@ -35,16 +82,20 @@ async def rooms(user=Depends(require_user)):
 async def create_room(body: RoomIn, user=Depends(admin)):
     try:
         async with db.acquire() as conn:
-            return dict(await conn.fetchrow('INSERT INTO rooms(name,enabled) VALUES($1,$2) RETURNING *', body.name, body.enabled))
+            return dict(await conn.fetchrow('INSERT INTO rooms(name,enabled,area_id) VALUES($1,$2,$3) RETURNING *', body.name, body.enabled, body.area_id))
     except asyncpg.UniqueViolationError:
         raise HTTPException(409, 'Room name already exists') from None
+    except asyncpg.ForeignKeyViolationError:
+        raise HTTPException(422, 'Unknown Area') from None
 
 
 @router.put('/rooms/{room_id}')
 async def update_room(room_id: int, body: RoomIn, user=Depends(admin)):
     try:
         async with db.acquire() as conn:
-            row = await conn.fetchrow('UPDATE rooms SET name=$2,enabled=$3 WHERE id=$1 RETURNING *', room_id, body.name, body.enabled)
+            row = await conn.fetchrow('''UPDATE rooms SET name=$2,enabled=$3,
+                area_id=CASE WHEN $4 THEN $5 ELSE area_id END WHERE id=$1 RETURNING *''',
+                room_id, body.name, body.enabled, 'area_id' in body.model_fields_set, body.area_id)
             if not row:
                 raise HTTPException(404)
             result = dict(row)
@@ -52,6 +103,8 @@ async def update_room(room_id: int, body: RoomIn, user=Depends(admin)):
         return result
     except asyncpg.UniqueViolationError:
         raise HTTPException(409, 'Room name already exists') from None
+    except asyncpg.ForeignKeyViolationError:
+        raise HTTPException(422, 'Unknown Area') from None
 
 
 @router.delete('/rooms/{room_id}')
@@ -74,6 +127,12 @@ async def refresh_hvac_rooms():
 @router.get('/channels')
 async def channels(identifier: str | None = None, user=Depends(require_user)):
     return await registry.channels(identifier)
+
+
+@router.get('/entities')
+async def entities(identifier: str | None = None, user=Depends(require_user)):
+    from .entities import list_channel_entities
+    return await list_channel_entities(identifier)
 
 
 @router.patch('/channels/{channel_id}')

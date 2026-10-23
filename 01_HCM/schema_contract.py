@@ -7,6 +7,8 @@ REQUIRED_COLUMNS = {
     'integration_instances': {'instance_id', 'provider_id', 'display_name', 'enabled', 'configured', 'status', 'config'},
     'logical_devices': {'provider_id', 'external_device_id', 'display_name', 'availability', 'instance_id'},
     'channel_metadata': {'id', 'module_id', 'channel_id', 'channel_kind', 'purpose', 'room_id', 'emergency', 'hvac_control', 'mqtt_enabled', 'matter_enabled'},
+    'hcm_areas': {'id', 'name', 'enabled'},
+    'rooms': {'id', 'name', 'area_id', 'enabled'},
     'pnl_rooms': {'module_id', 'room_id', 'is_primary'},
     'matter_endpoints': {'channel_id', 'endpoint'},
     'bridge_settings': {'bridge', 'settings'},
