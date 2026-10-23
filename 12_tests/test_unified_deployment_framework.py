@@ -1276,11 +1276,12 @@ def test_hcm_docker_clone_preserves_mounts_networks_environment_and_command(monk
     connect = next(call for call in calls if call[1] == "/networks/hcm-internal/connect")
     body = create[2]
     assert body["Image"] == "homecontrol-hcm:new"
-    assert body["Env"] == ["HCM_DATABASE_URL=postgres://redacted"]
+    assert body["Env"] == ["HCM_DATABASE_URL=postgres://redacted", "HCM_MATTER_STORAGE=/var/lib/homecontrol-matter"]
     assert body["Cmd"] == ["python", "-m", "uvicorn", "01_HCM.main:app"]
     assert body["HostConfig"]["Binds"] == [
         "/etc/hcm/postgres-password:/run/secrets/postgres_password:ro",
         "/srv/hcm-data/homecontrol:/var/lib/homecontrol:rw",
+        "/srv/hcm-data/matter:/var/lib/homecontrol-matter:rw",
     ]
     assert body["HostConfig"]["PortBindings"]["8080/tcp"][0]["HostIp"] == "192.168.20.27"
     assert set(body["NetworkingConfig"]["EndpointsConfig"]) == {"hcm-control"}
@@ -1315,6 +1316,7 @@ def test_hcm_docker_clone_preserves_existing_homecontrol_storage_mount(monkeypat
     create = next(call for call in calls if call[1].startswith("/containers/create"))
     assert create[2]["HostConfig"]["Binds"].count("/custom/homecontrol:/var/lib/homecontrol:rw") == 1
     assert "/srv/hcm-data/homecontrol:/var/lib/homecontrol:rw" not in create[2]["HostConfig"]["Binds"]
+    assert "/srv/hcm-data/matter:/var/lib/homecontrol-matter:rw" in create[2]["HostConfig"]["Binds"]
 
 
 def test_hcm_docker_clone_reports_additional_network_connect_failure(monkeypatch):

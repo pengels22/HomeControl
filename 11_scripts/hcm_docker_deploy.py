@@ -18,6 +18,9 @@ from urllib.parse import quote
 SOCKET = "/var/run/docker.sock"
 HOMECONTROL_STORAGE_BIND = "/srv/hcm-data/homecontrol:/var/lib/homecontrol:rw"
 HOMECONTROL_STORAGE_DEST = "/var/lib/homecontrol"
+MATTER_STORAGE_BIND = "/srv/hcm-data/matter:/var/lib/homecontrol-matter:rw"
+MATTER_STORAGE_DEST = "/var/lib/homecontrol-matter"
+MATTER_STORAGE_ENV = "HCM_MATTER_STORAGE"
 CONFLICT_STATUS_SECRET_SOURCE = "/etc/hcm/conflict-status.secret"
 CONFLICT_STATUS_SECRET_DEST = "/etc/hcm-heartbeat/heartbeat-auth.secret"
 
@@ -139,7 +142,9 @@ def create_clone(source, image, name):
     primary_network = "hcm-control" if "hcm-control" in endpoints else sorted(endpoints)[0]
     additional_networks = [(network_name, endpoints[network_name]) for network_name in sorted(endpoints) if network_name != primary_network]
     config["Image"] = image
+    config["Env"] = ensure_matter_storage_env(config.get("Env") or [])
     host_config["Binds"] = ensure_homecontrol_storage_bind(host_config.get("Binds") or [])
+    host_config["Binds"] = ensure_matter_storage_bind(host_config["Binds"])
     configure_safety_gpio(host_config)
     configure_conflict_status_secret(host_config)
     body = {
@@ -213,6 +218,24 @@ def ensure_homecontrol_storage_bind(binds):
         if len(parts) >= 2 and parts[1] == HOMECONTROL_STORAGE_DEST:
             return result
     result.append(HOMECONTROL_STORAGE_BIND)
+    return result
+
+
+def ensure_matter_storage_bind(binds):
+    """Keep Matter SDK state on the dedicated persistent HCM disk."""
+    result = list(binds or [])
+    for bind in result:
+        parts = str(bind).split(":")
+        if len(parts) >= 2 and parts[1] == MATTER_STORAGE_DEST:
+            return result
+    result.append(MATTER_STORAGE_BIND)
+    return result
+
+
+def ensure_matter_storage_env(env):
+    """Point every replacement at the same host-backed Matter path."""
+    result = [item for item in env if not str(item).startswith(MATTER_STORAGE_ENV + "=")]
+    result.append(MATTER_STORAGE_ENV + "=" + MATTER_STORAGE_DEST)
     return result
 
 
