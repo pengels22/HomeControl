@@ -23,6 +23,7 @@ MATTER_STORAGE_DEST = "/var/lib/homecontrol-matter"
 MATTER_STORAGE_ENV = "HCM_MATTER_STORAGE"
 CONFLICT_STATUS_SECRET_SOURCE = "/etc/hcm/conflict-status.secret"
 CONFLICT_STATUS_SECRET_DEST = "/etc/hcm-heartbeat/heartbeat-auth.secret"
+HCM_DEFAULT_CMD = ["python", "-m", "uvicorn", "02_HCM.main:app", "--host", "0.0.0.0", "--port", "8080"]
 
 
 class DockerDeployError(RuntimeError):
@@ -142,6 +143,9 @@ def create_clone(source, image, name):
     primary_network = "hcm-control" if "hcm-control" in endpoints else sorted(endpoints)[0]
     additional_networks = [(network_name, endpoints[network_name]) for network_name in sorted(endpoints) if network_name != primary_network]
     config["Image"] = image
+    # Do not carry forward a retired package path from the currently running
+    # container. The candidate image owns the application entrypoint.
+    config["Cmd"] = list(HCM_DEFAULT_CMD)
     config["Env"] = ensure_matter_storage_env(config.get("Env") or [])
     host_config["Binds"] = ensure_homecontrol_storage_bind(host_config.get("Binds") or [])
     host_config["Binds"] = ensure_matter_storage_bind(host_config["Binds"])

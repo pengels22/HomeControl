@@ -1277,7 +1277,7 @@ def test_hcm_docker_clone_preserves_mounts_networks_environment_and_command(monk
     body = create[2]
     assert body["Image"] == "homecontrol-hcm:new"
     assert body["Env"] == ["HCM_DATABASE_URL=postgres://redacted", "HCM_MATTER_STORAGE=/var/lib/homecontrol-matter"]
-    assert body["Cmd"] == ["python", "-m", "uvicorn", "02_HCM.main:app"]
+    assert body["Cmd"] == ["python", "-m", "uvicorn", "02_HCM.main:app", "--host", "0.0.0.0", "--port", "8080"]
     assert body["HostConfig"]["Binds"] == [
         "/etc/hcm/postgres-password:/run/secrets/postgres_password:ro",
         "/srv/hcm-data/homecontrol:/var/lib/homecontrol:rw",
