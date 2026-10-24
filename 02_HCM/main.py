@@ -173,6 +173,8 @@ async def web_index():
     return FileResponse(WEB_ROOT / 'index.html')
 
 @app.get('/dashboard')
+@app.get('/pnl')
+@app.get('/editor')
 @app.get('/devices')
 @app.get('/devices/{path:path}')
 @app.get('/service')
