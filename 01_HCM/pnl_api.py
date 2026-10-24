@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import db
 from .auth import require_user
-from .pnl_backplane import PNLTelemetryError, local_aliases, validate_telemetry, verify_token
+from .pnl_backplane import PNLTelemetryError, STALE_AFTER_SECONDS, local_aliases, validate_telemetry, verify_token
 
 router = APIRouter(prefix='/api/v1/pnl')
 
@@ -43,7 +43,7 @@ async def ingest_telemetry(body: TelemetryIn, authorization: str | None = Header
                                   local_state=$3::jsonb,updated_at=now() WHERE device_id=$1''',
                                body.device_id, body.sequence, json.dumps(payload['local']))
     return {'ok': True, 'device_id': body.device_id, 'sequence': body.sequence,
-            'stale_after_seconds': 15, 'local_aliases': local_aliases(body.device_id, payload['local'])}
+            'stale_after_seconds': STALE_AFTER_SECONDS, 'local_aliases': local_aliases(body.device_id, payload['local'], payload['validity'])}
 
 
 @router.get('/devices')
@@ -61,6 +61,6 @@ async def pnl_aliases(device_id: str, user=Depends(require_user)):
     if not row:
         raise HTTPException(404, 'PNL device not found')
     last = row['last_telemetry_at']
-    stale = last is None or (datetime.now(timezone.utc) - last).total_seconds() > 15
+    stale = last is None or (datetime.now(timezone.utc) - last).total_seconds() > STALE_AFTER_SECONDS
     return {'device_id': device_id, 'stale': stale,
             'aliases': local_aliases(device_id, row['local_state'] or {})}

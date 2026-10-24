@@ -13,6 +13,7 @@ LOCAL_FIELDS = {
     'local.temp': ('temperature', 'C'),
     'local.humidity': ('humidity', '%'),
 }
+STALE_AFTER_SECONDS = 15
 
 
 class PNLTelemetryError(ValueError):
@@ -59,18 +60,29 @@ def validate_telemetry(payload: dict[str, Any], *, device_id: str,
         value = values[key]
         if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))):
             raise PNLTelemetryError(f'local.{key} must be numeric or null')
+    validity = payload.get('validity', {key: values[key] is not None for key in ('lux', 'occupancy', 'temp', 'humidity')})
+    if not isinstance(validity, dict) or set(validity) != {'lux', 'occupancy', 'temp', 'humidity'} or any(not isinstance(value, bool) for value in validity.values()):
+        raise PNLTelemetryError('sensor validity must contain boolean values for every local sensor')
     if values['lux'] is not None and not 0 <= float(values['lux']) <= 200000:
         raise PNLTelemetryError('local.lux outside supported range')
     if values['humidity'] is not None and not 0 <= float(values['humidity']) <= 100:
         raise PNLTelemetryError('local.humidity outside supported range')
+    if values['temp'] is not None and not -50 <= float(values['temp']) <= 80:
+        raise PNLTelemetryError('local.temp outside supported range')
     return {'device_id': device_id, 'sequence': sequence,
-            'timestamp': parsed.astimezone(timezone.utc).isoformat(), 'local': values}
+            'timestamp': parsed.astimezone(timezone.utc).isoformat(), 'local': values, 'validity': validity}
 
 
-def local_aliases(device_id: str, local: dict[str, Any]) -> list[dict[str, Any]]:
+def telemetry_is_stale(last_telemetry_at: float | None, now: float, threshold: float = STALE_AFTER_SECONDS) -> bool:
+    """Return freshness independently of the Unified Heartbeat V3 channel."""
+    return last_telemetry_at is None or now - last_telemetry_at > threshold
+
+
+def local_aliases(device_id: str, local: dict[str, Any], validity: dict[str, bool] | None = None) -> list[dict[str, Any]]:
+    validity = validity or {key: local.get(key) is not None for key in ('lux', 'occupancy', 'temp', 'humidity')}
     return [
         {'entity_id': f'pnl_{device_id}_{key.replace(".", "_")}', 'alias': key,
          'panel_id': device_id, 'capability': capability, 'unit': unit,
-         'state': local.get(key.split('.', 1)[1])}
+         'state': local.get(key.split('.', 1)[1]), 'valid': bool(validity.get(key.split('.', 1)[1], False))}
         for key, (capability, unit) in LOCAL_FIELDS.items()
     ]
