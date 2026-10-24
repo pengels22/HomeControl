@@ -4,8 +4,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from .auth import require_user
 from . import db, channel_registry as registry
+from . import legacy_module_status
 
 router = APIRouter(prefix='/api/v1')
+
+
+@router.get('/legacy-module-status')
+async def legacy_status(user=Depends(require_user)):
+    """Expose reversible SIM/RMC retirement metadata without deleting data."""
+    return {'modules': await legacy_module_status.status()}
 
 
 async def admin(user=Depends(require_user)):

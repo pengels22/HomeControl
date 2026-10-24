@@ -10,7 +10,7 @@ def test_migration_runner_is_numbered_and_ordered():
     versions = [int(path.name[:3]) for path in migrations.MIGRATIONS]
 
     assert versions == sorted(versions)
-    assert versions == list(range(1, 26))
+    assert versions == list(range(1, 27))
 
 
 async def test_hcm_areas_migrate_from_previous_schema_without_losing_rooms():
