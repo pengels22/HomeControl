@@ -103,7 +103,7 @@ def test_profile_lifecycle_accepts_bench_testing_but_keeps_it_nonphysical():
 
 
 def test_hcm_binding_execution_mode_is_the_only_physical_wire_selector():
-    devices = import_module('01_HCM.devices')
+    devices = import_module('02_HCM.devices')
     row = {'metadata': {'execution_mode': 'physical'}, 'channel': 'A1'}
     assert devices._payload(row, {'op': 'set_relay', 'value': True})['physical_write_requested'] is True
     simulated = devices._payload({'metadata': {}, 'channel': 'A1'}, {'op': 'set_relay', 'value': True, 'physical_write_requested': True})

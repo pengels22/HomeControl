@@ -8,8 +8,8 @@ from importlib import import_module
 
 import asyncpg
 
-auth = import_module("01_HCM.auth")
-settings = import_module("01_HCM.settings").settings
+auth = import_module("02_HCM.auth")
+settings = import_module("02_HCM.settings").settings
 
 
 async def main() -> None:

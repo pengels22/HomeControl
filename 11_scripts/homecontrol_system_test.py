@@ -328,7 +328,7 @@ def run_driver_scenarios(coord: Coordinator) -> None:
 
 
 def run_fire_scenarios(coord: Coordinator) -> None:
-    gpio = importlib.import_module("00_Heartbeat.gpio_inputs")
+    gpio = importlib.import_module("01_Heartbeat.gpio_inputs")
 
     def fire_run() -> dict[str, Any]:
         fire = gpio.DebouncedLevel(250)
@@ -496,7 +496,7 @@ def run_local_diagnostics(coord: Coordinator, report_dir: Path) -> None:
 
 def verify_output_inhibition() -> dict[str, Any]:
     """Verify the repository safety contract before any simulated mutation."""
-    paths = [ROOT / "07_config" / item for item in ("01_HCM/hardware_pins.yaml", "03_LCM/hardware_pins.yaml", "04_RCM/hardware_pins.yaml")]
+    paths = [ROOT / "07_config" / item for item in ("02_HCM/hardware_pins.yaml", "03_LCM/hardware_pins.yaml", "04_RCM/hardware_pins.yaml")]
     checked = []
     for path in paths:
         text = path.read_text(encoding="utf-8")
@@ -560,7 +560,7 @@ def run_remote_diagnostics(coord: Coordinator, *, skip_remote: bool) -> None:
         "conflict": "curl -fsS --max-time 5 http://192.168.20.26:6004/status",
     }
     safety_commands = {
-        "jetson": "sudo -n docker inspect --format='container={{.Name}} image={{.Config.Image}} mounts={{range .Mounts}}{{.Destination}};{{end}}' hcm-test && sudo -n docker exec hcm-test python3 -c \"import importlib; s=importlib.import_module('01_HCM.settings').settings; assert getattr(s,'physical_outputs_enabled',False) is False; print('hcm_commissioning_enabled='+str(s.commissioning_enabled)+' physical_outputs_enabled=false')\"",
+        "jetson": "sudo -n docker inspect --format='container={{.Name}} image={{.Config.Image}} mounts={{range .Mounts}}{{.Destination}};{{end}}' hcm-test && sudo -n docker exec hcm-test python3 -c \"import importlib; s=importlib.import_module('02_HCM.settings').settings; assert getattr(s,'physical_outputs_enabled',False) is False; print('hcm_commissioning_enabled='+str(s.commissioning_enabled)+' physical_outputs_enabled=false')\"",
         "conflict": "sudo -n python3 - <<'PY'\nimport json\npath='/etc/hcm-heartbeat/config.json'\ntry:\n data=json.load(open(path))\n print('heartbeat_identity={} heartbeat_port={} physical_output_writes=false'.format(data.get('device_id','unknown'), data.get('port','unknown')))\nexcept Exception as exc:\n raise SystemExit('installed heartbeat config unavailable: {}'.format(exc))\nPY",
         "lab1": "python3 - <<'PY'\nimport json\nstate=json.load(open('/opt/homecontrol-lab/state/module.json'))\nassert state.get('device_id') == '2ccf675d3414'\nassert state.get('simulation') is True\nassert state.get('physical_outputs_enabled') is False\nprint('device_id={} role={} simulation=true physical_outputs_enabled=false commissioned={}'.format(state.get('device_id'), state.get('role'), state.get('commissioned')))\nPY",
     }

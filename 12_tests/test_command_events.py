@@ -2,9 +2,9 @@ from importlib import import_module
 
 import pytest
 
-commands = import_module("01_HCM.command_events")
-automation = import_module("01_HCM.automation")
-api = import_module("01_HCM.api")
+commands = import_module("02_HCM.command_events")
+automation = import_module("02_HCM.automation")
+api = import_module("02_HCM.api")
 
 
 def test_command_normalization_is_bounded_and_deterministic():

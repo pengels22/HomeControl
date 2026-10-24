@@ -3,7 +3,7 @@ from importlib import import_module
 import pytest
 
 
-events = import_module('01_HCM.pnl_events')
+events = import_module('02_HCM.pnl_events')
 
 
 def test_event_limits_are_bounded():

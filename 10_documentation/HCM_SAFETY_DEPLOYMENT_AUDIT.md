@@ -6,8 +6,8 @@ GPIO reads, output commands, or Conflict runtime changes were performed.
 
 ## Route and dashboard
 
-`01_HCM/api.py` defines `GET /safety/status` on the `/api/v1` router.
-`01_HCM/main.py` constructs the production FastAPI application and includes
+`02_HCM/api.py` defines `GET /safety/status` on the `/api/v1` router.
+`02_HCM/main.py` constructs the production FastAPI application and includes
 `api.router` before mounting `/static`. The remaining HTML routes do not overlap
 `/api/v1/safety/status`. Tests instantiate this actual application without its
 lifespan, inspect its generated OpenAPI route table, and issue HTTP requests.
@@ -26,11 +26,11 @@ shows Unavailable. Explicit simulation is labelled Simulation.
 
 ## Deployment and the reported 404
 
-The Jetson adapter builds `07_config/01_HCM/Dockerfile.live` from the extracted
+The Jetson adapter builds `07_config/02_HCM/Dockerfile.live` from the extracted
 `git archive` release root at `/tmp/homecontrol-release-<SHA>` and tags it
 `homecontrol-hcm:<SHA>`. It copies requirements then the entire release root,
-including `01_HCM/api.py` and `01_HCM/www`, into `/opt/HomeControl`. It launches
-`python -m uvicorn 01_HCM.main:app --host 0.0.0.0 --port 8080`.
+including `02_HCM/api.py` and `02_HCM/www`, into `/opt/HomeControl`. It launches
+`python -m uvicorn 02_HCM.main:app --host 0.0.0.0 --port 8080`.
 The root Dockerfile/compose files are not this installed-host deployment path.
 No database migration is needed for these changes.
 
@@ -42,7 +42,7 @@ cause**: identifying the live image, launch override, or proxy requires a later
 approved inspection. The source has no shadowing route to explain a 404.
 
 The build now requires a full `HCM_GIT_SHA` argument. It writes non-secret
-`01_HCM/build_info.json` with version, SHA, and UTC build time, then verifies the
+`02_HCM/build_info.json` with version, SHA, and UTC build time, then verifies the
 actual app route table and both copied source assets during image construction.
 `GET /api/v1/version` is public and returns this file, independent of `.git` or
 stale environment values inherited when cloning the previous container.
@@ -91,7 +91,7 @@ Installed GPIO permissions, device mounts and physical wiring remain unverified.
 
 ## Conflict: C supported; independent GPIO disabled in checked-in configuration
 
-`00_Heartbeat/gpio_inputs.py` supports independently reading/debouncing Conflict's
+`01_Heartbeat/gpio_inputs.py` supports independently reading/debouncing Conflict's
 own fire and AC contacts. `config-conflict.json` sets `gpio_inputs.enabled=false`.
 The manifest specifies header pins 38/40, gpiochip1 lines 260/259. No assertion
 is made that the installed configuration or physical contacts have been validated.
@@ -138,7 +138,7 @@ failure tests use fake transports and explicitly select Linux behavior.
 - Focused route/safety/GPIO/deployment tests: 119 passed.
 - Full `python -m pytest`: 562 passed, 10 skipped.
 - Requested compileall directories, including `13_hardware_tests`: passed.
-- `node --check 01_HCM/www/app.js`: passed.
+- `node --check 02_HCM/www/app.js`: passed.
 - `git diff --check`: passed.
 - Deprecation warnings remain from the existing Python/pytest-asyncio dependencies.
 

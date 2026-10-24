@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_hcm_manifest_contains_authoritative_fire_input_mappings():
-    signals = config.load_fire_alarm_signals(ROOT / '07_config/01_HCM/hardware_pins.yaml')
+    signals = config.load_fire_alarm_signals(ROOT / '07_config/02_HCM/hardware_pins.yaml')
     assert signals['fire_alarm_s']['physical_pin'] == 38
     assert signals['fire_alarm_s']['gpiochip'] == '/dev/gpiochip0'
     assert signals['fire_alarm_s']['line'] == 159
@@ -30,7 +30,7 @@ def test_conflict_manifest_contains_independent_processor_mappings():
 
 
 def test_field_module_configs_select_explicit_real_io_without_commissioning_outputs():
-    hcm = yaml_config.load_yaml(ROOT / '07_config/01_HCM/hcm.yaml')
+    hcm = yaml_config.load_yaml(ROOT / '07_config/02_HCM/hcm.yaml')
     rcm = yaml_config.load_yaml(ROOT / '07_config/04_RCM/rcm.yaml')
     lcm = yaml_config.load_yaml(ROOT / '07_config/03_LCM/lcm.yaml')
     assert hcm['safety']['fire_input']['mode'] == 'physical'

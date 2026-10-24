@@ -5,8 +5,8 @@ from importlib import import_module
 import pytest
 
 
-weather = import_module('01_HCM.weather_service')
-time_mod = import_module('01_HCM.time_service')
+weather = import_module('02_HCM.weather_service')
+time_mod = import_module('02_HCM.time_service')
 
 
 class FakeClient:
@@ -111,7 +111,7 @@ def test_timestamp_rejects_naive_values_and_normalizes_utc():
 @pytest.mark.asyncio
 async def test_weather_api_paths_are_read_only(monkeypatch):
     import importlib
-    api = importlib.import_module('01_HCM.api')
+    api = importlib.import_module('02_HCM.api')
     class FakeWeather:
         def summary(self): return {'health': 'unavailable', 'active_alert_count': 0}
         def snapshot(self): return {'current': None, 'hourly': [], 'forecast': [], 'alerts': [], 'health': {'status': 'unavailable'}}

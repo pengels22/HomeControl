@@ -1,6 +1,6 @@
 schema_version: 1
 device_type: HCM
-package: 01_HCM
+package: 02_HCM
 hardware:
   supported_platforms: [jetson_xavier_nx]
   supported_os: [ubuntu]

@@ -3,7 +3,7 @@ from importlib import import_module
 
 import pytest
 
-zones = import_module('01_HCM.zones')
+zones = import_module('02_HCM.zones')
 
 
 def test_distance_uses_geographic_meters():
@@ -44,7 +44,7 @@ def test_disabled_zone_does_not_emit_synthetic_leave():
 
 
 def test_automation_zone_trigger_matches_normalized_event():
-    automation = import_module('01_HCM.automation')
+    automation = import_module('02_HCM.automation')
     engine = automation.AutomationEngine(None)
     trigger = {'type': 'zone', 'tracker_ref': 'tracker', 'zone_ref': 'zone', 'event': 'enter'}
     event = {'event_type': 'hcm_native.zone.enter', 'payload': {'tracker_ref': 'tracker', 'zone_ref': 'zone'}}

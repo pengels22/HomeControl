@@ -7,7 +7,7 @@
 - Focused RCM, LCM, safety, registry, touchscreen, and PNL tests passed after
   removing SIM-only cases.
 - Python compile checks passed for active source trees.
-- JavaScript syntax check passed for `01_HCM/www/app.js`.
+- JavaScript syntax check passed for `02_HCM/www/app.js`.
 - No Jetson deployment, database migration, Heartbeat V3 change, GPIO change, or
   physical output operation was performed.
 

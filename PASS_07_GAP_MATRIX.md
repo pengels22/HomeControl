@@ -7,7 +7,7 @@
 | Authenticated panel session | IMPLEMENTED (simulation); PARTIAL (live API) | Simulator rejects unregistered panels; `/api/v1/pnl/telemetry` verifies bearer token and panel identity. |
 | Five-second telemetry and local aliases | IMPLEMENTED | Simulator emits sequenced telemetry; `pnl_backplane.py` validates `local.*`, validity, ranges, replay, and 15-second freshness. |
 | Immediate occupancy event | IMPLEMENTED (simulation) | `SimulatedHCM.ingest_occupancy` deduplicates changes independently of telemetry. |
-| Unified Heartbeat V3 | IMPLEMENTED | Simulator emits `hcm-heartbeat-v3`, version 3; it does not replace `00_Heartbeat`. |
+| Unified Heartbeat V3 | IMPLEMENTED | Simulator emits `hcm-heartbeat-v3`, version 3; it does not replace `01_Heartbeat`. |
 | Independent telemetry/heartbeat freshness | IMPLEMENTED | `panel_status` tracks each channel separately and has regression coverage. |
 | Dashboard distribution and last-known-good | IMPLEMENTED (simulation); PARTIAL (persistent assignment API) | Shared compiled layout is selected by area and refreshed after publish; panel retains its prior layout while HCM is offline. |
 | Five approved card types and bounds | IMPLEMENTED | Existing compiler plus Pass 7 layout with button, slider, entity, entities, thermostat. |

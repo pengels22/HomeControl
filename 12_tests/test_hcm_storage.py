@@ -5,7 +5,7 @@ import subprocess
 import pytest
 
 
-storage = import_module('01_HCM.storage')
+storage = import_module('02_HCM.storage')
 
 
 def test_storage_layout_initializes_local_git_and_expected_directories(tmp_path):

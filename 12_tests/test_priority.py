@@ -2,8 +2,8 @@ from importlib import import_module
 
 import pytest
 
-devices = import_module('01_HCM.devices')
-priority = import_module('01_HCM.priority')
+devices = import_module('02_HCM.devices')
+priority = import_module('02_HCM.priority')
 
 
 class FakeAcquire:

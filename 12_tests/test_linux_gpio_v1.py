@@ -3,7 +3,7 @@ from importlib import import_module
 import pytest
 
 transport = import_module('08_servises.common.linux_gpio_v1')
-safety = import_module('01_HCM.safety_relays')
+safety = import_module('02_HCM.safety_relays')
 
 
 def test_v1_requests_only_input_and_reads_without_output_ioctl(monkeypatch):

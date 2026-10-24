@@ -4,7 +4,7 @@ import asyncio
 import pytest
 from fastapi import HTTPException
 
-auth = import_module('01_HCM.auth')
+auth = import_module('02_HCM.auth')
 
 
 class FakeAcquire:

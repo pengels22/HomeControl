@@ -16,11 +16,11 @@ Pass: 1 of 6
 
 | Boundary | Current authority | Pass 1 decision |
 | --- | --- | --- |
-| HCM control and safety | `01_HCM`, shared arbitration, module registry | Preserve. No safety or output path changes. |
+| HCM control and safety | `02_HCM`, shared arbitration, module registry | Preserve. No safety or output path changes. |
 | PostgreSQL configuration | Existing schema and ordered migrations through 025 | Preserve. Migration 025 is additive and remains deliberate. |
 | Rooms and HCM Areas | `rooms`, `hcm_areas`, nullable `rooms.area_id` | Preserve as the location model for PNL work. ACM Areas remain separate. |
-| Canonical entities | `01_HCM/entities.py` over channel/module state | Preserve as the only physical entity projection. Extend through adapters. |
-| Matter | `01_HCM/bridges.py` plus Matter.js child and persistent storage | Preserve endpoint allocation and host-backed SDK storage. No commissioning claim. |
+| Canonical entities | `02_HCM/entities.py` over channel/module state | Preserve as the only physical entity projection. Extend through adapters. |
+| Matter | `02_HCM/bridges.py` plus Matter.js child and persistent storage | Preserve endpoint allocation and host-backed SDK storage. No commissioning claim. |
 | Time and NWS | Native `time_service.py` and `weather_service.py` | Preserve. Fixed NWS coordinate/cache recovery defect in Pass 1. |
 | Consumer integrations | Compatibility source/API paths; inactive during normal startup | Do not delete until dependency review proves safe. |
 | PNL | Existing Python module surface | No firmware implementation in Pass 1. |

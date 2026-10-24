@@ -1,7 +1,7 @@
 import importlib
 import pytest
 
-api = importlib.import_module('01_HCM.automation_api')
+api = importlib.import_module('02_HCM.automation_api')
 
 
 def test_definition_accepts_multiline_yaml_and_applies_editor_name():

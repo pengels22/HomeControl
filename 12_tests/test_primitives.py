@@ -1,7 +1,7 @@
 import pytest
 from importlib import import_module
 
-m=import_module('01_HCM.primitives')
+m=import_module('02_HCM.primitives')
 
 def test_helper_validation_and_initial_values():
     manager=m.NativePrimitives(None)
@@ -21,9 +21,9 @@ def test_native_service_models_reject_unknown_fields():
 async def test_semantic_side_effect_services_are_explicitly_unconfigured(monkeypatch):
     manager=m.NativePrimitives(None)
     async def no_destination(*args,**kwargs): return None
-    monkeypatch.setattr('01_HCM.notification_config.resolve_notification', no_destination)
+    monkeypatch.setattr('02_HCM.notification_config.resolve_notification', no_destination)
     assert (await manager._notify_send(m.NotificationArg(message='ok'),None))['status']=='target_unavailable'
-    monkeypatch.setattr('01_HCM.notification_config.resolve_backend', no_destination)
+    monkeypatch.setattr('02_HCM.notification_config.resolve_backend', no_destination)
     assert (await manager._announcement_speak(m.AnnouncementArg(message='ok'),None))['status']=='backend_unavailable'
 
 @pytest.mark.asyncio

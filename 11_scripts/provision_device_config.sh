@@ -29,7 +29,7 @@ REMOTE_DIR="${3:-/tmp/homecontrol-install}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 case "$DEVICE_TYPE" in
-  HCM) CONFIG_DIR="01_HCM" ;;
+  HCM) CONFIG_DIR="02_HCM" ;;
   LCM) CONFIG_DIR="03_LCM" ;;
   RCM) CONFIG_DIR="04_RCM" ;;
   PNL) CONFIG_DIR="05_PNL" ;;

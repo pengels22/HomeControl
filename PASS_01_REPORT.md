@@ -13,7 +13,7 @@ test was performed as part of this pass.
 
 ## Change log
 
-- `01_HCM/weather_service.py`
+- `02_HCM/weather_service.py`
   - Canonicalizes coordinates with more than four decimal places before NWS
     point lookup, avoiding the NWS precision redirect that the bounded HTTP
     client intentionally does not follow.

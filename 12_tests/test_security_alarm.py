@@ -1,8 +1,8 @@
 import pytest
 from importlib import import_module
 
-security = import_module('01_HCM.security_alarm')
-importer = import_module('01_HCM.ha_importer')
+security = import_module('02_HCM.security_alarm')
+importer = import_module('02_HCM.ha_importer')
 
 
 @pytest.mark.asyncio

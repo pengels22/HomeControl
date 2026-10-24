@@ -190,7 +190,7 @@ class ConflictAdapter(BaseAdapter):
         return super().steps(artifact, deployment_id=deployment_id) + [
             AdapterStep("preflight_auth", "sudo -n python3 - <<'PY'\nimport json,os,stat\ncfg=json.load(open('/etc/hcm-heartbeat/config.json'))\nassert cfg.get('heartbeat_auth_mode') == 'hmac-sha256'\npath=cfg.get('heartbeat_auth_secret_file')\nassert path and os.path.exists(path)\nmode=stat.S_IMODE(os.stat(path).st_mode)\nassert mode == 0o600, oct(mode)\nprint('auth_mode=hmac-sha256 secret_present=true secret_mode=0600')\nPY"),
             AdapterStep("backup_heartbeat_app", self._conflict_backup_command(backup_dir, release_dir), changes_system=True, timeout=120),
-            AdapterStep("install_heartbeat_skip_start", f"cd {release_dir}/00_Heartbeat && sudo HC_SKIP_START=1 ./install.sh conflict", changes_system=True, timeout=120),
+            AdapterStep("install_heartbeat_skip_start", f"cd {release_dir}/01_Heartbeat && sudo HC_SKIP_START=1 ./install.sh conflict", changes_system=True, timeout=120),
             AdapterStep("restart_heartbeat", "sudo systemctl restart hcm-heartbeat.service", changes_system=True, timeout=60),
             AdapterStep("verify_heartbeat", self._heartbeat_verify_command(script=f"{release_dir}/11_scripts/heartbeat_verify_readonly.sh"), timeout=60),
             AdapterStep("record_release", f"sudo install -d -m 0755 /var/lib/hcm-heartbeat && printf '%s\n' {artifact.release} | sudo tee {self.release_marker()} >/dev/null", changes_system=True),
@@ -337,13 +337,13 @@ class JetsonDockerAdapter(BaseAdapter):
         rollback_name = self._rollback_container_name(deployment_id or artifact.release)
         return super().steps(artifact, deployment_id=deployment_id) + [
             AdapterStep("preflight_docker_layout", self._docker_preflight_command()),
-            AdapterStep("build_hcm_image", f"sudo docker build --build-arg HCM_GIT_SHA={artifact.release} -t {image} -f {release_dir}/07_config/01_HCM/Dockerfile.live {release_dir}", changes_system=True, timeout=600),
+            AdapterStep("build_hcm_image", f"sudo docker build --build-arg HCM_GIT_SHA={artifact.release} -t {image} -f {release_dir}/07_config/02_HCM/Dockerfile.live {release_dir}", changes_system=True, timeout=600),
             AdapterStep("verify_hcm_image_git", f"sudo docker run --rm --user 10001:10001 {image} git --version", changes_system=True, timeout=60),
             AdapterStep("verify_hcm_schema", self._schema_check_command(release_dir), timeout=60),
             AdapterStep("provision_conflict_status_secret", "sudo -n test -f /etc/hcm-heartbeat/heartbeat-auth.secret && sudo -n install -o 10001 -g 10001 -m 0400 /etc/hcm-heartbeat/heartbeat-auth.secret /etc/hcm/conflict-status.secret && sudo -n cmp -s /etc/hcm-heartbeat/heartbeat-auth.secret /etc/hcm/conflict-status.secret && sudo -n test \"$(sudo -n stat -c '%u:%a' /etc/hcm/conflict-status.secret)\" = '10001:400'", changes_system=True),
             AdapterStep("replace_hcm_container", f"sudo python3 {release_dir}/11_scripts/hcm_docker_deploy.py deploy --image {image} --expected-sha {artifact.release} --rollback-name {rollback_name} --deployment-id {deployment_id or artifact.release}", changes_system=True, timeout=180),
             AdapterStep("verify_hcm_api", self._hcm_health_command(), timeout=60),
-            AdapterStep("verify_conflict_supervisor", "sudo -n docker exec hcm-test python -c \"import asyncio,importlib; result=asyncio.run(importlib.import_module('01_HCM.management').conflict_supervisor_status()); print('conflict_supervisor_status='+str(result.get('status'))); assert result.get('status') == 'Healthy', result.get('reason')\"", timeout=60),
+            AdapterStep("verify_conflict_supervisor", "sudo -n docker exec hcm-test python -c \"import asyncio,importlib; result=asyncio.run(importlib.import_module('02_HCM.management').conflict_supervisor_status()); print('conflict_supervisor_status='+str(result.get('status'))); assert result.get('status') == 'Healthy', result.get('reason')\"", timeout=60),
             AdapterStep("record_release", f"printf '%s\n' {artifact.release} | sudo tee {self.release_marker()} >/dev/null", changes_system=True),
         ]
 
@@ -351,10 +351,10 @@ class JetsonDockerAdapter(BaseAdapter):
         # Execute the candidate contract inside the existing app container, using
         # its DB credentials without printing or transferring them. No GPIO import.
         return (
-            f"(cat {release_dir}/01_HCM/schema_contract.py; cat <<'HCM_SCHEMA'\n"
+            f"(cat {release_dir}/02_HCM/schema_contract.py; cat <<'HCM_SCHEMA'\n"
             "import asyncio\nfrom importlib import import_module\n"
             "async def verify():\n"
-            " db=import_module('01_HCM.db')\n"
+            " db=import_module('02_HCM.db')\n"
             " try:\n"
             "  async with db.acquire() as conn:\n"
             "   async with conn.transaction(readonly=True):\n"

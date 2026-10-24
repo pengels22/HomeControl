@@ -6,7 +6,7 @@ import pytest
 
 
 def test_migration_runner_is_numbered_and_ordered():
-    migrations = import_module('01_HCM.db_migrations')
+    migrations = import_module('02_HCM.db_migrations')
     versions = [int(path.name[:3]) for path in migrations.MIGRATIONS]
 
     assert versions == sorted(versions)
@@ -17,7 +17,7 @@ async def test_hcm_areas_migrate_from_previous_schema_without_losing_rooms():
     url = os.getenv('HCM_TEST_DATABASE_URL')
     if not url:
         pytest.skip('HCM_TEST_DATABASE_URL required for PostgreSQL integration tests')
-    migrations = import_module('01_HCM.db_migrations')
+    migrations = import_module('02_HCM.db_migrations')
     conn = await asyncpg.connect(url)
     schema = 'areas_migration_' + uuid.uuid4().hex
     await conn.execute(f'CREATE SCHEMA {schema}')

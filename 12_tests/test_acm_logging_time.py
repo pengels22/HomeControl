@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LOGGER = (ROOT / "06_ACM/03_Shared/event_logger.cpp").read_text()
 ACM = (ROOT / "06_ACM/01_ACM/main.cpp").read_text()
 KEYPAD = (ROOT / "06_ACM/02_Keypad/main.cpp").read_text()
-HCM = (ROOT / "01_HCM/registry.py").read_text()
+HCM = (ROOT / "02_HCM/registry.py").read_text()
 
 
 class LogModel:

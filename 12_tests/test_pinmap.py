@@ -14,7 +14,7 @@ def test_load_rcm_pinout_is_no_longer_the_authoritative_source():
 
 
 def test_load_hcm_pinout_reads_fire_and_front_panel_pins():
-    entries = pinmap.load_pinout(Path('07_config/01_HCM/Pinout.md'))
+    entries = pinmap.load_pinout(Path('07_config/02_HCM/Pinout.md'))
     assert entries == {}
 
 

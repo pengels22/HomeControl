@@ -74,7 +74,7 @@ class ControlNetworkPlan:
                 if (address := str(ipaddress.ip_address(value))) not in self.reserved_addresses]
 
 def load_control_network_plan() -> ControlNetworkPlan:
-    path = Path(settings.config_root) / '01_HCM' / 'hcm.yaml'
+    path = Path(settings.config_root) / '02_HCM' / 'hcm.yaml'
     if not path.exists():
         raise RuntimeError(f'HCM control network configuration missing: {path}')
     import yaml

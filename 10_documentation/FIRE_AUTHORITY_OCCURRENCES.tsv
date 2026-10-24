@@ -1,142 +1,142 @@
 path	line	component/classification	term:count (case-insensitive, overlapping search terms)
-00_Heartbeat/README.md	161	Conflict/Heartbeat supervision and independent input support	fire:2
-00_Heartbeat/gpio_inputs.py	49	Conflict/Heartbeat supervision and independent input support	fire:2,fire_alarm:2,fire_alarm_s:1,fire_alarm_P:1
-00_Heartbeat/gpio_inputs.py	52	Conflict/Heartbeat supervision and independent input support	fire:1
-00_Heartbeat/gpio_inputs.py	70	Conflict/Heartbeat supervision and independent input support	fire:2,fire_alarm:2,fire_alarm_s:1,fire_alarm_P:1
-00_Heartbeat/gpio_inputs.py	78	Conflict/Heartbeat supervision and independent input support	fire:2,fire_alarm:2,fire_alarm_s:1,fire_alarm_P:1
-00_Heartbeat/gpio_inputs.py	82	Conflict/Heartbeat supervision and independent input support	fire:1
-00_Heartbeat/gpio_inputs.py	91	Conflict/Heartbeat supervision and independent input support	fire:2,fire_alarm:2,fire_alarm_s:1,fire_alarm_P:1
-00_Heartbeat/gpio_inputs.py	101	Conflict/Heartbeat supervision and independent input support	fire:1,fire_alarm:1,fire_alarm_s:1
-00_Heartbeat/hcm_heartbeat.py	658	Conflict/Heartbeat supervision and independent input support	safety_inputs:1
-00_Heartbeat/hcm_heartbeat.py	659	Conflict/Heartbeat supervision and independent input support	fire:1,fire_alarm:1,fire_alarm_s:1
-00_Heartbeat/hcm_heartbeat.py	660	Conflict/Heartbeat supervision and independent input support	fire:1,fire_alarm:1,fire_alarm_P:1
-00_Heartbeat/hcm_heartbeat.py	662	Conflict/Heartbeat supervision and independent input support	safety_inputs:1
-00_Heartbeat/hcm_heartbeat.py	663	Conflict/Heartbeat supervision and independent input support	fire:1
-00_Heartbeat/hcm_heartbeat.py	674	Conflict/Heartbeat supervision and independent input support	safety_inputs:2
-01_HCM/api.py	12	HCM authority/API/UI	fire:1
-01_HCM/api.py	85	HCM authority/API/UI	fire:1,life_safety:1
-01_HCM/api.py	86	HCM authority/API/UI	safety_inputs:1
-01_HCM/api.py	87	HCM authority/API/UI	fire:3,fire_alarm:2,fire_alarm_s:2,life_safety:1
-01_HCM/api.py	88	HCM authority/API/UI	fire:3,fire_alarm:2,fire_alarm_P:2,life_safety:1
-01_HCM/api.py	91	HCM authority/API/UI	fire:1,life_safety:1
-01_HCM/api.py	92	HCM authority/API/UI	fire:2,fire_alarm:2,fire_alarm_s:1,fire_alarm_P:1,safety_inputs:1
-01_HCM/api.py	647	HCM authority/API/UI	fire:1
-01_HCM/api.py	648	HCM authority/API/UI	fire:2
-01_HCM/api.py	652	HCM authority/API/UI	fire:1
-01_HCM/api.py	653	HCM authority/API/UI	fire:1
-01_HCM/api.py	654	HCM authority/API/UI	fire:1
-01_HCM/api.py	655	HCM authority/API/UI	fire:2
-01_HCM/api.py	670	HCM authority/API/UI	fire:2,life_safety:1
-01_HCM/api.py	679	HCM authority/API/UI	fire:2,life_safety:1
-01_HCM/main.py	14	HCM authority/API/UI	SafetyController:1
-01_HCM/main.py	51	HCM authority/API/UI	SafetyController:1
-01_HCM/main.py	89	HCM authority/API/UI	fire:1
-01_HCM/management.py	1882	HCM authority/API/UI	fire:1
-01_HCM/models.py	72	HCM authority/API/UI	fire:1
-01_HCM/priority.py	12	HCM authority/API/UI	life_safety:2
-01_HCM/priority.py	21	HCM authority/API/UI	life_safety:1
-01_HCM/safety.py	13	HCM authority/API/UI	fire:2
-01_HCM/safety.py	46	HCM authority/API/UI	SafetyController:1
-01_HCM/safety.py	50	HCM authority/API/UI	fire:1
-01_HCM/safety.py	55	HCM authority/API/UI	fire:1
-01_HCM/safety.py	58	HCM authority/API/UI	fire:3
-01_HCM/safety.py	59	HCM authority/API/UI	fire:1
-01_HCM/safety.py	60	HCM authority/API/UI	fire:1
-01_HCM/safety.py	62	HCM authority/API/UI	fire:2
-01_HCM/safety.py	63	HCM authority/API/UI	fire:1
-01_HCM/safety.py	66	HCM authority/API/UI	fire:2
-01_HCM/safety.py	68	HCM authority/API/UI	fire:1
-01_HCM/safety.py	75	HCM authority/API/UI	fire:1
-01_HCM/safety.py	76	HCM authority/API/UI	fire:1
-01_HCM/safety.py	77	HCM authority/API/UI	fire:1
-01_HCM/safety.py	78	HCM authority/API/UI	fire:1
-01_HCM/safety.py	86	HCM authority/API/UI	fire:3
-01_HCM/safety.py	89	HCM authority/API/UI	fire:2
-01_HCM/safety.py	92	HCM authority/API/UI	fire:2
-01_HCM/safety.py	93	HCM authority/API/UI	fire:1
-01_HCM/safety.py	94	HCM authority/API/UI	fire:2,fire_alarm:1,fire_alarm_s:1
-01_HCM/safety.py	95	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
-01_HCM/safety.py	96	HCM authority/API/UI	fire:1
-01_HCM/safety.py	99	HCM authority/API/UI	fire:1
-01_HCM/safety.py	101	HCM authority/API/UI	fire:1
-01_HCM/safety.py	102	HCM authority/API/UI	fire:1
-01_HCM/safety.py	104	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_s:1
-01_HCM/safety.py	105	HCM authority/API/UI	fire:2
-01_HCM/safety.py	107	HCM authority/API/UI	fire:1
-01_HCM/safety.py	108	HCM authority/API/UI	fire:2
-01_HCM/safety.py	109	HCM authority/API/UI	fire:2,fire_alarm:1,fire_alarm_s:1
-01_HCM/safety.py	110	HCM authority/API/UI	fire:2
-01_HCM/safety.py	130	HCM authority/API/UI	fire:1
-01_HCM/safety.py	145	HCM authority/API/UI	fire:1
-01_HCM/safety.py	147	HCM authority/API/UI	fire:1
-01_HCM/safety.py	149	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_s:1
-01_HCM/safety.py	152	HCM authority/API/UI	fire:1
-01_HCM/safety.py	160	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
-01_HCM/safety.py	167	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
-01_HCM/safety.py	168	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
-01_HCM/safety.py	174	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
-01_HCM/safety.py	175	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
-01_HCM/safety.py	177	HCM authority/API/UI	fire:1
-01_HCM/safety.py	181	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
-01_HCM/safety.py	183	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
-01_HCM/safety.py	187	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
-01_HCM/safety.py	194	HCM authority/API/UI	fire:1
-01_HCM/safety.py	197	HCM authority/API/UI	fire:1
-01_HCM/safety.py	198	HCM authority/API/UI	fire:1
-01_HCM/safety.py	199	HCM authority/API/UI	fire:1
-01_HCM/safety.py	200	HCM authority/API/UI	fire:1
-01_HCM/safety.py	202	HCM authority/API/UI	fire:1
-01_HCM/safety.py	204	HCM authority/API/UI	fire:1
-01_HCM/safety.py	205	HCM authority/API/UI	fire:1,fire_alarm:1
-01_HCM/safety.py	206	HCM authority/API/UI	fire:2,fire_alarm:1
-01_HCM/safety.py	211	HCM authority/API/UI	fire:2,life_safety:1
-01_HCM/safety.py	214	HCM authority/API/UI	fire:1
-01_HCM/safety.py	232	HCM authority/API/UI	life_safety:1
-01_HCM/safety.py	233	HCM authority/API/UI	fire:1
-01_HCM/safety.py	238	HCM authority/API/UI	life_safety:1
-01_HCM/safety_relays.py	12	HCM authority/API/UI	fire:2,fire_alarm:2
-01_HCM/safety_relays.py	42	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_s:1
-01_HCM/safety_relays.py	43	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
-01_HCM/safety_relays.py	65	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_s:1
-01_HCM/safety_relays.py	66	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_s:1
-01_HCM/safety_relays.py	118	HCM authority/API/UI	fire:2,fire_alarm:2,fire_alarm_s:1
-01_HCM/safety_relays.py	124	HCM authority/API/UI	fire:5,fire_alarm:4,fire_alarm_s:4
-01_HCM/safety_relays.py	125	HCM authority/API/UI	fire:5,fire_alarm:4,fire_alarm_P:4
-01_HCM/safety_relays.py	127	HCM authority/API/UI	fire:2,fire_alarm:1,fire_alarm_s:1
-01_HCM/safety_relays.py	128	HCM authority/API/UI	fire:2,fire_alarm:1,fire_alarm_P:1
-01_HCM/safety_relays.py	130	HCM authority/API/UI	fire:1
-01_HCM/safety_relays.py	149	HCM authority/API/UI	fire:2,fire_alarm:2,fire_alarm_s:2
-01_HCM/safety_relays.py	150	HCM authority/API/UI	fire:2,fire_alarm:2,fire_alarm_P:2
-01_HCM/updater.py	28	HCM authority/API/UI	fire:1
-01_HCM/updater.py	32	HCM authority/API/UI	fire:1
-01_HCM/updater.py	40	HCM authority/API/UI	fire:1
-01_HCM/updater.py	44	HCM authority/API/UI	fire:1
-01_HCM/updater.py	81	HCM authority/API/UI	fire:1
-01_HCM/updater.py	108	HCM authority/API/UI	fire:1
-01_HCM/www/app.js	195	HCM authority/API/UI	fire:1
-01_HCM/www/app.js	196	HCM authority/API/UI	fire:2
-01_HCM/www/app.js	197	HCM authority/API/UI	fire:1
-01_HCM/www/app.js	199	HCM authority/API/UI	fire:2
-01_HCM/www/app.js	207	HCM authority/API/UI	fire:1
-01_HCM/www/app.js	229	HCM authority/API/UI	fire:1
-01_HCM/www/app.js	230	HCM authority/API/UI	fire:4
-01_HCM/www/app.js	231	HCM authority/API/UI	fire:4,fire_alarm:1,fire_alarm_s:1
-01_HCM/www/app.js	309	HCM authority/API/UI	fire:1
-01_HCM/www/app.js	321	HCM authority/API/UI	fire:2
+01_Heartbeat/README.md	161	Conflict/Heartbeat supervision and independent input support	fire:2
+01_Heartbeat/gpio_inputs.py	49	Conflict/Heartbeat supervision and independent input support	fire:2,fire_alarm:2,fire_alarm_s:1,fire_alarm_P:1
+01_Heartbeat/gpio_inputs.py	52	Conflict/Heartbeat supervision and independent input support	fire:1
+01_Heartbeat/gpio_inputs.py	70	Conflict/Heartbeat supervision and independent input support	fire:2,fire_alarm:2,fire_alarm_s:1,fire_alarm_P:1
+01_Heartbeat/gpio_inputs.py	78	Conflict/Heartbeat supervision and independent input support	fire:2,fire_alarm:2,fire_alarm_s:1,fire_alarm_P:1
+01_Heartbeat/gpio_inputs.py	82	Conflict/Heartbeat supervision and independent input support	fire:1
+01_Heartbeat/gpio_inputs.py	91	Conflict/Heartbeat supervision and independent input support	fire:2,fire_alarm:2,fire_alarm_s:1,fire_alarm_P:1
+01_Heartbeat/gpio_inputs.py	101	Conflict/Heartbeat supervision and independent input support	fire:1,fire_alarm:1,fire_alarm_s:1
+01_Heartbeat/hcm_heartbeat.py	658	Conflict/Heartbeat supervision and independent input support	safety_inputs:1
+01_Heartbeat/hcm_heartbeat.py	659	Conflict/Heartbeat supervision and independent input support	fire:1,fire_alarm:1,fire_alarm_s:1
+01_Heartbeat/hcm_heartbeat.py	660	Conflict/Heartbeat supervision and independent input support	fire:1,fire_alarm:1,fire_alarm_P:1
+01_Heartbeat/hcm_heartbeat.py	662	Conflict/Heartbeat supervision and independent input support	safety_inputs:1
+01_Heartbeat/hcm_heartbeat.py	663	Conflict/Heartbeat supervision and independent input support	fire:1
+01_Heartbeat/hcm_heartbeat.py	674	Conflict/Heartbeat supervision and independent input support	safety_inputs:2
+02_HCM/api.py	12	HCM authority/API/UI	fire:1
+02_HCM/api.py	85	HCM authority/API/UI	fire:1,life_safety:1
+02_HCM/api.py	86	HCM authority/API/UI	safety_inputs:1
+02_HCM/api.py	87	HCM authority/API/UI	fire:3,fire_alarm:2,fire_alarm_s:2,life_safety:1
+02_HCM/api.py	88	HCM authority/API/UI	fire:3,fire_alarm:2,fire_alarm_P:2,life_safety:1
+02_HCM/api.py	91	HCM authority/API/UI	fire:1,life_safety:1
+02_HCM/api.py	92	HCM authority/API/UI	fire:2,fire_alarm:2,fire_alarm_s:1,fire_alarm_P:1,safety_inputs:1
+02_HCM/api.py	647	HCM authority/API/UI	fire:1
+02_HCM/api.py	648	HCM authority/API/UI	fire:2
+02_HCM/api.py	652	HCM authority/API/UI	fire:1
+02_HCM/api.py	653	HCM authority/API/UI	fire:1
+02_HCM/api.py	654	HCM authority/API/UI	fire:1
+02_HCM/api.py	655	HCM authority/API/UI	fire:2
+02_HCM/api.py	670	HCM authority/API/UI	fire:2,life_safety:1
+02_HCM/api.py	679	HCM authority/API/UI	fire:2,life_safety:1
+02_HCM/main.py	14	HCM authority/API/UI	SafetyController:1
+02_HCM/main.py	51	HCM authority/API/UI	SafetyController:1
+02_HCM/main.py	89	HCM authority/API/UI	fire:1
+02_HCM/management.py	1882	HCM authority/API/UI	fire:1
+02_HCM/models.py	72	HCM authority/API/UI	fire:1
+02_HCM/priority.py	12	HCM authority/API/UI	life_safety:2
+02_HCM/priority.py	21	HCM authority/API/UI	life_safety:1
+02_HCM/safety.py	13	HCM authority/API/UI	fire:2
+02_HCM/safety.py	46	HCM authority/API/UI	SafetyController:1
+02_HCM/safety.py	50	HCM authority/API/UI	fire:1
+02_HCM/safety.py	55	HCM authority/API/UI	fire:1
+02_HCM/safety.py	58	HCM authority/API/UI	fire:3
+02_HCM/safety.py	59	HCM authority/API/UI	fire:1
+02_HCM/safety.py	60	HCM authority/API/UI	fire:1
+02_HCM/safety.py	62	HCM authority/API/UI	fire:2
+02_HCM/safety.py	63	HCM authority/API/UI	fire:1
+02_HCM/safety.py	66	HCM authority/API/UI	fire:2
+02_HCM/safety.py	68	HCM authority/API/UI	fire:1
+02_HCM/safety.py	75	HCM authority/API/UI	fire:1
+02_HCM/safety.py	76	HCM authority/API/UI	fire:1
+02_HCM/safety.py	77	HCM authority/API/UI	fire:1
+02_HCM/safety.py	78	HCM authority/API/UI	fire:1
+02_HCM/safety.py	86	HCM authority/API/UI	fire:3
+02_HCM/safety.py	89	HCM authority/API/UI	fire:2
+02_HCM/safety.py	92	HCM authority/API/UI	fire:2
+02_HCM/safety.py	93	HCM authority/API/UI	fire:1
+02_HCM/safety.py	94	HCM authority/API/UI	fire:2,fire_alarm:1,fire_alarm_s:1
+02_HCM/safety.py	95	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+02_HCM/safety.py	96	HCM authority/API/UI	fire:1
+02_HCM/safety.py	99	HCM authority/API/UI	fire:1
+02_HCM/safety.py	101	HCM authority/API/UI	fire:1
+02_HCM/safety.py	102	HCM authority/API/UI	fire:1
+02_HCM/safety.py	104	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_s:1
+02_HCM/safety.py	105	HCM authority/API/UI	fire:2
+02_HCM/safety.py	107	HCM authority/API/UI	fire:1
+02_HCM/safety.py	108	HCM authority/API/UI	fire:2
+02_HCM/safety.py	109	HCM authority/API/UI	fire:2,fire_alarm:1,fire_alarm_s:1
+02_HCM/safety.py	110	HCM authority/API/UI	fire:2
+02_HCM/safety.py	130	HCM authority/API/UI	fire:1
+02_HCM/safety.py	145	HCM authority/API/UI	fire:1
+02_HCM/safety.py	147	HCM authority/API/UI	fire:1
+02_HCM/safety.py	149	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_s:1
+02_HCM/safety.py	152	HCM authority/API/UI	fire:1
+02_HCM/safety.py	160	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+02_HCM/safety.py	167	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+02_HCM/safety.py	168	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+02_HCM/safety.py	174	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+02_HCM/safety.py	175	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+02_HCM/safety.py	177	HCM authority/API/UI	fire:1
+02_HCM/safety.py	181	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+02_HCM/safety.py	183	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+02_HCM/safety.py	187	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+02_HCM/safety.py	194	HCM authority/API/UI	fire:1
+02_HCM/safety.py	197	HCM authority/API/UI	fire:1
+02_HCM/safety.py	198	HCM authority/API/UI	fire:1
+02_HCM/safety.py	199	HCM authority/API/UI	fire:1
+02_HCM/safety.py	200	HCM authority/API/UI	fire:1
+02_HCM/safety.py	202	HCM authority/API/UI	fire:1
+02_HCM/safety.py	204	HCM authority/API/UI	fire:1
+02_HCM/safety.py	205	HCM authority/API/UI	fire:1,fire_alarm:1
+02_HCM/safety.py	206	HCM authority/API/UI	fire:2,fire_alarm:1
+02_HCM/safety.py	211	HCM authority/API/UI	fire:2,life_safety:1
+02_HCM/safety.py	214	HCM authority/API/UI	fire:1
+02_HCM/safety.py	232	HCM authority/API/UI	life_safety:1
+02_HCM/safety.py	233	HCM authority/API/UI	fire:1
+02_HCM/safety.py	238	HCM authority/API/UI	life_safety:1
+02_HCM/safety_relays.py	12	HCM authority/API/UI	fire:2,fire_alarm:2
+02_HCM/safety_relays.py	42	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_s:1
+02_HCM/safety_relays.py	43	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_P:1
+02_HCM/safety_relays.py	65	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_s:1
+02_HCM/safety_relays.py	66	HCM authority/API/UI	fire:1,fire_alarm:1,fire_alarm_s:1
+02_HCM/safety_relays.py	118	HCM authority/API/UI	fire:2,fire_alarm:2,fire_alarm_s:1
+02_HCM/safety_relays.py	124	HCM authority/API/UI	fire:5,fire_alarm:4,fire_alarm_s:4
+02_HCM/safety_relays.py	125	HCM authority/API/UI	fire:5,fire_alarm:4,fire_alarm_P:4
+02_HCM/safety_relays.py	127	HCM authority/API/UI	fire:2,fire_alarm:1,fire_alarm_s:1
+02_HCM/safety_relays.py	128	HCM authority/API/UI	fire:2,fire_alarm:1,fire_alarm_P:1
+02_HCM/safety_relays.py	130	HCM authority/API/UI	fire:1
+02_HCM/safety_relays.py	149	HCM authority/API/UI	fire:2,fire_alarm:2,fire_alarm_s:2
+02_HCM/safety_relays.py	150	HCM authority/API/UI	fire:2,fire_alarm:2,fire_alarm_P:2
+02_HCM/updater.py	28	HCM authority/API/UI	fire:1
+02_HCM/updater.py	32	HCM authority/API/UI	fire:1
+02_HCM/updater.py	40	HCM authority/API/UI	fire:1
+02_HCM/updater.py	44	HCM authority/API/UI	fire:1
+02_HCM/updater.py	81	HCM authority/API/UI	fire:1
+02_HCM/updater.py	108	HCM authority/API/UI	fire:1
+02_HCM/www/app.js	195	HCM authority/API/UI	fire:1
+02_HCM/www/app.js	196	HCM authority/API/UI	fire:2
+02_HCM/www/app.js	197	HCM authority/API/UI	fire:1
+02_HCM/www/app.js	199	HCM authority/API/UI	fire:2
+02_HCM/www/app.js	207	HCM authority/API/UI	fire:1
+02_HCM/www/app.js	229	HCM authority/API/UI	fire:1
+02_HCM/www/app.js	230	HCM authority/API/UI	fire:4
+02_HCM/www/app.js	231	HCM authority/API/UI	fire:4,fire_alarm:1,fire_alarm_s:1
+02_HCM/www/app.js	309	HCM authority/API/UI	fire:1
+02_HCM/www/app.js	321	HCM authority/API/UI	fire:2
 03_LCM/main.py	69	LCM commanded safety/local safe-off only	fire:1
 04_RCM/main.py	75	RCM commanded safety/local safe-off only	fire:1
-07_config/01_HCM/Pinout.md	24	Configuration/manifests/deployment (component in path)	fire:1
-07_config/01_HCM/Pinout.md	27	Configuration/manifests/deployment (component in path)	fire:1
-07_config/01_HCM/global_var.py	62	Configuration/manifests/deployment (component in path)	fire:2
-07_config/01_HCM/global_var.py	63	Configuration/manifests/deployment (component in path)	fire:1
-07_config/01_HCM/global_var.py	64	Configuration/manifests/deployment (component in path)	fire:1
-07_config/01_HCM/global_var.py	65	Configuration/manifests/deployment (component in path)	fire:1
-07_config/01_HCM/global_var.py	67	Configuration/manifests/deployment (component in path)	fire:1
-07_config/01_HCM/hardware_pins.yaml	49	Configuration/manifests/deployment (component in path)	fire:1,fire_alarm:1,fire_alarm_s:1
-07_config/01_HCM/hardware_pins.yaml	51	Configuration/manifests/deployment (component in path)	fire:1,fire_alarm:1,fire_alarm_P:1
-07_config/01_HCM/hardware_pins.yaml	62	Configuration/manifests/deployment (component in path)	fire:1,fire_alarm:1,fire_alarm_s:1
-07_config/01_HCM/hardware_pins.yaml	63	Configuration/manifests/deployment (component in path)	fire:1,fire_alarm:1,fire_alarm_P:1
-07_config/01_HCM/hcm.yaml	43	Configuration/manifests/deployment (component in path)	fire:1
+07_config/02_HCM/Pinout.md	24	Configuration/manifests/deployment (component in path)	fire:1
+07_config/02_HCM/Pinout.md	27	Configuration/manifests/deployment (component in path)	fire:1
+07_config/02_HCM/global_var.py	62	Configuration/manifests/deployment (component in path)	fire:2
+07_config/02_HCM/global_var.py	63	Configuration/manifests/deployment (component in path)	fire:1
+07_config/02_HCM/global_var.py	64	Configuration/manifests/deployment (component in path)	fire:1
+07_config/02_HCM/global_var.py	65	Configuration/manifests/deployment (component in path)	fire:1
+07_config/02_HCM/global_var.py	67	Configuration/manifests/deployment (component in path)	fire:1
+07_config/02_HCM/hardware_pins.yaml	49	Configuration/manifests/deployment (component in path)	fire:1,fire_alarm:1,fire_alarm_s:1
+07_config/02_HCM/hardware_pins.yaml	51	Configuration/manifests/deployment (component in path)	fire:1,fire_alarm:1,fire_alarm_P:1
+07_config/02_HCM/hardware_pins.yaml	62	Configuration/manifests/deployment (component in path)	fire:1,fire_alarm:1,fire_alarm_s:1
+07_config/02_HCM/hardware_pins.yaml	63	Configuration/manifests/deployment (component in path)	fire:1,fire_alarm:1,fire_alarm_P:1
+07_config/02_HCM/hcm.yaml	43	Configuration/manifests/deployment (component in path)	fire:1
 07_config/07_CONFLICT/hardware_pins.yaml	11	Configuration/manifests/deployment (component in path)	fire:1,fire_alarm:1,fire_alarm_s:1
 07_config/07_CONFLICT/hardware_pins.yaml	23	Configuration/manifests/deployment (component in path)	fire:1,fire_alarm:1,fire_alarm_P:1
 08_servises/common/fire_alarm_config.py	1	Shared arbitration/input primitives and operational services	fire:1

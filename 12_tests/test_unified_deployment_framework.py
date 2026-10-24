@@ -121,7 +121,7 @@ def test_inventory_package_selection_preserves_lab1_identity_independent_of_role
 def test_hcm_commissioning_plan_uses_shared_package_selection():
     spec = importlib.util.spec_from_file_location(
         "deployment_selection",
-        ROOT / "01_HCM" / "deployment_selection.py",
+        ROOT / "02_HCM" / "deployment_selection.py",
     )
     module = importlib.util.module_from_spec(spec)
     sys.modules["deployment_selection"] = module
@@ -456,7 +456,7 @@ def test_jetson_preflight_does_not_require_env_file_or_pipe_docker_json_to_hered
 
 
 def test_live_hcm_image_installs_git_and_deployment_smoke_tests_it_before_replace():
-    dockerfile = (ROOT / "07_config" / "01_HCM" / "Dockerfile.live").read_text()
+    dockerfile = (ROOT / "07_config" / "02_HCM" / "Dockerfile.live").read_text()
     assert "apt-get install -y --no-install-recommends git ca-certificates" in dockerfile
 
     fake_artifact = artifact.ReleaseArtifact(
@@ -1248,7 +1248,7 @@ def test_hcm_docker_clone_preserves_mounts_networks_environment_and_command(monk
             "Hostname": "abc",
             "Image": "homecontrol-hcm:old",
             "Env": ["HCM_DATABASE_URL=postgres://redacted"],
-            "Cmd": ["python", "-m", "uvicorn", "01_HCM.main:app"],
+            "Cmd": ["python", "-m", "uvicorn", "02_HCM.main:app"],
             "Entrypoint": None,
             "Labels": {"homecontrol": "hcm"},
             "ExposedPorts": {"8080/tcp": {}, "6501/tcp": {}},
@@ -1277,7 +1277,7 @@ def test_hcm_docker_clone_preserves_mounts_networks_environment_and_command(monk
     body = create[2]
     assert body["Image"] == "homecontrol-hcm:new"
     assert body["Env"] == ["HCM_DATABASE_URL=postgres://redacted", "HCM_MATTER_STORAGE=/var/lib/homecontrol-matter"]
-    assert body["Cmd"] == ["python", "-m", "uvicorn", "01_HCM.main:app"]
+    assert body["Cmd"] == ["python", "-m", "uvicorn", "02_HCM.main:app"]
     assert body["HostConfig"]["Binds"] == [
         "/etc/hcm/postgres-password:/run/secrets/postgres_password:ro",
         "/srv/hcm-data/homecontrol:/var/lib/homecontrol:rw",

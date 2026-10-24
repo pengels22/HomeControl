@@ -3,7 +3,7 @@ from importlib import import_module
 import pytest
 
 
-m = import_module("01_HCM.ha_importer")
+m = import_module("02_HCM.ha_importer")
 
 
 def test_safe_yaml_and_normalized_automation_preview():

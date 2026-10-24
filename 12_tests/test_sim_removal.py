@@ -13,8 +13,8 @@ def test_obsolete_sim_tree_is_absent():
 
 
 def test_active_module_registration_excludes_sim():
-    registry = import_module("01_HCM.registry")
-    roles = import_module("01_HCM.role_switching")
+    registry = import_module("02_HCM.registry")
+    roles = import_module("02_HCM.role_switching")
     assert "SIM" not in registry.MODULE_TYPES
     assert "SIM" not in roles.ALLOWED_ROLES
     assert "SIM" not in roles.REGISTERED_MODULE_ROLES

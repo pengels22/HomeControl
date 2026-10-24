@@ -3,7 +3,7 @@ import asyncio
 from pydantic import BaseModel
 
 
-heos = importlib.import_module('01_HCM.integrations.heos')
+heos = importlib.import_module('02_HCM.integrations.heos')
 
 
 def test_heos_parses_json_player_discovery_envelope():

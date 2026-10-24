@@ -3,10 +3,10 @@ import asyncio
 
 import pytest
 
-safety_mod = import_module('01_HCM.safety')
-safety_relays_mod = import_module('01_HCM.safety_relays')
-api_mod = import_module('01_HCM.api')
-models = import_module('01_HCM.models')
+safety_mod = import_module('02_HCM.safety')
+safety_relays_mod = import_module('02_HCM.safety_relays')
+api_mod = import_module('02_HCM.api')
+models = import_module('02_HCM.models')
 SafetyController = safety_mod.SafetyController
 
 

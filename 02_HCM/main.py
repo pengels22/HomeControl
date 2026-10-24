@@ -194,4 +194,4 @@ if __name__ == '__main__':
         settings.dev_mode = True
     import uvicorn
     logging.basicConfig(level=logging.INFO)
-    uvicorn.run('01_HCM.main:app', host=settings.api_host, port=settings.api_port, reload=False)
+    uvicorn.run('02_HCM.main:app', host=settings.api_host, port=settings.api_port, reload=False)

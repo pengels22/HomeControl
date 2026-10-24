@@ -8,7 +8,7 @@ class GlobalConfigError(ValueError):
 
 
 COMPONENT_FILES = {
-    'HCM': Path('07_config/01_HCM/global_var.py'),
+    'HCM': Path('07_config/02_HCM/global_var.py'),
     'LCM': Path('07_config/03_LCM/global_config_LCM.py'),
     'RCM': Path('07_config/04_RCM/global_config_RCM.py'),
     'PNL': Path('07_config/05_PNL/global_config_PNL.py'),

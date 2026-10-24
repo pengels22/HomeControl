@@ -16,9 +16,9 @@ config="${HC_HEARTBEAT_CONFIG:-/etc/hcm-heartbeat/config.json}"
 db="${HC_HEARTBEAT_DB:-/var/lib/hcm-heartbeat/registry.sqlite3}"
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 case "$target" in
-  conflict) template="${HC_HEARTBEAT_TEMPLATE:-${repo_root}/00_Heartbeat/config-conflict.json}" ;;
-  jetson) template="${HC_HEARTBEAT_TEMPLATE:-${repo_root}/00_Heartbeat/config-jetson.json}" ;;
-  lab1) template="${HC_HEARTBEAT_TEMPLATE:-${repo_root}/00_Heartbeat/config-lab1.json}" ;;
+  conflict) template="${HC_HEARTBEAT_TEMPLATE:-${repo_root}/01_Heartbeat/config-conflict.json}" ;;
+  jetson) template="${HC_HEARTBEAT_TEMPLATE:-${repo_root}/01_Heartbeat/config-jetson.json}" ;;
+  lab1) template="${HC_HEARTBEAT_TEMPLATE:-${repo_root}/01_Heartbeat/config-lab1.json}" ;;
 esac
 
 echo "Heartbeat ${mode} preflight for ${target}"

@@ -4,7 +4,7 @@ from importlib import import_module
 import pytest
 
 
-safety_relays = import_module('01_HCM.safety_relays')
+safety_relays = import_module('02_HCM.safety_relays')
 
 
 @pytest.mark.asyncio

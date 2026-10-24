@@ -13,7 +13,7 @@ GPIO, sensor, audio, or physical network claim is made.
 
 - Migration `027_pnl_backplane.sql` adds `pnl_devices`, append-only
   `pnl_telemetry_events`, and singleton `sonic_policy` records.
-- `01_HCM/pnl_backplane.py` validates authenticated panel identity, monotonic
+- `02_HCM/pnl_backplane.py` validates authenticated panel identity, monotonic
   sequence, timezone-aware timestamps, bounded sensor values, and required
   `local.lux`, `local.occupancy`, `local.temp`, `local.humidity` fields.
 - `POST /api/v1/pnl/telemetry` accepts only a registered enabled panel with a

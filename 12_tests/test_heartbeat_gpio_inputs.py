@@ -1,7 +1,7 @@
 from importlib import import_module
 
 
-gpio_inputs = import_module('00_Heartbeat.gpio_inputs')
+gpio_inputs = import_module('01_Heartbeat.gpio_inputs')
 
 
 def test_conflict_gpio_monitor_is_unknown_when_disabled():

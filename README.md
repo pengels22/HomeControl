@@ -90,8 +90,8 @@ Repository defaults remain nonphysical.
 
 ## Repository layout
 
-- `00_Heartbeat` — Unified Heartbeat V3
-- `01_HCM` — Home Control Manager
+- `01_Heartbeat` — Unified Heartbeat V3
+- `02_HCM` — Home Control Manager
 - `03_LCM` — Lighting Control Module
 - `04_RCM` — Relay Control Module
 - `05_PNL` — Panel Module

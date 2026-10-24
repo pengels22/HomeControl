@@ -14,7 +14,7 @@ dependency audit: PNL replacement work is not yet complete.
 
 | Surface | Current consumer | Decision |
 | --- | --- | --- |
-| `01_HCM/entities.py` SIM/RMC state projection | Canonical read-only entity API | Preserve until PNL telemetry adapters replace it |
+| `02_HCM/entities.py` SIM/RMC state projection | Canonical read-only entity API | Preserve until PNL telemetry adapters replace it |
 | Historical SIM protocol names and `09_database` compatibility fields | Historical update/telemetry records | Retain for compatibility; no active SIM implementation or provisioning path remains |
 | `07_config/06_RMC` | RMC firmware and recorded CAN protocol definitions | Active RMC firmware metadata remains; physical transport is separately gated |
 | `07_config/10_Common/manifest.py` and inventory | Deployment and device validation | Preserve parser compatibility; retirement enforcement deferred until PNL backplane exists |
@@ -29,7 +29,7 @@ dependency audit: PNL replacement work is not yet complete.
   records for SIM and RMC.
 - Added read-only `GET /api/v1/legacy-module-status` for authenticated
   administration and later migration passes.
-- Added `01_HCM/legacy_module_status.py` as the single status adapter.
+- Added `02_HCM/legacy_module_status.py` as the single status adapter.
 - Added this report and the Pass 1 baseline carry-forward documentation.
 
 The migration does not delete modules, mappings, events, firmware records,

@@ -2,8 +2,8 @@ from importlib import import_module
 
 import pytest
 
-events = import_module('01_HCM.device_events')
-automation = import_module('01_HCM.automation')
+events = import_module('02_HCM.device_events')
+automation = import_module('02_HCM.automation')
 
 
 def test_normalized_event_is_bounded_and_provider_neutral():

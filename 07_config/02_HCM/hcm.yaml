@@ -35,7 +35,7 @@ network:
     vlan: 20
     conflict_manager_address: 192.168.20.26
     port: 6004
-    implementation: 00_Heartbeat Unified Heartbeat V3
+    implementation: 01_Heartbeat Unified Heartbeat V3
     note: Current development deployment uses the VLAN 20 Ethernet path; the VLAN 60 migration is not active.
   vlan140:
     applicable: false

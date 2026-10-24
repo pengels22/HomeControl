@@ -25,4 +25,4 @@ COPY --from=matter_runtime /matter/node_modules /opt/HomeControl/08_servises/mat
 USER 10001:10001
 EXPOSE 8080
 
-CMD ["python", "-m", "uvicorn", "01_HCM.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python", "-m", "uvicorn", "02_HCM.main:app", "--host", "0.0.0.0", "--port", "8080"]

@@ -4,8 +4,8 @@ from importlib import import_module
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import pytest
 from types import SimpleNamespace
-hvac = import_module('01_HCM.hvac')
-hcm_db = import_module('01_HCM.db')
+hvac = import_module('02_HCM.hvac')
+hcm_db = import_module('02_HCM.db')
 HVACController = hvac.HVACController
 RoomReading = hvac.RoomReading
 Mode = hvac.Mode

@@ -4,8 +4,8 @@ from importlib import import_module
 
 import pytest
 
-climate = import_module('01_HCM.climate')
-importer = import_module('01_HCM.ha_importer')
+climate = import_module('02_HCM.climate')
+importer = import_module('02_HCM.ha_importer')
 
 
 class Controller:

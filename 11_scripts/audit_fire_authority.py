@@ -8,8 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = '10_documentation/FIRE_AUTHORITY_OCCURRENCES.tsv'
 TERMS = ['fire', 'fire_alarm', 'fire_alarm_s', 'fire_alarm_P', 'life_safety', 'SafetyController', 'safety_inputs']
 CLASSES = {
-    '00_Heartbeat': 'Conflict/Heartbeat supervision and independent input support',
-    '01_HCM': 'HCM authority/API/UI',
+    '01_Heartbeat': 'Conflict/Heartbeat supervision and independent input support',
+    '02_HCM': 'HCM authority/API/UI',
     '03_LCM': 'LCM commanded safety/local safe-off only',
     '04_RCM': 'RCM commanded safety/local safe-off only',
     '05_PNL': 'PNL interface only',

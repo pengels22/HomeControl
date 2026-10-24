@@ -3,7 +3,7 @@ from importlib import import_module
 from zoneinfo import ZoneInfo
 import pytest
 
-m=import_module('01_HCM.automation')
+m=import_module('02_HCM.automation')
 
 def test_trigger_id_is_stable_and_sun_offsets_are_normalized():
     first={'type':'time','time':'07:00'}

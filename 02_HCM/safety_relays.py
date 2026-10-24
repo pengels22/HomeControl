@@ -130,7 +130,7 @@ class HCMSafetyRelayController:
 
     @staticmethod
     def load_signal_config(hardware_profile=None):
-        path = hardware_profile or Path(__file__).resolve().parents[1] / '07_config' / '01_HCM' / 'hardware_pins.yaml'
+        path = hardware_profile or Path(__file__).resolve().parents[1] / '07_config' / '02_HCM' / 'hardware_pins.yaml'
         return fire_alarm_config.load_fire_alarm_signals(path)
 
     def __init__(self, backend: SimulatedSafetyRelayBackend | None = None, globals_=None, hardware_profile=None):

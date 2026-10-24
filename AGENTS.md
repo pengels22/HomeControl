@@ -98,7 +98,7 @@ architecture unless a change is explicitly approved.
 - Current heartbeat/supervisory path: VLAN 20, TCP 6004
 - Future VLAN 60 address: `192.168.60.2` on `eth0.60` (not deployed)
 - Heartbeat TCP port: 6004
-- Unified Heartbeat V3 in `00_Heartbeat/` is the standard implementation
+- Unified Heartbeat V3 in `01_Heartbeat/` is the standard implementation
 - Device IDs are normalized MAC addresses from the designated physical interface:
   lowercase, colons removed, exactly 12 hexadecimal characters
 

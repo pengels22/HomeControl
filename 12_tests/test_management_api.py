@@ -8,8 +8,8 @@ import pytest
 import httpx
 from fastapi import HTTPException
 
-api = import_module('01_HCM.api')
-management = import_module('01_HCM.management')
+api = import_module('02_HCM.api')
+management = import_module('02_HCM.management')
 
 
 class FakeAcquire:
@@ -38,7 +38,7 @@ def test_host_network_status_file_rejects_stale_provider_data(monkeypatch, tmp_p
 
 
 def test_settings_frontend_labels_verified_emergency_endpoint():
-    app_js = (management.Path(__file__).parents[1] / '01_HCM' / 'www' / 'app.js').read_text()
+    app_js = (management.Path(__file__).parents[1] / '02_HCM' / 'www' / 'app.js').read_text()
 
     assert 'Open Configuration' in app_js
     assert 'emergency?.available && emergency.url' in app_js

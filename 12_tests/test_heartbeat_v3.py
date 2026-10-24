@@ -9,7 +9,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location('hcm_heartbeat_v3', ROOT / '00_Heartbeat/hcm_heartbeat.py')
+SPEC = importlib.util.spec_from_file_location('hcm_heartbeat_v3', ROOT / '01_Heartbeat/hcm_heartbeat.py')
 hcm = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(hcm)
 
@@ -431,8 +431,8 @@ def test_active_communication_fault_persists_across_conflict_restart(tmp_path, m
 
 
 def test_lab1_installer_mode_is_supported_and_preserves_lab_agent_boundary():
-    install_script = (ROOT / '00_Heartbeat/install.sh').read_text()
-    lab1_config = json.loads((ROOT / '00_Heartbeat/config-lab1.json').read_text())
+    install_script = (ROOT / '01_Heartbeat/install.sh').read_text()
+    lab1_config = json.loads((ROOT / '01_Heartbeat/config-lab1.json').read_text())
 
     assert 'lab1) TARGET=lab1; CFG=config-lab1.json ;;' in install_script
     assert 'homecontrol-lab.service' in install_script
@@ -445,6 +445,6 @@ def test_lab1_installer_mode_is_supported_and_preserves_lab_agent_boundary():
 
 def test_heartbeat_templates_are_fail_closed_for_staged_lab_authentication():
     for name in ('config-conflict.json', 'config-jetson.json', 'config-lab1.json'):
-        data = json.loads((ROOT / '00_Heartbeat' / name).read_text())
+        data = json.loads((ROOT / '01_Heartbeat' / name).read_text())
         assert data['heartbeat_auth_mode'] == 'hmac-sha256'
         assert data['heartbeat_auth_secret_file'] == '/etc/hcm-heartbeat/heartbeat-auth.secret'

@@ -47,7 +47,7 @@ def verify_image(expected_sha):
     from pathlib import Path
     # Override any environment before importing main; no lifespan is entered.
     os.environ['HCM_SAFETY_INPUT_BACKEND'] = 'simulated'
-    main = import_module('01_HCM.main')
+    main = import_module('02_HCM.main')
     if 'get' not in main.app.openapi()['paths'].get('/api/v1/safety/status', {}):
         raise RuntimeError('safety route missing from actual app')
     root = Path(main.__file__).parent
@@ -55,7 +55,7 @@ def verify_image(expected_sha):
         raise RuntimeError('safety route source missing')
     if 'api("/safety/status")' not in (root / 'www/app.js').read_text():
         raise RuntimeError('dashboard safety-status code missing')
-    identity = import_module('01_HCM.build_info').build_info()
+    identity = import_module('02_HCM.build_info').build_info()
     if identity['git_sha'] != expected_sha:
         raise RuntimeError('image SHA mismatch')
     return identity

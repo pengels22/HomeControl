@@ -25,7 +25,7 @@ last-update time, and last-value-change time are persisted separately.
 
 ## Lifecycle and services
 
-`01_HCM/integrations/provider.py` defines setup, start, stop, reload, health check,
+`02_HCM/integrations/provider.py` defines setup, start, stop, reload, health check,
 and diagnostics. The runtime isolates asynchronous provider exceptions and
 timeouts, records sanitized error summaries, and checks health every 30 seconds.
 Providers must remain cooperative asynchronous code; this is not process
@@ -45,7 +45,7 @@ or physical output adapter is connected to this dispatcher.
 
 ## Events
 
-`01_HCM/events.py` uses the existing `EventRecord` model. Provider events carry
+`02_HCM/events.py` uses the existing `EventRecord` model. Provider events carry
 provider/device/entity identity, origin, correlation ID, and payload. State
 reports publish `entity.state_changed` after a successful database write
 (including repeated samples; `last_changed` tracks value changes only).

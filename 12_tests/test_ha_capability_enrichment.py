@@ -3,8 +3,8 @@ from importlib import import_module
 
 import pytest
 
-m = import_module('01_HCM.ha_importer')
-enrich = import_module('01_HCM.ha_capability_enrichment').enrich_plan
+m = import_module('02_HCM.ha_importer')
+enrich = import_module('02_HCM.ha_capability_enrichment').enrich_plan
 
 
 class Services:

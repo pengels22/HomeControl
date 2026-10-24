@@ -1,7 +1,7 @@
 from pathlib import Path
 
-APP = Path('01_HCM/www/app.js').read_text()
-CSS = Path('01_HCM/www/app.css').read_text()
+APP = Path('02_HCM/www/app.js').read_text()
+CSS = Path('02_HCM/www/app.css').read_text()
 
 
 def test_automation_ui_uses_full_width_rows_and_human_labels():

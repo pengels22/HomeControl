@@ -51,7 +51,7 @@ Run the local UI preview on a Mac:
 ```
 
 Open `http://127.0.0.1:8081`. The preview binds to `127.0.0.1`, serves the
-actual assets from `01_HCM/www/`, and implements only preview fixtures for the
+actual assets from `02_HCM/www/`, and implements only preview fixtures for the
 API endpoints used by the frontend. It does not require PostgreSQL or Docker and
 does not contact production HCM, Jetson, Conflict, LAB1 or physical modules.
 

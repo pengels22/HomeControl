@@ -124,7 +124,7 @@ def load_profile(path: str | Path, expected_module: str | None = None) -> Hardwa
 
 
 def profile_path(repo_root: str | Path, module_type: str) -> Path:
-    directory = {"HCM": "01_HCM", "LCM": "03_LCM", "RCM": "04_RCM", "PNL": "05_PNL"}.get(module_type.upper())
+    directory = {"HCM": "02_HCM", "LCM": "03_LCM", "RCM": "04_RCM", "PNL": "05_PNL"}.get(module_type.upper())
     if not directory:
         raise HardwareProfileError(f"unsupported module type {module_type}")
     return Path(repo_root) / "07_config" / directory / "hardware_pins.yaml"

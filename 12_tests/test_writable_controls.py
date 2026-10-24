@@ -2,9 +2,9 @@ import pytest
 from importlib import import_module
 from types import SimpleNamespace
 
-controls = import_module('01_HCM.writable_controls')
-primitives = import_module('01_HCM.primitives')
-importer = import_module('01_HCM.ha_importer')
+controls = import_module('02_HCM.writable_controls')
+primitives = import_module('02_HCM.primitives')
+importer = import_module('02_HCM.ha_importer')
 
 
 def test_number_capability_validates_bounds_and_step():

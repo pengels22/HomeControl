@@ -71,7 +71,7 @@ HCM_Dev_Mode = False
 HCM_TLS_Enabled = False
 # [REPO] Require module client certificate when TLS enabled (settings.py).
 HCM_TLS_Require_Client_Cert = True
-# [REPO] Heartbeat timing from 00_Heartbeat/config-jetson.json, ms.
+# [REPO] Heartbeat timing from 01_Heartbeat/config-jetson.json, ms.
 Heartbeat_Interval = 5000
 # [REPO] Fault if available memory < percent in heartbeat daemon.
 Heartbeat_Min_Available_Memory_Percent = 5

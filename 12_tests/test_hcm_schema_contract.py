@@ -2,8 +2,8 @@ from importlib import import_module
 from unittest.mock import AsyncMock
 import pytest
 
-contract = import_module('01_HCM.schema_contract')
-migrations = import_module('01_HCM.db_migrations')
+contract = import_module('02_HCM.schema_contract')
+migrations = import_module('02_HCM.db_migrations')
 
 async def test_schema_check_catches_live_login_regression_without_writes():
     rows = [{'table_name': t, 'column_name': c} for t, columns in contract.REQUIRED_COLUMNS.items()

@@ -4,8 +4,8 @@ import base64
 import pytest
 from fastapi import HTTPException
 
-api = import_module('01_HCM.api')
-safety_relays_mod = import_module('01_HCM.safety_relays')
+api = import_module('02_HCM.api')
+safety_relays_mod = import_module('02_HCM.safety_relays')
 
 
 class FakeModuleSession:

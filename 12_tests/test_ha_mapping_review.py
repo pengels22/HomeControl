@@ -1,8 +1,8 @@
 from importlib import import_module
 
 
-importer = import_module("01_HCM.ha_importer")
-review = import_module("01_HCM.ha_mapping_review")
+importer = import_module("02_HCM.ha_importer")
+review = import_module("02_HCM.ha_mapping_review")
 
 
 def test_queue_groups_requirements_and_scores_impact_without_private_source_dump():

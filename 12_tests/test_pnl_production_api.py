@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 
-api = import_module('01_HCM.pnl_production_api')
+api = import_module('02_HCM.pnl_production_api')
 
 
 def test_production_router_exposes_separate_admin_and_panel_contracts():

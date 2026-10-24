@@ -1,7 +1,7 @@
 from importlib import import_module
 
 
-legacy = import_module('01_HCM.legacy_module_status')
+legacy = import_module('02_HCM.legacy_module_status')
 
 
 def test_fresh_install_policy_excludes_legacy_roles_without_erasing_history():

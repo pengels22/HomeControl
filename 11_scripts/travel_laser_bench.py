@@ -177,7 +177,7 @@ def stage(source_root: Path, target: str, remote_root: str) -> None:
         "11_scripts/touchscreen_native.py",
         "11_scripts/touchscreen_hardware",
         "11_scripts/touchscreen_ui",
-        "07_config/01_HCM/hardware_pins.yaml",
+        "07_config/02_HCM/hardware_pins.yaml",
         "07_config/03_LCM/hardware_pins.yaml",
         "07_config/04_RCM/hardware_pins.yaml",
         "08_servises/common",

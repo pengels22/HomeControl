@@ -36,9 +36,9 @@ python3 -m venv "${INSTALL_ROOT}/.venv"
 "${INSTALL_ROOT}/.venv/bin/python" -m pip install --upgrade pip
 "${INSTALL_ROOT}/.venv/bin/python" -m pip install -r "${INSTALL_ROOT}/requirements.txt"
 
-mkdir -p "${INSTALL_ROOT}/07_config/01_HCM" "/etc/homecontrol/01_HCM" "${INSTALL_ROOT}/runtime"
-cp -a "${SCRIPT_DIR}/." "/etc/homecontrol/01_HCM/"
-cp -a "${SCRIPT_DIR}/." "${INSTALL_ROOT}/07_config/01_HCM/"
+mkdir -p "${INSTALL_ROOT}/07_config/02_HCM" "/etc/homecontrol/02_HCM" "${INSTALL_ROOT}/runtime"
+cp -a "${SCRIPT_DIR}/." "/etc/homecontrol/02_HCM/"
+cp -a "${SCRIPT_DIR}/." "${INSTALL_ROOT}/07_config/02_HCM/"
 
 install -m 0644 "${INSTALL_ROOT}/08_servises/systemd/homecontrol-hcm.service" \
   "/etc/systemd/system/${SERVICE_NAME}"

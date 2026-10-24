@@ -9,8 +9,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from fastapi import FastAPI
 
-registry = import_module('01_HCM.channel_registry')
-api = import_module('01_HCM.metadata_api')
+registry = import_module('02_HCM.channel_registry')
+api = import_module('02_HCM.metadata_api')
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -206,7 +206,7 @@ async def test_new_lighting_appears_without_bridge_flags(database):
 
 async def test_legacy_file_import_preserves_unbound_names_and_emergency(database,monkeypatch,tmp_path):
     import json
-    storage=import_module('01_HCM.storage')
+    storage=import_module('02_HCM.storage')
     await module(database,'LCM',1)
     path=tmp_path/'config'/'LCM'/'LCM1.json'
     path.parent.mkdir(parents=True)
@@ -219,7 +219,7 @@ async def test_legacy_file_import_preserves_unbound_names_and_emergency(database
 
 async def test_hvac_room_id_survives_rename_and_disabled_room_stays_disabled(database):
     from unittest.mock import AsyncMock
-    hvac=import_module('01_HCM.hvac')
+    hvac=import_module('02_HCM.hvac')
     controller=hvac.HVACController(AsyncMock(),AsyncMock())
     reading=hvac.RoomReading('Old cached name',69,True,room_id=901)
     await database.execute("UPDATE rooms SET name='New name' WHERE id=901")

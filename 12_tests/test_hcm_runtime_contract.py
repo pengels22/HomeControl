@@ -15,9 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture
 def main(monkeypatch):
-    settings = import_module('01_HCM.settings').settings
+    settings = import_module('02_HCM.settings').settings
     monkeypatch.setattr(settings, 'safety_input_backend', 'simulated')
-    return import_module('01_HCM.main')
+    return import_module('02_HCM.main')
 
 
 @pytest.fixture
@@ -33,10 +33,10 @@ def test_actual_app_route_and_authentication(main, client):
 
 @pytest.mark.parametrize('status', ['Normal', 'Active', 'Unknown'])
 def test_authenticated_status_with_all_modules_offline(main, client, monkeypatch, status):
-    auth = import_module('01_HCM.auth')
+    auth = import_module('02_HCM.auth')
     monkeypatch.setattr(auth.settings, 'dev_mode', True)
     token = auth.create_session('reader', 'READONLY')
-    safety = import_module('01_HCM.safety')
+    safety = import_module('02_HCM.safety')
     controller = safety.SafetyController(None, safety_relays=SimpleNamespace(
         backend=SimpleNamespace(physical_input_authoritative=True)))
     monkeypatch.setattr(safety.time, 'time', lambda: 100.0)
@@ -56,7 +56,7 @@ def test_authenticated_status_with_all_modules_offline(main, client, monkeypatch
 
 
 def test_version_uses_embedded_file(main, client, monkeypatch, tmp_path):
-    info = import_module('01_HCM.build_info')
+    info = import_module('02_HCM.build_info')
     path = tmp_path / 'build_info.json'
     expected = {'version': '0.1.0', 'git_sha': 'a' * 40, 'build_time': '2026-10-19T00:00:00Z'}
     path.write_text(json.dumps(expected))
@@ -66,7 +66,7 @@ def test_version_uses_embedded_file(main, client, monkeypatch, tmp_path):
 
 
 async def test_physical_init_failure_is_unknown_not_simulation(main, monkeypatch):
-    relays = import_module('01_HCM.safety_relays')
+    relays = import_module('02_HCM.safety_relays')
     monkeypatch.setattr(main.settings, 'safety_input_backend', 'linux')
     def fail(*args, **kwargs):
         raise OSError('GPIO unavailable')
@@ -84,14 +84,14 @@ async def test_physical_init_failure_is_unknown_not_simulation(main, monkeypatch
 
 
 async def test_linux_backend_read_failure_is_unknown(monkeypatch):
-    relays = import_module('01_HCM.safety_relays')
+    relays = import_module('02_HCM.safety_relays')
     class BrokenTransport:
         def __init__(self, *args): pass
         def read(self): raise OSError('read failed')
         def close(self): pass
     monkeypatch.setattr(relays.physical_drivers, 'LinuxGPIOInputTransport', BrokenTransport)
     backend = relays.HCMSafetyRelayController.from_linux()
-    controller = import_module('01_HCM.safety').SafetyController(None, safety_relays=backend, heartbeat=AsyncMock())
+    controller = import_module('02_HCM.safety').SafetyController(None, safety_relays=backend, heartbeat=AsyncMock())
     await controller.sample_fire_input_from_backend(now=1)
     assert controller.status_payload()['status'] == 'Unknown'
     assert controller.physical_fire_input_authoritative()
@@ -107,11 +107,11 @@ def test_dashboard_safety_is_independent_and_preserves_unknown(client):
 
 
 def test_build_path_embeds_sha_and_checks_image(tmp_path):
-    (tmp_path / '01_HCM').mkdir()
+    (tmp_path / '02_HCM').mkdir()
     sha = 'b' * 40
     subprocess.run([sys.executable, str(ROOT / '11_scripts/hcm_build_info.py'), sha], cwd=tmp_path, check=True)
-    assert json.loads((tmp_path / '01_HCM/build_info.json').read_text())['git_sha'] == sha
-    dockerfile = (ROOT / '07_config/01_HCM/Dockerfile.live').read_text()
+    assert json.loads((tmp_path / '02_HCM/build_info.json').read_text())['git_sha'] == sha
+    dockerfile = (ROOT / '07_config/02_HCM/Dockerfile.live').read_text()
     assert 'ARG HCM_GIT_SHA' in dockerfile
     assert 'hcm_verify.py --expected-sha "$HCM_GIT_SHA"' in dockerfile
     adapters = (ROOT / '07_config/10_Common/adapters.py').read_text()

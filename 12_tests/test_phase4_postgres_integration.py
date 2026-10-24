@@ -10,8 +10,8 @@ import pytest
 
 from importlib import import_module
 
-management = import_module('01_HCM.management')
-role_switching = import_module('01_HCM.role_switching')
+management = import_module('02_HCM.management')
+role_switching = import_module('02_HCM.role_switching')
 
 
 ROOT = Path(__file__).resolve().parents[1]

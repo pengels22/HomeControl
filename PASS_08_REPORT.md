@@ -5,7 +5,7 @@
 - Added migration 029 for production panel metadata, credential audit, command
   deduplication, occupancy events, bounded state events, and dashboard assignment
   uniqueness.
-- Added `01_HCM/pnl_production_api.py` and registered it in `main.py`.
+- Added `02_HCM/pnl_production_api.py` and registered it in `main.py`.
 - Added transactional admin registration, area/hostname management, enable/
   revoke, credential rotation, published dashboard assignment and Sonic policy
   administration.

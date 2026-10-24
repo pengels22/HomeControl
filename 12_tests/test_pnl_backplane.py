@@ -4,7 +4,7 @@ from importlib import import_module
 import pytest
 
 
-pnl = import_module('01_HCM.pnl_backplane')
+pnl = import_module('02_HCM.pnl_backplane')
 
 
 def payload(sequence=1, device_id='aabbccddeeff'):

@@ -2,7 +2,7 @@ from importlib import import_module
 from pathlib import Path
 
 
-api = import_module("01_HCM.ha_import_api")
+api = import_module("02_HCM.ha_import_api")
 
 
 def test_imported_helpers_use_canonical_entity_ref_target_kind():
@@ -13,7 +13,7 @@ def test_imported_helpers_use_canonical_entity_ref_target_kind():
 
 
 def test_legacy_slash_qualified_helper_target_kind_is_not_supported():
-    assert "helper/entity_ref" not in Path("01_HCM/mapping_registry.py").read_text()
+    assert "helper/entity_ref" not in Path("02_HCM/mapping_registry.py").read_text()
 
 
 def test_existing_native_helper_is_reuse_without_durable_mapping():

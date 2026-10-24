@@ -1,7 +1,7 @@
 from importlib import import_module
 
 
-staging = import_module("01_HCM.ha_staging")
+staging = import_module("02_HCM.ha_staging")
 
 
 def test_runtime_snapshot_overrides_initial_state_and_defaults_enabled():

@@ -2,7 +2,7 @@ from importlib import import_module
 
 import pytest
 
-registry_mod = import_module("01_HCM.registry")
+registry_mod = import_module("02_HCM.registry")
 protocol = import_module("08_servises.common.protocol")
 
 verify = registry_mod.ModuleRegistry.verify_client_identity

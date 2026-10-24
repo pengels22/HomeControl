@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 contract = import_module('08_servises.common.channel_metadata')
-bridges = import_module('01_HCM.bridges')
-entities = import_module('01_HCM.entities')
-registry = import_module('01_HCM.channel_registry')
-hvac = import_module('01_HCM.hvac')
+bridges = import_module('02_HCM.bridges')
+entities = import_module('02_HCM.entities')
+registry = import_module('02_HCM.channel_registry')
+hvac = import_module('02_HCM.hvac')
 rcm = import_module('04_RCM.main')
 
 
@@ -345,7 +345,7 @@ async def test_matter_failures_back_off_and_disabled_setting_does_not_restart(mo
 
 
 async def test_hcm_cross_module_interlock_rejects_active_cooling(monkeypatch):
-    devices=import_module('01_HCM.devices')
+    devices=import_module('02_HCM.devices')
     records=[row(id=901,device_id='020000000001',purpose='HVAC',hvac_control='Y1',last_state={'relays':{'A1':True}})]
     monkeypatch.setattr(registry,'channels',AsyncMock(return_value=records))
     dispatch=AsyncMock()

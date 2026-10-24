@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-registry_mod = import_module('01_HCM.registry')
+registry_mod = import_module('02_HCM.registry')
 protocol = import_module('08_servises.common.protocol')
 
 
@@ -422,7 +422,7 @@ async def test_replaced_connection_cannot_mark_new_session_offline(monkeypatch):
     assert conn.modules[key]['control_session_online'] is True
 
 def write_hcm_config(root: Path, active_profile: str, production_subnet: str | None = None) -> None:
-    path = root / '01_HCM'
+    path = root / '02_HCM'
     path.mkdir(parents=True)
     prod_subnet = production_subnet if production_subnet is not None else 'null'
     prod_enabled = 'true' if production_subnet else 'false'
@@ -459,7 +459,7 @@ def test_future_production_control_requires_explicit_subnet(tmp_path, monkeypatc
 
 def test_vlan60_rejected_as_control_network(tmp_path, monkeypatch):
     root = tmp_path / 'cfg'
-    path = root / '01_HCM'
+    path = root / '02_HCM'
     path.mkdir(parents=True)
     (path / 'hcm.yaml').write_text('''
 network:

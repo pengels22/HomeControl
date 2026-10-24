@@ -1,7 +1,7 @@
 from importlib import import_module
 
 
-catalog = import_module("01_HCM.hcm_target_catalog")
+catalog = import_module("02_HCM.hcm_target_catalog")
 
 
 def test_catalog_is_purpose_built_and_redacts_secret_fields():

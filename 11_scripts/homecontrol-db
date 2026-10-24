@@ -16,7 +16,7 @@ async def main() -> None:
     args = parser.parse_args()
     if args.command == 'status' and args.version:
         parser.error('--version is only valid for migrate')
-    migrations = importlib.import_module('01_HCM.db_migrations')
+    migrations = importlib.import_module('02_HCM.db_migrations')
     if args.command == 'migrate':
         result = await migrations.migrate(versions=args.version)
     else:

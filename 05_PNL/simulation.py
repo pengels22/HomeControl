@@ -12,7 +12,7 @@ from typing import Any
 from homecontrol_identity import normalize_device_id
 
 dashboard = import_module('05_PNL.dashboard')
-heartbeat = import_module('00_Heartbeat.hcm_heartbeat')
+heartbeat = import_module('01_Heartbeat.hcm_heartbeat')
 
 
 class SimulationError(ValueError):

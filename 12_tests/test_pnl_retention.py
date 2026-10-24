@@ -3,7 +3,7 @@ from importlib import import_module
 import pytest
 
 
-retention = import_module('01_HCM.pnl_retention')
+retention = import_module('02_HCM.pnl_retention')
 
 
 def test_retention_policy_is_positive_and_preserves_safe_defaults():

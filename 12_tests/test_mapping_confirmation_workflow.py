@@ -3,9 +3,9 @@ from importlib import import_module
 import pytest
 from fastapi import HTTPException
 
-ha_import = import_module("01_HCM.ha_import_api")
-mapping_api = import_module("01_HCM.mapping_api")
-registry = import_module("01_HCM.mapping_registry")
+ha_import = import_module("02_HCM.ha_import_api")
+mapping_api = import_module("02_HCM.mapping_api")
+registry = import_module("02_HCM.mapping_registry")
 
 
 ADMIN = {"user": "tester", "role": "ADMIN"}

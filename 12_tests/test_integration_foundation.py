@@ -13,14 +13,14 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel, ConfigDict
 
-registry_mod=import_module('01_HCM.integrations.registry')
-runtime_mod=import_module('01_HCM.integrations.runtime')
-provider_mod=import_module('01_HCM.integrations.provider')
-mock_mod=import_module('01_HCM.integrations.mock')
-api_mod=import_module('01_HCM.integrations.api')
-instances_mod=import_module('01_HCM.integrations.instances')
-config_api_mod=import_module('01_HCM.integrations.config_api')
-events=import_module('01_HCM.events')
+registry_mod=import_module('02_HCM.integrations.registry')
+runtime_mod=import_module('02_HCM.integrations.runtime')
+provider_mod=import_module('02_HCM.integrations.provider')
+mock_mod=import_module('02_HCM.integrations.mock')
+api_mod=import_module('02_HCM.integrations.api')
+instances_mod=import_module('02_HCM.integrations.instances')
+config_api_mod=import_module('02_HCM.integrations.config_api')
+events=import_module('02_HCM.events')
 ROOT=Path(__file__).resolve().parents[1]
 
 @pytest.mark.asyncio
@@ -321,7 +321,7 @@ async def test_configuration_encrypts_redacts_and_replaces_credentials(database,
     monkeypatch.setenv('HCM_INTEGRATION_SECRET_KEY', Fernet.generate_key().decode())
     host=runtime_mod.Runtime(registry_mod.Registry()); mock=mock_mod.MockProvider(); host.attach(mock,enabled=True)
     await host.start_provider('internal_mock')
-    config=import_module('01_HCM.integrations.config'); secrets=import_module('01_HCM.integrations.secrets')
+    config=import_module('02_HCM.integrations.config'); secrets=import_module('02_HCM.integrations.secrets')
     first=await config.save(mock,config.ConfigInput(config={'host':'lan.local','port':1234},credential_kind='api_key',credential='first-secret'),actor='admin')
     assert first[0]['credential_configured'] and first[0]['credential_ref'] is None
     public=await config.inspect('internal_mock'); assert 'first-secret' not in str(public) and public[0]['config']=={'host':'lan.local','port':1234}
@@ -335,14 +335,14 @@ async def test_configuration_encrypts_redacts_and_replaces_credentials(database,
 
 async def test_configuration_authorization_and_validation(database):
     app=FastAPI(); from importlib import import_module
-    app.include_router(import_module('01_HCM.integrations.config_api').router)
+    app.include_router(import_module('02_HCM.integrations.config_api').router)
     async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client:
-        app.dependency_overrides[import_module('01_HCM.integrations.config_api').require_user]=lambda:{'user':'viewer','role':'READONLY'}
+        app.dependency_overrides[import_module('02_HCM.integrations.config_api').require_user]=lambda:{'user':'viewer','role':'READONLY'}
         assert (await client.post('/api/v1/integrations/internal_mock/disable')).status_code==403
 
 
 def test_webhook_guard_authentication_replay_and_size():
-    webhooks=import_module('01_HCM.integrations.webhooks'); h=webhooks.WebhookGuard('internal_mock',max_bytes=8)
+    webhooks=import_module('02_HCM.integrations.webhooks'); h=webhooks.WebhookGuard('internal_mock',max_bytes=8)
     import hmac,hashlib
     payload=b'payload'; sig=hmac.new(b'secret',payload,hashlib.sha256).hexdigest()
     assert h.verify(payload,sig,'secret','nonce')['provider_id']=='internal_mock'
@@ -353,7 +353,7 @@ def test_webhook_guard_authentication_replay_and_size():
 async def test_provider_chooser_and_multiple_instances(database,monkeypatch):
     monkeypatch.setenv('HCM_INTEGRATION_SECRET_KEY', Fernet.generate_key().decode())
     host=runtime_mod.Runtime(registry_mod.Registry()); mock=mock_mod.MockProvider(); host.attach(mock,enabled=True); await host.start_provider('internal_mock')
-    instances=import_module('01_HCM.integrations.instances')
+    instances=import_module('02_HCM.integrations.instances')
     one=await instances.create('internal_mock','Mock One',{'host':'one'},credential='one-secret',actor='admin')
     two=await instances.create('internal_mock','Mock Two',{'host':'two'},credential='two-secret',actor='admin')
     rows=await instances.list_instances(); assert {str(r['instance_id']) for r in rows} >= {one,two}
@@ -383,12 +383,12 @@ async def test_mock_oauth_state_exchange_and_replay(database,monkeypatch):
     monkeypatch.setenv('HCM_INTEGRATION_SECRET_KEY', Fernet.generate_key().decode())
     host=runtime_mod.Runtime(registry_mod.Registry()); mock=mock_mod.MockProvider(); host.attach(mock,enabled=True); await host.start_provider('internal_mock')
     iid=await database.fetchval("INSERT INTO integration_instances(provider_id,display_name,enabled,configured) VALUES('internal_mock','OAuth',true,true) RETURNING instance_id")
-    oauth=import_module('01_HCM.integrations.oauth'); url=await oauth.authorization_url('internal_mock','https://auth.test/authorize','client','https://hcm.test/cb',instance_id=iid)
+    oauth=import_module('02_HCM.integrations.oauth'); url=await oauth.authorization_url('internal_mock','https://auth.test/authorize','client','https://hcm.test/cb',instance_id=iid)
     from urllib.parse import parse_qs,urlparse
     state=parse_qs(urlparse(url).query)['state'][0]
     await oauth.consume_state('internal_mock',state,'https://hcm.test/cb',iid)
     with pytest.raises(ValueError,match='Invalid or expired'): await oauth.consume_state('internal_mock',state,'https://hcm.test/cb',iid)
-    token=await mock.oauth_exchange('mock-code'); ref=await import_module('01_HCM.integrations.secrets').put('internal_mock','oauth_access_token',token['access_token']); await oauth.associate_access_credential(iid,ref)
+    token=await mock.oauth_exchange('mock-code'); ref=await import_module('02_HCM.integrations.secrets').put('internal_mock','oauth_access_token',token['access_token']); await oauth.associate_access_credential(iid,ref)
     assert await database.fetchval('SELECT credential_ref IS NOT NULL FROM integration_instances WHERE instance_id=$1',iid)
     await host.stop()
 
@@ -408,7 +408,7 @@ async def test_startup_reconstructs_instances_and_marks_missing_provider(databas
 
 
 async def test_generic_oauth_client_normalizes_and_scheduler_cancels():
-    oauth=import_module('01_HCM.integrations.oauth'); calls=[]
+    oauth=import_module('02_HCM.integrations.oauth'); calls=[]
     async def request(endpoint,data,style): calls.append((endpoint,data,style)); return {'access_token':'a','refresh_token':'r','expires_in':'60','scope':'one two'}
     client=oauth.OAuthHTTPClient(request); token=await client.exchange(oauth.OAuthMetadata('a','t',('one',)),'code','id','secret','cb')
     assert token.access_token=='a' and token.refresh_token=='r' and token.scopes==('one','two') and calls[0][1]['code']=='code'
@@ -416,22 +416,22 @@ async def test_generic_oauth_client_normalizes_and_scheduler_cancels():
 
 
 def test_weather_and_openai_normalization_contracts():
-    weather=import_module('01_HCM.integrations.weather'); state=weather.WeatherState(condition='Sunny',temperature=72,provider='nws')
+    weather=import_module('02_HCM.integrations.weather'); state=weather.WeatherState(condition='Sunny',temperature=72,provider='nws')
     assert state.as_dict()=={'condition':'Sunny','temperature':72,'provider':'nws'}
-    openai=import_module('01_HCM.integrations.openai_provider'); args=openai.GenerateText(prompt='hello',max_tokens=10)
+    openai=import_module('02_HCM.integrations.openai_provider'); args=openai.GenerateText(prompt='hello',max_tokens=10)
     assert args.prompt=='hello' and args.max_tokens==10
 
 
 @pytest.mark.asyncio
 async def test_weather_forecast_service_returns_bounded_normalized_response():
-    weather=import_module('01_HCM.integrations.weather'); nws=import_module('01_HCM.integrations.nws')
+    weather=import_module('02_HCM.integrations.weather'); nws=import_module('02_HCM.integrations.nws')
     provider=nws.NWSProvider(); provider.last=weather.WeatherState(forecast=[{'start':str(i)} for i in range(60)])
     result=await provider._get_forecast(weather.ForecastRequest(type='daily'), 1)
     assert result['type']=='daily' and len(result['forecast'])==48
 
 
 async def test_nws_alert_deduplication_and_forecast(database):
-    nws=import_module('01_HCM.integrations.nws'); calls=[]
+    nws=import_module('02_HCM.integrations.nws'); calls=[]
     class Client:
         def __init__(self): self.alerts=[{'features':[{'id':'a1','properties':{'event':'Storm','severity':'Severe','headline':'Storm'}}]},{'features':[] }]
         async def json(self,method,url,**kwargs):
@@ -450,14 +450,14 @@ async def test_nws_alert_deduplication_and_forecast(database):
 
 
 def test_google_calendar_and_gmail_normalization():
-    google=import_module('01_HCM.integrations.google'); calendar=google.GoogleCalendarProvider()
+    google=import_module('02_HCM.integrations.google'); calendar=google.GoogleCalendarProvider()
     event=calendar.normalize_event({'id':'evt','summary':'Meeting','start':{'date':'2026-01-01'},'end':{'date':'2026-01-02'},'status':'confirmed'})
     assert event['event_id']=='evt' and event['all_day'] and event['start']=='2026-01-01'
     assert google.GoogleCalendarProvider.info.setup_type=='oauth' and google.GmailProvider.info.capabilities['mail']
 
 
 async def test_gmail_history_cursor_baseline_and_dedup():
-    google=import_module('01_HCM.integrations.google')
+    google=import_module('02_HCM.integrations.google')
     class Context:
         config={}; entity='entity'; instance_id=None
         def __init__(self): self.saved={}; self.events=[]
@@ -475,7 +475,7 @@ async def test_gmail_history_cursor_baseline_and_dedup():
 
 
 def test_smartthings_capability_mapping_and_webhook_guard():
-    smart=import_module('01_HCM.integrations.smartthings'); provider=smart.SmartThingsProvider()
+    smart=import_module('02_HCM.integrations.smartthings'); provider=smart.SmartThingsProvider()
     assert provider._mapping('switch')==('switch','state')
     assert provider._mapping('washerOperatingState')==('sensor','job_state')
     assert provider._mapping('unknown') is None
@@ -485,7 +485,7 @@ def test_smartthings_capability_mapping_and_webhook_guard():
 
 
 async def test_smartthings_rsa_webhook_verification_and_event_dedup():
-    smart=import_module('01_HCM.integrations.smartthings'); from cryptography.hazmat.primitives.asymmetric import rsa, padding; from cryptography.hazmat.primitives import hashes, serialization; from datetime import datetime, timezone; import base64
+    smart=import_module('02_HCM.integrations.smartthings'); from cryptography.hazmat.primitives.asymmetric import rsa, padding; from cryptography.hazmat.primitives import hashes, serialization; from datetime import datetime, timezone; import base64
     private=rsa.generate_private_key(public_exponent=65537,key_size=2048); public=private.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo).decode()
     class Client:
         async def json(self,*args,**kwargs): return {'publicKey':public},200
@@ -513,22 +513,22 @@ async def test_multi_instance_identity_service_routing_and_durable_events(databa
 
 
 def test_denon_and_heos_media_transport_normalization():
-    denon=import_module('01_HCM.integrations.denon'); receiver=denon.DenonProvider(); receiver.parse_line('PWON'); receiver.parse_line('MVFL-40.0'); receiver.parse_line('MUON'); receiver.parse_line('SICBL/SAT'); assert receiver.state['power'] and receiver.state['volume_level']==0.5 and receiver.state['muted'] and receiver.state['source']=='CBL/SAT'
-    heos=import_module('01_HCM.integrations.heos'); parsed=heos.HEOSTransport('host').parse('heos://event/player_state?pid=7&state=play\r\n'); assert parsed['command']=='event/player_state' and parsed['params']['pid']=='7'; assert heos.PlayMediaArgs(media_content_id='1',media_content_type='favorite').media_content_type=='favorite'
+    denon=import_module('02_HCM.integrations.denon'); receiver=denon.DenonProvider(); receiver.parse_line('PWON'); receiver.parse_line('MVFL-40.0'); receiver.parse_line('MUON'); receiver.parse_line('SICBL/SAT'); assert receiver.state['power'] and receiver.state['volume_level']==0.5 and receiver.state['muted'] and receiver.state['source']=='CBL/SAT'
+    heos=import_module('02_HCM.integrations.heos'); parsed=heos.HEOSTransport('host').parse('heos://event/player_state?pid=7&state=play\r\n'); assert parsed['command']=='event/player_state' and parsed['params']['pid']=='7'; assert heos.PlayMediaArgs(media_content_id='1',media_content_type='favorite').media_content_type=='favorite'
 
 
 def test_native_bluetooth_and_ibeacon_parsing_cache():
-    bt=import_module('01_HCM.bluetooth'); ibeacon=import_module('01_HCM.integrations.ibeacon'); raw=b'\x02\x15'+bytes.fromhex('00112233445566778899aabbccddeeff')+(1).to_bytes(2,'big')+(2).to_bytes(2,'big')+(-59).to_bytes(1,'big',signed=True); adv=bt.Advertisement('hci1','AA:BB',rssi=-61,manufacturer_data={0x004c:raw}); parsed=ibeacon.IBeaconProvider.parse(adv); assert parsed['uuid']=='00112233-4455-6677-8899-aabbccddeeff' and parsed['major']==1 and parsed['minor']==2 and parsed['tx_power']==-59
+    bt=import_module('02_HCM.bluetooth'); ibeacon=import_module('02_HCM.integrations.ibeacon'); raw=b'\x02\x15'+bytes.fromhex('00112233445566778899aabbccddeeff')+(1).to_bytes(2,'big')+(2).to_bytes(2,'big')+(-59).to_bytes(1,'big',signed=True); adv=bt.Advertisement('hci1','AA:BB',rssi=-61,manufacturer_data={0x004c:raw}); parsed=ibeacon.IBeaconProvider.parse(adv); assert parsed['uuid']=='00112233-4455-6677-8899-aabbccddeeff' and parsed['major']==1 and parsed['minor']==2 and parsed['tx_power']==-59
     scanner=bt.BluetoothScanner(cache_size=1); scanner.observe(adv); scanner.observe(bt.Advertisement('hci1','CC:DD')); assert len(scanner.recent())==1
 
 
 async def test_bluetooth_callback_tasks_are_tracked_and_stopped():
-    bt=import_module('01_HCM.bluetooth'); finished=asyncio.Event()
+    bt=import_module('02_HCM.bluetooth'); finished=asyncio.Event()
     async def callback(advertisement): await asyncio.sleep(0); finished.set()
     scanner=bt.BluetoothScanner(); scanner.subscribe(callback); scanner.observe(bt.Advertisement('hci0','AA')); await asyncio.wait_for(finished.wait(),1); await asyncio.sleep(0); assert not scanner.tasks; await scanner.stop(); assert not scanner.pending
 
 async def test_automation_state_event_routes_service_and_advances_cursor(database, running, monkeypatch):
-    automation_mod=import_module('01_HCM.automation')
+    automation_mod=import_module('02_HCM.automation')
     host, mock, _ = running
     monkeypatch.setattr(automation_mod.db, 'acquire', registry_mod.db.acquire)
     context=host.registry.context('internal_mock')
@@ -546,7 +546,7 @@ async def test_automation_state_event_routes_service_and_advances_cursor(databas
     await engine.stop()
 
 async def test_automation_validation_rejects_unknown_keys(database, monkeypatch):
-    automation_mod=import_module('01_HCM.automation')
+    automation_mod=import_module('02_HCM.automation')
     monkeypatch.setattr(automation_mod.db, 'acquire', registry_mod.db.acquire)
     with pytest.raises(automation_mod.AutomationValidationError):
         await automation_mod.AutomationStore().validate({'name':'bad','triggers':[{'type':'event','event_type':'x'}],'actions':[],'unsupported':True})
