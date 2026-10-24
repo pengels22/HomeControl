@@ -162,7 +162,7 @@ async def run_physical_bridge(role: str, url: str | None = None) -> list[dict]:
 async def main() -> None:
     _configure_logging()
     parser = argparse.ArgumentParser(description="HomeControl Chromium-to-ST7796U bridge")
-    parser.add_argument("--role", choices=["RCM", "LCM", "SIM"], default="RCM")
+    parser.add_argument("--role", choices=["RCM", "LCM"], default="RCM")
     parser.add_argument("--mode", choices=["simulated", "orange_pi"], default="simulated")
     parser.add_argument("--url", default=None)
     args = parser.parse_args()

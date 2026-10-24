@@ -13,7 +13,7 @@ def test_storage_layout_initializes_local_git_and_expected_directories(tmp_path)
 
     assert (tmp_path / 'config' / 'RCM').is_dir()
     assert (tmp_path / 'config' / 'LCM').is_dir()
-    assert (tmp_path / 'config' / 'SIM').is_dir()
+    assert (tmp_path / 'config' / 'PNL').is_dir()
     assert (tmp_path / 'config' / 'system').is_dir()
     assert (tmp_path / 'logs' / 'HCM').is_dir()
     assert (tmp_path / '.git').is_dir()

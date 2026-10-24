@@ -7,7 +7,7 @@ import pytest
 profiles = import_module('08_servises.common.hardware_profiles')
 
 
-@pytest.mark.parametrize('module_type', ['HCM', 'SIM', 'LCM', 'RCM'])
+@pytest.mark.parametrize('module_type', ['HCM', 'LCM', 'RCM'])
 def test_authoritative_profiles_have_complete_processor_headers_and_inhibit_outputs(module_type):
     profile = profiles.load_profile(profiles.profile_path(Path(__file__).parents[1], module_type), module_type)
     assert len(profile.data['processor_header']) == profile.data['processor']['header_pins']

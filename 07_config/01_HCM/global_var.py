@@ -31,9 +31,9 @@ Auth_Password_PBKDF2_Iterations = 260000
 Auth_Session_TTL = 3600000
 # [REPO] CAN firmware application return timeout, ms.
 CAN_Firmware_Application_Return_Timeout = 20000
-# [REPO] CAN firmware transfer max retries per block (sim.yaml).
+# [REPO] CAN firmware transfer max retries per block.
 CAN_Firmware_Block_Max_Retries = 3
-# [REPO] CAN firmware transfer data bytes per classical CAN block (sim.yaml).
+# [REPO] CAN firmware transfer data bytes per classical CAN block.
 CAN_Firmware_Block_Size = 4
 # [REPO] CAN firmware ACK timeout for each block, ms.
 CAN_Firmware_Block_Timeout = 2000
@@ -133,34 +133,6 @@ Safety_Contact_Debounce = 250
 Safety_Lockout_Release_Requires_New_Command = True
 # [PROPOSED] Flag output feedback discrepancy after grace period, ms.
 Safety_Output_Feedback_Timeout = 2000
-# [REPO] SIM Hexa 3.3 V upper fault threshold, V.
-SIM_Bus_3V3_Warn_High_V = 3.5
-# [REPO] SIM Hexa 3.3 V low-voltage fault lower bound, V.
-SIM_Bus_3V3_Warn_Low_V = 3.1
-# [REPO] SIM Hexa 5 V upper-voltage warning threshold, V.
-SIM_Bus_5V_Warn_High_V = 5.25
-# [REPO] SIM Hexa 5 V low-voltage warning threshold, V.
-SIM_Bus_5V_Warn_Low_V = 4.75
-# [REPO] SIM Hexa ADC bus monitor off threshold, V (applies to 3V3/5V monitors).
-SIM_Bus_Off_Below_V = 1.0
-# [REPO] SIM CAN interfaces enabled in sim.yaml. Bitrate is excluded pending physical agreement.
-SIM_CAN_Enabled = True
-# [REPO] SIM Hexa monitored 12 V loops high limit, V.
-SIM_Loop_12V_Warn_High_V = 13.2
-# [REPO] SIM Hexa monitored 12 V loops low limit, V.
-SIM_Loop_12V_Warn_Low_V = 11.0
-# [REPO] SIM Hexa monitored 12 V loops off threshold, V.
-SIM_Loop_Off_Below_V = 3.0
-# [REPO] SIM-to-RMC firmware update capability enabled (sim.yaml).
-SIM_RMC_Firmware_Updates_Enabled = True
-# [REPO] SIM web UI enabled (sim.yaml).
-SIM_Web_Enabled = True
-# [REPO] Simulator overrides HVAC lead/restart delays to zero; simulator only.
-Simulator_HVAC_Fast_Timing = True
-# [REPO] Simulator fade interpolation steps.
-Simulator_LCM_Fade_Steps = 30
-# [REPO] Simulator LCM fade duration, ms.
-Simulator_LCM_Fade_Time = 3000
 # [REPO] Module -> HCM V3 Unix socket read timeout, ms (agent.py).
 Supervision_Local_Socket_Timeout = 1000
 # [REPO] Poll cadence during post-update reconnect, ms (updater.py).

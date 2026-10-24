@@ -9,7 +9,7 @@ This glossary defines terms as they are used in the current HomeControl architec
 | **HCM** | **Home Control Manager** | Central application controller, API, database authority, HVAC controller, device manager, and safety orchestrator. Historical documents sometimes called it “House Control Module”; the current white papers use Home Control Manager. |
 | **RCM** | Relay Control Module | Linux field module providing 32 relay outputs A1-D8. |
 | **LCM** | Lighting Control Module | Linux field module providing relay, 0-10 V, and high-voltage dimming outputs. |
-| **SIM** | Sensor Interface Module | Linux sensor/CAN gateway between HCM and field sensor/RMC networks. |
+| **SIM** | Retired Sensor Interface Module | Historical Linux sensor/CAN gateway name. Removed from active provisioning; retained only in compatibility records and protocol history. |
 | **RMC** | Room Monitoring Cluster | CAN-connected room sensor microcontroller node. |
 | **PNL** | Panel Module | Wall-panel logical agent and configuration role. |
 | **Conflict Manager** | Independent supervisory processor | Maintains network-wide heartbeat registry and detects communication conflicts/failures independently of HCM. |
@@ -22,7 +22,7 @@ This glossary defines terms as they are used in the current HomeControl architec
 | **GPIO** | General-Purpose Input/Output | Processor digital I/O pins. |
 | **I2C / I²C** | Inter-Integrated Circuit | Two-wire local peripheral bus used by relay, PWM, touch, and sensor devices. |
 | **SPI** | Serial Peripheral Interface | Synchronous peripheral bus used for devices such as displays or CAN controllers. |
-| **CAN** | Controller Area Network | Field bus used between SIM and RMC nodes. HomeControl uses 125000 bit/s. |
+| **CAN** | Controller Area Network | Historical RMC transport records use 125000 bit/s; active room sensing uses the PNL telemetry architecture. |
 | **ADC** | Analog-to-Digital Converter | Converts analog voltage to digital measurement. |
 | **DAC** | Digital-to-Analog Converter | Converts digital command to analog voltage; older LCM concepts used DAC modules. |
 | **PWM** | Pulse-Width Modulation | Used by the active LCM PCA9685 0-10 V control architecture. |

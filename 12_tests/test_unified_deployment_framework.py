@@ -93,7 +93,7 @@ def sample_heartbeat_status():
 def test_all_device_manifests_validate_and_rmc_is_firmware_only():
     manifests = manifest.load_all_manifests(ROOT / "07_config")
 
-    assert set(manifests) == {"HCM", "SIM", "LCM", "RCM", "PNL", "RMC", "CONFLICT", "LAB"}
+    assert set(manifests) == {"HCM", "LCM", "RCM", "PNL", "RMC", "CONFLICT", "LAB"}
     assert manifests["RMC"].deployment["adapter"] == "firmware"
     assert "install" not in manifests["RMC"].deployment
     assert manifests["HCM"].deployment["adapter"] == "hcm_docker"

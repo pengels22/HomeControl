@@ -3,7 +3,6 @@ from importlib import import_module
 import pytest
 
 rmc_fw = import_module('08_servises.common.rmc_firmware')
-sim = import_module('02_SIM.main')
 
 
 def test_rmc_firmware_package_validation_rejects_wrong_target():
@@ -37,50 +36,3 @@ def test_rmc_build_time_config_uses_global_values():
     assert cfg['CAN_BITRATE'] == 125000
     assert cfg['RMC_FIRMWARE_BLOCK_SIZE'] == 4
     assert cfg['TELEMETRY_INTERVAL_MS'] == 5000
-
-
-@pytest.mark.asyncio
-async def test_sim_stages_and_completes_rmc_firmware_update(tmp_path):
-    cfg = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '07_config/02_SIM/sim.yaml')
-    cfg['io'] = {'mode': 'simulated'}
-    cfg['rmc_firmware_updates']['staging_root'] = str(tmp_path)
-    agent = sim.SIMAgent(cfg)
-    image = bytes((i % 251 for i in range(64)))
-    package = rmc_fw.make_package(image=image, firmware_version='1.4.0', session_id='test-session')
-
-    result = await agent.apply_command({
-        'op': 'rmc_firmware_update',
-        'target': {'rmc_id': 'RMC-07', 'node_id': 7, 'can_interface': 'can0'},
-        'package': package,
-    })
-
-    assert result['ok'] is True
-    assert result['session']['state'] == 'COMPLETE'
-    assert result['session']['progress_pct'] == 100
-    assert result['reported_firmware_version'] == '1.4.0'
-    assert agent.rmc_nodes['7']['firmware_version'] == '1.4.0'
-    assert agent.can_network.snapshot()['can0']['tx_count'] > 0
-    assert not (tmp_path / 'test-session.bin').exists()
-
-
-@pytest.mark.asyncio
-async def test_sim_rejects_incompatible_rmc_firmware(tmp_path):
-    cfg = sim.common_cfg.load_yaml(sim.Path(__file__).resolve().parents[1] / '07_config/02_SIM/sim.yaml')
-    cfg['io'] = {'mode': 'simulated'}
-    cfg['rmc_firmware_updates']['staging_root'] = str(tmp_path)
-    agent = sim.SIMAgent(cfg)
-    package = rmc_fw.make_package(
-        image=b'bad-hardware',
-        firmware_version='1.4.0',
-        hardware_revision='OTHER-HARDWARE',
-    )
-
-    result = await agent.apply_command({
-        'op': 'rmc_firmware_update',
-        'target': {'rmc_id': 'RMC-07', 'node_id': 7, 'can_interface': 'can0'},
-        'package': package,
-    })
-
-    assert result['ok'] is False
-    assert result['session']['state'] == 'FAILED'
-    assert 'incompatible RMC hardware revision' in result['error']

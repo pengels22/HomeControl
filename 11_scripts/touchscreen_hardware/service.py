@@ -29,8 +29,8 @@ class TouchscreenHardwareService:
 
 def create_service(role: str, mode: str = "simulated") -> TouchscreenHardwareService:
     role = role.upper()
-    if role not in {"RCM", "LCM", "SIM"}:
-        raise ValueError("Orange Pi touchscreen service supports RCM, LCM, and SIM")
+    if role not in {"RCM", "LCM"}:
+        raise ValueError("Orange Pi touchscreen service supports RCM and LCM")
     if mode not in {"simulated", "orange_pi"}:
         raise ValueError("mode must be simulated or orange_pi")
     return TouchscreenHardwareService(role=role, mode=mode)

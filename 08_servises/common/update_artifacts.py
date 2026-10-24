@@ -33,7 +33,6 @@ class VerifiedArtifact:
 INSTALLERS: dict[tuple[str, str], tuple[str, ...]] = {
     ("RCM", "firmware"): ("/usr/local/lib/homecontrol/install-rcm-firmware",),
     ("LCM", "firmware"): ("/usr/local/lib/homecontrol/install-lcm-firmware",),
-    ("SIM", "firmware"): ("/usr/local/lib/homecontrol/install-sim-firmware",),
     ("PNL", "firmware"): ("/usr/local/lib/homecontrol/install-pnl-firmware",),
 }
 

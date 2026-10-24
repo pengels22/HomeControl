@@ -13,7 +13,6 @@ from pathlib import Path
 ROLES = {
     "RCM": {"home": [], "status": ["status"], "relays": ["relays"], "network": ["network"], "settings": ["settings"]},
     "LCM": {"home": [], "status": ["status"], "lights": ["lights"], "dimmers": ["lights", "dimmers"], "non-dimmers": ["lights", "non-dimmers"], "network": ["network"], "settings": ["settings"]},
-    "SIM": {"home": [], "status": ["status"], "rmc-data": ["rmc-data"], "network": ["network"], "settings": ["settings"]},
     "HCM": {"home": [], "status": ["status"], "sensors": ["sensors"], "network": ["network"], "settings": ["settings"]},
 }
 

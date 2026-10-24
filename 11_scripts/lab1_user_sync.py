@@ -87,7 +87,7 @@ def active_module_type() -> str:
     except (OSError, ValueError):
         return "RCM"
     role = str(state.get("role") or "").upper()
-    return role if role in {"RCM", "LCM", "SIM"} else "RCM"
+    return role if role in {"RCM", "LCM"} else "RCM"
 
 
 def apply_config_payload(payload: dict) -> bool:

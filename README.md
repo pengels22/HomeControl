@@ -31,8 +31,7 @@ Core roles:
 - **HCM** — central API, PostgreSQL-backed control authority, logical-device mapping, HVAC, safety orchestration, authentication, updates, and management.
 - **RCM** — 32-channel relay control module.
 - **LCM** — lighting module with relay outputs, ten 0-10 V outputs, and four Shelly high-voltage dimmer channels.
-- **SIM** — sensor/CAN gateway.
-- **RMC** — CAN room-monitoring microcontroller node.
+- **RMC** — CAN room-monitoring microcontroller node; historical SIM transport records remain readable.
 - **PNL** — panel agent / wall-interface role.
 - **Conflict Manager** — independent Heartbeat V3 supervisor.
 
@@ -54,7 +53,7 @@ VLAN 40 remains a future production-control placeholder. VLAN 60 is not part of 
 
 ## CAN baseline
 
-RMC/SIM CAN is **125000 bit/s**.
+RMC CAN is **125000 bit/s**.
 
 ## Safety baseline
 
@@ -93,7 +92,6 @@ Repository defaults remain nonphysical.
 
 - `00_Heartbeat` — Unified Heartbeat V3
 - `01_HCM` — Home Control Manager
-- `02_SIM` — Sensor Interface Module
 - `03_LCM` — Lighting Control Module
 - `04_RCM` — Relay Control Module
 - `05_PNL` — Panel Module
@@ -101,7 +99,7 @@ Repository defaults remain nonphysical.
 - `08_servises` — shared/system services (spelling retained by project)
 - `09_database` — PostgreSQL schema and migrations
 - `10_documentation` — current runbooks, pinout, and white papers
-- `11_scripts` — simulators, deployment, and admin tooling
+- `11_scripts` — deployment and admin tooling
 - `12_tests` — automated software tests
 - `13_hardware_tests` — explicitly gated HIL tests
 

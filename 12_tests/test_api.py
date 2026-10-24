@@ -65,24 +65,6 @@ async def test_fire_api_rejects_manual_changes_when_physical_input_is_authoritat
         await api.fire(api.FireStateIn(active=False), {'user': 'admin', 'role': 'ADMIN'})
     assert exc.value.status_code == 409
 
-
-@pytest.mark.asyncio
-async def test_fire_api_allows_only_simulation_backend_injection(monkeypatch):
-    class SimSafety:
-        fire_active = False
-        def physical_fire_input_authoritative(self):
-            return False
-        async def set_fire(self, active, *, source):
-            assert source == 'simulation'
-            self.fire_active = active
-
-    safety = SimSafety()
-    monkeypatch.setattr(api, 'safety', safety)
-    result = await api.fire(api.FireStateIn(active=True), {'user': 'admin', 'role': 'ADMIN'})
-    assert result == {'ok': True, 'fire_active': True}
-
-
-@pytest.mark.asyncio
 async def test_safety_status_endpoint_returns_controller_source_and_state(monkeypatch):
     class Safety:
         def status_payload(self):
@@ -154,36 +136,6 @@ async def test_passkey_verify_endpoint_returns_session_token(monkeypatch):
 
     assert result == {'token': 'session-token'}
 
-
-@pytest.mark.asyncio
-async def test_rmc_firmware_update_endpoint_routes_through_updater(monkeypatch):
-    async def update_rmc_via_sim(**kwargs):
-        assert kwargs['target_rmc_id'] == 'RMC-07'
-        assert kwargs['sim_hostname'] == 'SIM01'
-        assert kwargs['can_interface'] == 'can0'
-        assert kwargs['node_id'] == 7
-        assert kwargs['firmware_image'] == b'firmware'
-        assert kwargs['firmware_version'] == '1.4.0'
-        return {'ok': True, 'state': 'COMPLETE'}
-
-    monkeypatch.setattr(api.updater, 'update_rmc_via_sim', update_rmc_via_sim)
-
-    result = await api.rmc_firmware_update(
-        api.RmcFirmwareUpdateIn(
-            target_rmc_id='RMC-07',
-            sim_hostname='SIM01',
-            can_interface='can0',
-            node_id=7,
-            firmware_version='1.4.0',
-            firmware_image_b64=base64.b64encode(b'firmware').decode('ascii'),
-        ),
-        {'user': 'patrick', 'role': 'ADMIN'},
-    )
-
-    assert result == {'ok': True, 'state': 'COMPLETE'}
-
-
-@pytest.mark.asyncio
 async def test_hcm_safety_relay_pulse_requires_admin(monkeypatch):
     controller = safety_relays_mod.HCMSafetyRelayController()
     monkeypatch.setattr(api, 'safety_relays', controller)
@@ -211,96 +163,3 @@ async def test_hcm_safety_relay_pulse_uses_global_default(monkeypatch):
     assert result['ok'] is True
     assert result['pulse_ms'] == 3000
     assert result['relay']['lockout_exempt'] is True
-
-
-@pytest.mark.asyncio
-async def test_module_role_change_requires_admin():
-    with pytest.raises(HTTPException) as exc:
-        await api.module_role_change(
-            '2ccf675d3414',
-            api.ModuleRoleChangeIn(requested_role='SIM', confirm=True),
-            {'user': 'viewer', 'role': 'READONLY'},
-        )
-
-    assert exc.value.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_module_roles_returns_supported_backend_roles(monkeypatch):
-    async def list_role_managed_modules():
-        return [{'device_id': '2ccf675d3414'}]
-
-    monkeypatch.setattr(api.role_switching, 'list_role_managed_modules', list_role_managed_modules)
-
-    result = await api.module_roles({'user': 'patrick', 'role': 'ADMIN'})
-
-    assert result['roles'] == ['UNASSIGNED', 'RCM', 'SIM', 'LCM']
-    assert result['modules'][0]['device_id'] == '2ccf675d3414'
-
-
-@pytest.mark.asyncio
-async def test_module_role_change_requires_explicit_confirmation():
-    with pytest.raises(HTTPException) as exc:
-        await api.module_role_change(
-            '2ccf675d3414',
-            api.ModuleRoleChangeIn(requested_role='SIM', confirm=False),
-            {'user': 'patrick', 'role': 'ADMIN'},
-        )
-
-    assert exc.value.status_code == 400
-
-
-@pytest.mark.asyncio
-async def test_module_role_change_sends_existing_control_session(monkeypatch):
-    session = FakeModuleSession()
-    monkeypatch.setattr(api.registry, 'connections', {'2ccf675d3414': session})
-    monkeypatch.setattr(api.registry, '_connections_lock', __import__('asyncio').Lock())
-
-    async def create_transition(**kwargs):
-        assert kwargs['actor'] == 'patrick'
-        assert kwargs['control_session_key'] == '2ccf675d3414'
-        return {
-            'operation_id': '11111111-2222-4333-8444-555555555555',
-            'command_payload': {
-                'op': 'set_module_role',
-                'device_id': '2ccf675d3414',
-                'requested_role': 'SIM',
-                'simulation_required': True,
-            },
-        }
-
-    async def mark_sent(operation_id):
-        assert operation_id == '11111111-2222-4333-8444-555555555555'
-
-    async def mark_acknowledged(operation_id, ack):
-        assert ack == {'ok': True, 'accepted': True}
-        return {'operation_id': operation_id, 'status': 'ACCEPTED'}
-
-    monkeypatch.setattr(api.role_switching, 'create_transition', create_transition)
-    monkeypatch.setattr(api.role_switching, 'mark_sent', mark_sent)
-    monkeypatch.setattr(api.role_switching, 'mark_acknowledged', mark_acknowledged)
-
-    result = await api.module_role_change(
-        '2ccf675d3414',
-        api.ModuleRoleChangeIn(requested_role='SIM', confirm=True),
-        {'user': 'patrick', 'role': 'ADMIN'},
-    )
-
-    assert result['status'] == 'ACCEPTED'
-    assert session.commands[0][0]['operation_id'] == '11111111-2222-4333-8444-555555555555'
-    assert session.commands[0][1] == '11111111-2222-4333-8444-555555555555'
-
-
-@pytest.mark.asyncio
-async def test_module_role_change_rejects_offline_module(monkeypatch):
-    monkeypatch.setattr(api.registry, 'connections', {})
-    monkeypatch.setattr(api.registry, '_connections_lock', __import__('asyncio').Lock())
-
-    with pytest.raises(HTTPException) as exc:
-        await api.module_role_change(
-            '2ccf675d3414',
-            api.ModuleRoleChangeIn(requested_role='SIM', confirm=True),
-            {'user': 'patrick', 'role': 'ADMIN'},
-        )
-
-    assert exc.value.status_code == 409

@@ -17,7 +17,7 @@ from .settings import settings
 infra = import_module('08_servises.common.module_infra')
 
 
-CONFIG_DIRS = ('RCM', 'LCM', 'SIM', 'system')
+CONFIG_DIRS = ('RCM', 'LCM', 'PNL', 'system')
 LOG_DIRS = ('HCM',)
 TRACKED_PATHS = ('config', 'logs', 'recovery-manifest.json')
 SYNC_INTERVAL_SECONDS = 600

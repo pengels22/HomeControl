@@ -3,7 +3,7 @@ let token = localStorage.getItem("homecontrol_token") || "";
 let currentUser = null;
 let lastModules = [];
 let roleManagementByDevice = new Map();
-let moduleRoleOptions = ["UNASSIGNED", "RCM", "SIM", "LCM"];
+let moduleRoleOptions = ["UNASSIGNED", "RCM", "LCM", "PNL"];
 const pending = new Set();
 let activeDialog = null;
 let previewMode = false;
@@ -992,7 +992,6 @@ async function renderDeviceDetail(identifier) {
   const role = roleLabel(device);
   if (role === "RCM") return renderRcm(device);
   if (role === "LCM") return renderLcm(device);
-  if (role === "SIM") return renderSim(device);
   if (role === "PNL") return renderPanelRooms(device);
   return renderRoleShell(device, "Unassigned Device");
 }
@@ -1137,112 +1136,8 @@ function dimmerTile(channel) {
   </article>`;
 }
 
-async function renderSim(device) {
-  const data = await api(`/device-admin/${encodeURIComponent(device.module.hostname)}/sim-dashboard`);
-  window.__lastSimDashboard = data;
-  $("content").innerHTML = `
-    <section class="panel">
-      <div class="panel-head">
-        <div>
-          <h3>${esc(data.device.module.hostname)} - Sensor Interface Module</h3>
-          <p class="device-subtitle">${simCanSubtitle(data.can_loops)}</p>
-        </div>
-        ${statusPill(online(data.device.module))}
-      </div>
-      ${identityBlock(data.device)}
-      ${roleManagementBlock(data.device)}
-    </section>
-    <section class="panel sim-panel">
-      <div class="panel-head">
-        <h3>Room Clusters</h3>
-        <span class="muted">${data.rmcs.length} RMC nodes</span>
-      </div>
-      <div class="rmc-grid">${data.rmcs.length ? data.rmcs.map(rmcCard).join("") : `<div class="empty">No RMC telemetry reported for this SIM.</div>`}</div>
-    </section>
-    <section class="panel sim-panel">
-      <div class="panel-head">
-        <h3>Analog Inputs</h3>
-        <span class="muted">${data.analog_inputs.length} physical inputs</span>
-      </div>
-      <div class="sim-ai-grid">${data.analog_inputs.map(analogInputCard).join("")}</div>
-    </section>
-    <section class="panel sim-panel">
-      <details>
-        <summary>SIM Diagnostics</summary>
-        <div class="sim-diagnostics">
-          ${data.can_loops.map(canDiagnostic).join("")}
-          <div><span>Hexa board</span><strong>${esc(data.diagnostics.hexa_board_model || "Unknown")}</strong></div>
-          <div><span>I/O mode</span><strong>${esc(data.diagnostics.io_mode || "Unknown")}</strong></div>
-        </div>
-      </details>
-    </section>`;
-}
-
-function simCanSubtitle(loops) {
-  return loops.map((loop) => `<span class="can-status ${simStatusClass(loop.status)}"><span aria-hidden="true"></span>CAN ${esc(loop.label)}: ${esc(loop.status || "Unknown")}</span>`).join(" · ");
-}
-
-function simStatusClass(status) {
-  const clean = String(status || "Unknown").toLowerCase();
-  if (clean === "online") return "online";
-  if (clean === "fault") return "fault";
-  if (clean === "offline") return "offline";
-  if (clean === "stale") return "stale";
-  return "unknown";
-}
-
-function rmcCard(rmc) {
-  return `<article class="rmc-card ${simStatusClass(rmc.status)}">
-    <div class="rmc-head">
-      <div class="rmc-title-block">
-        <strong>${esc(rmc.name || rmc.id)}</strong>
-        <span>${esc(rmc.id)} / ${esc(rmc.can_interface || "Unknown")}</span>
-      </div>
-      <div class="rmc-actions">
-        <span class="status-chip ${simStatusClass(rmc.status)}">${esc(rmc.status || "Unknown")}</span>
-        <button class="icon-button cog-button" type="button" data-sim-rmc-settings="${esc(rmc.id)}" aria-label="Open ${esc(rmc.name || rmc.id)} settings">⚙</button>
-      </div>
-    </div>
-    <div class="rmc-readings">
-      ${readingCell("Temp", rmc.readings.temperature_f, (value) => `${value} F`)}
-      ${readingCell("Humidity", rmc.readings.humidity_pct, (value) => `${value}%`)}
-      ${readingCell("Light", rmc.readings.lux, (value) => `${value} lux`)}
-      ${readingCell("AQI", rmc.readings.aqi, (value) => `${value}`)}
-      ${readingCell("Presence", rmc.readings.presence, (value) => value ? "Detected" : "Clear")}
-    </div>
-  </article>`;
-}
-
-function readingCell(label, reading, format) {
-  const status = reading?.status || "Unknown";
-  const value = reading?.value;
-  const text = value === null || value === undefined ? status : format(value);
-  return `<div class="reading ${simStatusClass(status)}"><span>${esc(label)}</span><strong>${esc(text)}</strong></div>`;
-}
-
 function kv(label, value) {
   return `<div><span>${esc(label)}</span><strong>${esc(value ?? "Unknown")}</strong></div>`;
-}
-
-function analogInputCard(input) {
-  const value = input.value === null || input.value === undefined ? "Unknown" : `${input.value} ${input.unit || ""}`.trim();
-  return `<article class="ai-card ${input.bound ? "" : "disabled"}">
-    <div class="lcm-channel-main">
-      <button class="channel-title" type="button" data-sim-ai-settings="${esc(input.channel)}" ${input.config_enabled ? "" : "disabled"}>${esc(input.name || "Unbound")}</button>
-      <span class="channel-meta">${esc(input.channel)}${input.firmware_channel ? ` / ${esc(input.firmware_channel)}` : ""}</span>
-    </div>
-    <div class="ai-reading">
-      <strong>${esc(value)}</strong>
-      <span>${esc(input.disabled_reason || input.status || "Unknown")}</span>
-    </div>
-  </article>`;
-}
-
-function canDiagnostic(loop) {
-  return `<div>
-    <span>CAN ${esc(loop.label)} / ${esc(loop.interface || "Unknown")}</span>
-    <strong>${esc(loop.status || "Unknown")}</strong>
-  </div>`;
 }
 
 function channelCard(channel) {
@@ -1621,94 +1516,6 @@ function closeDialog() {
 
 function lcmChannel(channelId) {
   return (window.__lastLcmChannels || []).find((item) => item.channel === channelId);
-}
-
-function simRmc(rmcId) {
-  return (window.__lastSimDashboard?.rmcs || []).find((item) => item.id === rmcId);
-}
-
-function simAnalog(channelId) {
-  return (window.__lastSimDashboard?.analog_inputs || []).find((item) => item.channel === channelId);
-}
-
-function openDimmerDialog(channelId) {
-  const channel = lcmChannel(channelId);
-  if (!channel) return;
-  const knownPercent = channel.percent !== null && channel.percent !== undefined;
-  const percent = knownPercent ? Math.round(Number(channel.percent)) : 0;
-  const acknowledged = knownPercent ? `${percent}%` : "Unknown";
-  const max = Number(channel.max_intensity || 100);
-  modal(`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="dimmer-title">
-    <div class="modal-head">
-      <h3 id="dimmer-title">${esc(channel.name)}</h3>
-      <button type="button" class="secondary icon-button" data-close-dialog aria-label="Close">x</button>
-    </div>
-    <p class="muted">${esc(channel.channel)} / acknowledged ${acknowledged} / maximum ${max}%</p>
-    <div class="slider-readout"><strong data-dimmer-readout>${acknowledged}</strong></div>
-    <input class="brightness-slider" type="range" min="0" max="${esc(max)}" step="1" value="${percent}" data-dimmer-slider="${esc(channel.channel)}" aria-label="${esc(channel.name)} brightness">
-    <div class="modal-actions">
-      <button type="button" class="secondary" data-dimmer-off="${esc(channel.channel)}">Off</button>
-      <button type="button" data-dimmer-restore="${esc(channel.channel)}">Restore</button>
-    </div>
-    <p class="channel-state">Slider movement previews the target. One command is sent when the value is released or committed from the keyboard.</p>
-  </section>`);
-}
-
-function openSimRmcDialog(rmcId) {
-  const rmc = simRmc(rmcId);
-  if (!rmc) return;
-  const nameField = rmc.bound
-    ? `<label>RMC name <input value="${esc(rmc.name || "")}" data-sim-name></label>`
-    : `<div class="notice warn">This RMC is not bound to a logical device. Diagnostics are read-only until HCM has a valid binding.</div>`;
-  const actions = rmc.bound
-    ? `<button type="button" class="secondary" data-close-dialog>Cancel</button><button type="button" data-save-sim-rmc="${esc(rmc.id)}">Save</button>`
-    : `<button type="button" data-close-dialog>Close</button>`;
-  modal(`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="sim-rmc-title">
-    <div class="modal-head">
-      <h3 id="sim-rmc-title">${esc(rmc.name || rmc.id)}</h3>
-      <button type="button" class="secondary icon-button" data-close-dialog aria-label="Close">x</button>
-    </div>
-    ${nameField}
-    <div class="diagnostic-grid">
-      ${kv("Logical ID", rmc.logical_identifier)}
-      ${kv("Permanent ID", rmc.id)}
-      ${kv("CAN loop", rmc.can_interface)}
-      ${kv("CAN node", rmc.can_node_address)}
-      ${kv("Room", rmc.room)}
-      ${kv("Last heartbeat", rmc.last_heartbeat)}
-      ${kv("Last seen", rmc.last_seen)}
-      ${kv("Firmware", rmc.firmware_version)}
-      ${kv("Hardware", rmc.hardware_revision)}
-      ${kv("Health flags", rmc.health_flags)}
-      ${kv("Faults", rmc.faults?.length ? rmc.faults.join(", ") : "None")}
-      ${kv("Binding", rmc.bound ? "Bound" : "Unbound")}
-    </div>
-    <div class="modal-actions">
-      ${actions}
-    </div>
-  </section>`);
-}
-
-function openSimAnalogDialog(channelId) {
-  const input = simAnalog(channelId);
-  if (!input || !input.config_enabled) return;
-  modal(`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="sim-ai-title">
-    <div class="modal-head">
-      <h3 id="sim-ai-title">${esc(input.name || input.channel)}</h3>
-      <button type="button" class="secondary icon-button" data-close-dialog aria-label="Close">x</button>
-    </div>
-    <label>Input name <input value="${esc(input.name || "")}" data-sim-name></label>
-    <div class="diagnostic-grid">
-      ${kv("Physical input", input.channel)}
-      ${kv("Firmware input", input.firmware_channel)}
-      ${kv("Source", input.source)}
-      ${kv("Unit", input.unit)}
-    </div>
-    <div class="modal-actions">
-      <button type="button" class="secondary" data-close-dialog>Cancel</button>
-      <button type="button" data-save-sim-ai="${esc(input.channel)}">Save</button>
-    </div>
-  </section>`);
 }
 
 function openSettingsDialog(channelId) {
@@ -2119,16 +1926,6 @@ document.addEventListener("click", async (event) => {
     openSettingsDialog(settings.dataset.settingsChannel);
     return;
   }
-  const simRmcSettings = event.target.closest("[data-sim-rmc-settings]");
-  if (simRmcSettings) {
-    openSimRmcDialog(simRmcSettings.dataset.simRmcSettings);
-    return;
-  }
-  const simAiSettings = event.target.closest("[data-sim-ai-settings]");
-  if (simAiSettings) {
-    openSimAnalogDialog(simAiSettings.dataset.simAiSettings);
-    return;
-  }
   const close = event.target.closest("[data-close-dialog]");
   if (close) {
     closeDialog();
@@ -2169,16 +1966,6 @@ document.addEventListener("click", async (event) => {
   const disableTouchscreen = event.target.closest("[data-disable-touchscreen-pin]");
   if (disableTouchscreen) {
     await disableTouchscreenPin(disableTouchscreen.dataset.disableTouchscreenPin);
-    return;
-  }
-  const saveSimRmc = event.target.closest("[data-save-sim-rmc]");
-  if (saveSimRmc) {
-    await saveSimRmcSettings(saveSimRmc.dataset.saveSimRmc);
-    return;
-  }
-  const saveSimAi = event.target.closest("[data-save-sim-ai]");
-  if (saveSimAi) {
-    await saveSimAnalogSettings(saveSimAi.dataset.saveSimAi);
     return;
   }
   const saveHvac = event.target.closest("[data-save-hvac]");
@@ -2344,13 +2131,6 @@ async function currentLcmChannels() {
   return data.channels;
 }
 
-async function currentSimDashboard() {
-  const identifier = selectedDeviceIdentifier();
-  const data = await api(`/device-admin/${encodeURIComponent(identifier)}/sim-dashboard`);
-  window.__lastSimDashboard = data;
-  return data;
-}
-
 async function setLcmLight(channel, value) {
   try {
     const channels = await currentLcmChannels();
@@ -2416,36 +2196,6 @@ async function saveLcmSettings(channel) {
         body: JSON.stringify({logical_name: existing.logical_name, active: maintenanceLocked}),
       });
     }
-    closeDialog();
-    await renderDeviceDetail(selectedDeviceIdentifier());
-  } catch (error) {
-    setError(error.message);
-  }
-}
-
-async function saveSimRmcSettings(rmcId) {
-  try {
-    const name = activeDialog.querySelector("[data-sim-name]").value.trim();
-    if (!name) throw new Error("Name is required");
-    await api(`/device-admin/${encodeURIComponent(selectedDeviceIdentifier())}/sim-rmcs/${encodeURIComponent(rmcId)}/settings`, {
-      method: "PATCH",
-      body: JSON.stringify({name}),
-    });
-    closeDialog();
-    await renderDeviceDetail(selectedDeviceIdentifier());
-  } catch (error) {
-    setError(error.message);
-  }
-}
-
-async function saveSimAnalogSettings(channel) {
-  try {
-    const name = activeDialog.querySelector("[data-sim-name]").value.trim();
-    if (!name) throw new Error("Name is required");
-    await api(`/device-admin/${encodeURIComponent(selectedDeviceIdentifier())}/sim-analog-inputs/${encodeURIComponent(channel)}/settings`, {
-      method: "PATCH",
-      body: JSON.stringify({name}),
-    });
     closeDialog();
     await renderDeviceDetail(selectedDeviceIdentifier());
   } catch (error) {

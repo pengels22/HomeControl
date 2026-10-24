@@ -40,12 +40,12 @@ jobs:
       - name: Test
         run: python -m pytest
       - name: Compile
-        run: python -m compileall -q 00_Heartbeat 01_HCM 02_SIM 03_LCM 04_RCM 05_PNL 07_config 08_servises 11_scripts 12_tests
+        run: python -m compileall -q 00_Heartbeat 01_HCM 03_LCM 04_RCM 05_PNL 07_config 08_servises 11_scripts 12_tests
       - name: Diff check
         run: git diff --check
       - name: Active configuration safety checks
         run: |
-          ! grep -RInE '192\.168\.60|CAN_250KBPS|250000' 02_SIM 04_RCM 07_config/02_SIM 07_config/04_RCM 07_config/06_RMC
+          ! grep -RInE '192\.168\.60|CAN_250KBPS|250000' 04_RCM 07_config/04_RCM 07_config/06_RMC
       - name: JavaScript syntax
         run: |
           node --check 01_HCM/www/app.js

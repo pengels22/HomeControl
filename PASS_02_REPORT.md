@@ -15,8 +15,8 @@ dependency audit: PNL replacement work is not yet complete.
 | Surface | Current consumer | Decision |
 | --- | --- | --- |
 | `01_HCM/entities.py` SIM/RMC state projection | Canonical read-only entity API | Preserve until PNL telemetry adapters replace it |
-| `02_SIM/main.py`, CAN helpers, `rmc_firmware.py` | Simulator, firmware tests, historical update paths | Preserve as compatibility-only |
-| `07_config/02_SIM`, `07_config/06_RMC` | Inventory, profiles, global configuration | Preserve; future fresh-install policy must hide deprecated roles |
+| Historical SIM protocol names and `09_database` compatibility fields | Historical update/telemetry records | Retain for compatibility; no active SIM implementation or provisioning path remains |
+| `07_config/06_RMC` | RMC firmware and recorded CAN protocol definitions | Active RMC firmware metadata remains; physical transport is separately gated |
 | `07_config/10_Common/manifest.py` and inventory | Deployment and device validation | Preserve parser compatibility; retirement enforcement deferred until PNL backplane exists |
 | Touchscreen SIM/RMC views | Existing preview and operator tooling | Preserve until PNL UI/backplane replacement |
 | `modules.module_type` and audit/event checks | Historical database rows and role transitions | Preserve; no destructive type rewrite |

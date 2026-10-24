@@ -32,7 +32,7 @@ The package manifests model:
 - Jetson HCM Docker deployment;
 - Conflict Heartbeat V3;
 - LAB1 simulation;
-- Linux modules SIM/LCM/RCM/PNL;
+- Linux modules LCM/RCM/PNL; the former SIM package is retired.
 - RMC firmware as a non-Linux target.
 
 RMC firmware is not installed through the generic Linux package path.
@@ -57,7 +57,6 @@ Use:
 
 Linux module packages remain under:
 
-- `07_config/02_SIM`
 - `07_config/03_LCM`
 - `07_config/04_RCM`
 - `07_config/05_PNL`
@@ -127,19 +126,12 @@ Do not store in Git:
 
 ## RMC firmware
 
-The approved update path is:
-
-HCM -> SIM -> CAN -> RMC
+Historical HCM -> SIM -> CAN -> RMC records remain readable for compatibility.
 
 Physical RMC bootloader transfer remains intentionally unavailable until the real bootloader/ACK/retry/verification transport is implemented and bench validated.
 
-## Simulator
-
-The local simulator can be started with:
-
-```sh
-.venv/bin/python 11_scripts/simulate_homecontrol.py
-```
+The former SIM simulator and service package are removed. PNL provides the
+active panel telemetry and local-alias path.
 
 Simulation must not be described as physical hardware validation.
 

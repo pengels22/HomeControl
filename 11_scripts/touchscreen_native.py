@@ -620,5 +620,5 @@ async def run(role: str, mode: str, api_mode: str = "simulated") -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(); parser.add_argument("--role", choices=("RCM", "LCM", "SIM"), default="SIM"); parser.add_argument("--mode", choices=("simulated", "orange_pi"), default="simulated"); parser.add_argument("--api-mode", choices=("simulated", "production"), default="simulated")
+    parser = argparse.ArgumentParser(); parser.add_argument("--role", choices=("RCM", "LCM"), default="RCM"); parser.add_argument("--mode", choices=("simulated", "orange_pi"), default="simulated"); parser.add_argument("--api-mode", choices=("simulated", "production"), default="simulated")
     args = parser.parse_args(); asyncio.run(run(args.role, args.mode, args.api_mode))

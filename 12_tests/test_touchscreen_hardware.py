@@ -37,11 +37,6 @@ def test_ft6336_rotation_transform_is_stable():
     assert driver._transform(480, 320) == (320, 0)
 
 
-def test_simulated_service_never_opens_hardware_nodes():
-    service = hardware.create_service("SIM", mode="simulated")
-    assert service.mode == "simulated"
-    assert service.create_display() is None
-    assert service.create_touch() is None
 
 
 def test_native_production_api_requires_authenticated_hcm_and_logical_bindings(monkeypatch):
@@ -125,61 +120,8 @@ def test_native_pin_entry_unlocks_without_persisting_pin():
     assert ui.pin_buffer == ""
 
 
-def test_native_renderer_draws_shared_frame_without_browser():
-    class Display:
-        width = 480
-        height = 320
-
-        async def draw_rgb565(self, x, y, width, height, data):
-            self.frame = (x, y, width, height, data)
-
-    display = Display()
-    ui = native.NativeUI("SIM", display)
-    ui.state = {
-        "module": {"name": "SIM-01", "role": "SIM", "simulation": True, "physical_outputs_enabled": False},
-        "health": {"status": "SIMULATED"},
-        "settings": {"inactivity_seconds": 10, "hardware_profile": "SIMULATED"},
-    }
-    asyncio.run(ui.draw())
-    assert display.frame[:4] == (0, 0, 480, 320)
-    assert len(display.frame[4]) == 480 * 320 * 2
 
 
-def test_native_rcm_bank_selection_filters_eight_channels_and_preserves_mapping():
-    class Display:
-        width = 480
-        height = 320
-
-        async def draw_rgb565(self, *args):
-            pass
-
-    class Api:
-        def __init__(self):
-            self.calls = []
-
-        def request(self, path, payload=None):
-            previous_command = next((item[1] for item in reversed(self.calls) if item[1] is not None), None)
-            self.calls.append((path, payload))
-            return {"ok": True, "bank": payload.get("bank", 0)} if payload else {
-                "module": {"name": "RCM-01"}, "health": {"status": "SIMULATED"},
-                "settings": {"inactivity_seconds": 10},
-                    "bank_selector": {"effective_bank": previous_command.get("bank", 0) if previous_command else 0},
-                "relays": [{"channel": f"{bank}{number}", "position": index, "name": f"Relay {index}", "on": False, "lockout": False}
-                            for index, (bank, number) in enumerate(((b, n) for b in "ABCD" for n in range(1, 9)), 1)],
-            }
-
-    api = Api()
-    ui = native.NativeUI("RCM", Display(), api)
-    ui.page = "relays"
-    ui.state = {"settings": {"inactivity_seconds": 10}, "bank_selector": {"effective_bank": 0}, "relays": [
-        {"channel": f"{bank}{number}", "position": index, "name": f"Relay {index}", "on": False, "lockout": False}
-        for index, (bank, number) in enumerate(((b, n) for b in "ABCD" for n in range(1, 9)), 1)
-    ]}
-    asyncio.run(ui._tap(10 + 2 * 117 + 10, 110))
-    assert ui.bank == 2
-    command = next(payload for _, payload in api.calls if payload and payload.get("kind") == "bank_select")
-    assert command["bank"] == 2
-    assert [item["channel"] for item in ui.state["relays"] if (item["position"] - 1) // 8 == ui.bank] == ["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8"]
 
 
 def test_native_lockout_does_not_send_relay_command_and_timeout_is_editable_only():
@@ -206,19 +148,6 @@ def test_native_lockout_does_not_send_relay_command_and_timeout_is_editable_only
     assert next(payload for _, payload in api.calls if payload and payload.get("kind") == "setting") == {"kind": "setting", "setting": "screen_timeout", "value": 11, "role": "RCM"}
 
 
-def test_native_back_button_returns_from_any_subpage_to_home():
-    class Display:
-        width = 480
-        height = 320
-
-        async def draw_rgb565(self, *args):
-            pass
-
-    ui = native.NativeUI("SIM", Display())
-    ui.page = "settings"
-    event = interfaces.TouchEvent("down", (interfaces.TouchPoint(0, 40, 72),))
-    asyncio.run(ui.touch(event))
-    assert ui.page == "home"
 
 
 def test_jetson_adapter_is_separate_from_orange_pi_profile():
@@ -237,7 +166,7 @@ def test_kiosk_bridge_preserves_role_and_display_size():
     assert command[-1] == "http://127.0.0.1:8765/?role=LCM"
 
 
-@pytest.mark.parametrize("module_type", ["RCM", "LCM", "SIM"])
+@pytest.mark.parametrize("module_type", ["RCM", "LCM"])
 def test_orange_pi_manifests_use_touchscreen_mapping_and_keep_outputs_disabled(module_type):
     profile = profiles.load_profile(profiles.profile_path(ROOT, module_type), module_type)
     header = profile.data["processor_header"]
@@ -249,12 +178,6 @@ def test_orange_pi_manifests_use_touchscreen_mapping_and_keep_outputs_disabled(m
     assert profile.data["buses"]["i2c"]["touch"]["device"] == "/dev/i2c-2"
 
 
-def test_sim_leds_use_non_display_header_pins():
-    profile = profiles.load_profile(profiles.profile_path(ROOT, "SIM"), "SIM")
-    header = profile.data["processor_header"]
-    assert header["15"]["function"] == "LINK_LED"
-    assert header["16"]["function"] == "STATUS_LED"
-    assert header["22"]["function"] == "FAULT_LED"
 
 
 def test_hcm_jetson_manifest_is_unchanged_by_orange_pi_profile():

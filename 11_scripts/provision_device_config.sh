@@ -7,7 +7,7 @@ Usage:
   provision_device_config.sh <device-type> <user@host> [remote-dir]
 
 Device types:
-  HCM, SIM, LCM, RCM, PNL, CONFLICT, LAB
+  HCM, LCM, RCM, PNL, CONFLICT, LAB
 
 Examples:
   11_scripts/provision_device_config.sh RCM orangepi@192.168.20.20
@@ -30,7 +30,6 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 case "$DEVICE_TYPE" in
   HCM) CONFIG_DIR="01_HCM" ;;
-  SIM) CONFIG_DIR="02_SIM" ;;
   LCM) CONFIG_DIR="03_LCM" ;;
   RCM) CONFIG_DIR="04_RCM" ;;
   PNL) CONFIG_DIR="05_PNL" ;;

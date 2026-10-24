@@ -532,13 +532,6 @@ def test_conflict_status_signature_verification_rejects_tampering(monkeypatch, t
         management._verify_conflict_status_signature(response)
 
 
-def test_sim_physical_ai_inventory_and_supported_rmc_binding_channels():
-    capabilities = {'hexa-aio', 'rmc-can'}
-
-    assert management._sim_analog_channels() == [f'AI-{i}' for i in range(1, 11)]
-    assert management._module_supports_channel('SIM', 'AI-10', capabilities) is True
-    assert management._module_supports_channel('SIM', 'AI-11', capabilities) is False
-    assert management._module_supports_channel('SIM', 'RMC:CAN0:1', capabilities) is True
 
 
 @pytest.mark.asyncio
@@ -847,23 +840,6 @@ async def test_rcm_channels_use_real_bindings_and_disable_inhibited_outputs(monk
 
 
 @pytest.mark.asyncio
-async def test_rcm_unbound_channels_keep_configuration_and_simulation_capabilities(monkeypatch):
-    conn = FakeDeviceAdminConn()
-    conn.module['last_state']['state']['lab_role'] = 'RCM'
-    stored = management.module_infra.default_rcm_config()
-    stored[1]['name'] = 'Unbound Spare'
-    monkeypatch.setattr(management, '_stored_rcm_channels', lambda hostname: stored)
-    monkeypatch.setattr(management.db, 'acquire', lambda: FakeAcquire(conn))
-
-    result = await management.get_rcm_channels('LAB1')
-
-    unbound = result['channels'][1]
-    assert unbound['name'] == 'Unbound Spare'
-    assert unbound['configuration_enabled'] is True
-    assert unbound['simulation'] is True
-    assert unbound['simulation_control_enabled'] is True
-    assert unbound['control_enabled'] is False
-    assert unbound['disabled_reason'] == 'No logical binding'
 
 
 @pytest.mark.asyncio

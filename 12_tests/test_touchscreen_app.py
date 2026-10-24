@@ -19,7 +19,7 @@ def client():
         yield test_client
 
 
-@pytest.mark.parametrize('role', ['RCM', 'LCM', 'SIM', 'HCM'])
+@pytest.mark.parametrize('role', ['RCM', 'LCM', 'HCM'])
 def test_each_role_has_shared_state_and_simulation_safety(client, role):
     response = client.get('/api/touchscreen/state', params={'role': role})
     assert response.status_code == 200
@@ -149,13 +149,6 @@ def test_shared_contract_normalizes_touchscreen_commands():
     assert dimmer['value'] is False
 
 
-def test_sim_rmc_data_is_stale_safe_and_hcm_sensor_scope_is_external_only(client):
-    sim = client.get('/api/touchscreen/state', params={'role': 'SIM'}).json()
-    assert sim['rooms'][0]['online'] is False
-    assert sim['rooms'][0]['temperature_f'] is None
-    hcm = client.get('/api/touchscreen/state', params={'role': 'HCM'}).json()
-    assert [item['name'] for item in hcm['external_sensors']] == ['FIRE input', 'AC monitor']
-    assert all(item['value'] == 'Unavailable' for item in hcm['external_sensors'])
 
 
 def test_static_preview_assets_are_available(client):
@@ -182,7 +175,7 @@ def test_lcm_control_markup_hides_hardware_identifiers():
     assert "<small>${esc(item.channel)}</small>" not in source
 
 
-@pytest.mark.parametrize('role', ['HCM', 'RCM', 'LCM', 'SIM'])
+@pytest.mark.parametrize('role', ['HCM', 'RCM', 'LCM'])
 def test_only_screen_timeout_is_editable_and_persists(client, role):
     adapter = touchscreen.adapters[role]
     timeout_file = adapter.settings_path

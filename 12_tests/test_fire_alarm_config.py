@@ -33,12 +33,10 @@ def test_field_module_configs_select_explicit_real_io_without_commissioning_outp
     hcm = yaml_config.load_yaml(ROOT / '07_config/01_HCM/hcm.yaml')
     rcm = yaml_config.load_yaml(ROOT / '07_config/04_RCM/rcm.yaml')
     lcm = yaml_config.load_yaml(ROOT / '07_config/03_LCM/lcm.yaml')
-    sim = yaml_config.load_yaml(ROOT / '07_config/02_SIM/sim.yaml')
     assert hcm['safety']['fire_input']['mode'] == 'physical'
-    assert all(item['io']['mode'] == 'real' for item in (rcm, lcm, sim))
+    assert all(item['io']['mode'] == 'real' for item in (rcm, lcm))
     assert rcm['io']['mode'] == 'real'
     assert lcm['io']['mode'] == 'real'
-    assert sim['io']['mode'] == 'real'
-    for path in ('04_RCM/hardware_pins.yaml', '03_LCM/hardware_pins.yaml', '02_SIM/hardware_pins.yaml'):
+    for path in ('04_RCM/hardware_pins.yaml', '03_LCM/hardware_pins.yaml'):
         profile = yaml_config.load_yaml(ROOT / '07_config' / path)
         assert profile.get('physical_output_enabled', False) is False

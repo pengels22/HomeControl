@@ -628,10 +628,6 @@ th {
   background: #cf6b62;
 }
 
-.sim-panel {
-  padding: 14px;
-}
-
 .rmc-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -736,8 +732,7 @@ th {
 
 .reading span,
 .ai-reading span,
-.diagnostic-grid span,
-.sim-diagnostics span {
+.diagnostic-grid span {
   display: block;
   color: #98a5ad;
   font-size: 0.72rem;
@@ -745,8 +740,7 @@ th {
 
 .reading strong,
 .ai-reading strong,
-.diagnostic-grid strong,
-.sim-diagnostics strong {
+.diagnostic-grid strong {
   display: block;
   margin-top: 2px;
   overflow-wrap: anywhere;
@@ -758,33 +752,19 @@ th {
   color: #ffc976;
 }
 
-.sim-panel summary {
-  cursor: pointer;
-  color: #8bd8c3;
-  font-weight: 800;
-}
-
-.diagnostic-grid,
-.sim-diagnostics {
+.diagnostic-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   margin-top: 8px;
 }
 
-.diagnostic-grid div,
-.sim-diagnostics div {
+.diagnostic-grid div {
   min-width: 0;
   padding: 8px;
   border: 1px solid #263139;
   border-radius: 6px;
   background: #11161a;
-}
-
-.sim-ai-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
 }
 
 .ai-card {
@@ -1178,14 +1158,12 @@ th {
   }
 
   .lcm-columns,
-  .rmc-grid,
-  .sim-ai-grid {
+  .rmc-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .rmc-readings,
   .diagnostic-grid,
-  .sim-diagnostics,
   .detail-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1221,7 +1199,7 @@ th {
     flex-direction: column;
   }
 
-  .identity-grid, .rcm-grid, .summary-grid, .dashboard-grid, .lcm-columns, .rmc-grid, .sim-ai-grid {
+  .identity-grid, .rcm-grid, .summary-grid, .dashboard-grid, .lcm-columns, .rmc-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1247,7 +1225,6 @@ th {
 
   .rmc-readings,
   .diagnostic-grid,
-  .sim-diagnostics,
   .detail-fields {
     grid-template-columns: 1fr;
   }

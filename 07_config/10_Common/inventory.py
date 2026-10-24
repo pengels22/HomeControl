@@ -96,7 +96,6 @@ def package_for_device(device_type: str, *, hardware_platform: str | None = None
         if entry.device_type == device_type:
             return entry.package
     package_by_type = {
-        "SIM": "02_SIM",
         "LCM": "03_LCM",
         "RCM": "04_RCM",
         "PNL": "05_PNL",

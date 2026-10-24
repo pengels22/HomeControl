@@ -46,7 +46,7 @@ def assignment_lifecycle_tags(path):
 
 
 def test_global_configs_load_from_numbered_directories_with_paths():
-    for component in ('HCM', 'SIM', 'LCM', 'RCM', 'PNL', 'RMC'):
+    for component in ('HCM', 'LCM', 'RCM', 'PNL', 'RMC'):
         cfg = global_config.load_global_config(component)
 
         assert cfg.component == component
@@ -90,10 +90,8 @@ def test_global_config_validation_rejects_bad_type_and_range():
 
 def test_phase3_pinned_values_are_available():
     hcm = global_config.load_global_config('HCM')
-    sim = global_config.load_global_config('SIM')
     rmc = global_config.load_global_config('RMC')
 
     assert hcm.Heartbeat_TCP_Port == 6004
     assert hcm.Door_Open_Pulse == 3000
-    assert sim.Hexa_12V_Restart_Off_Time == 5000
-    assert sim.CAN_Bitrate == rmc.CAN_Bitrate == 125000
+    assert rmc.CAN_Bitrate == 125000

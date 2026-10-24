@@ -17,7 +17,7 @@ from typing import Any
 
 
 LAB1_DEVICE_ID = "2ccf675d3414"
-ALLOWED_ROLES = {"UNASSIGNED", "RCM", "SIM", "LCM"}
+ALLOWED_ROLES = {"UNASSIGNED", "RCM", "LCM"}
 OPERATION_HISTORY_KEY = "role_operation_history"
 
 

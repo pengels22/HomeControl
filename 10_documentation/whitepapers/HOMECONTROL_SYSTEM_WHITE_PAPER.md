@@ -101,23 +101,14 @@ The active software architecture supports:
 
 Physical output remains disabled pending commissioning.
 
-### SIM — Sensor Interface Module
+### Retired SIM architecture
 
-SIM is the field sensor/CAN gateway.
-
-Implemented responsibilities include:
-
-- Linux SocketCAN receive transport;
-- CAN interfaces can0, can1, and can2;
-- RMC telemetry decoding;
-- RMC online/stale tracking;
-- simulated Hexa analog, digital, USB, and switched-12 V state;
-- RMC firmware update simulation;
-- fail-closed rejection of physical RMC firmware updates until a real bootloader transport exists.
-
-All active RMC/SIM CAN configuration is 125000 bit/s.
-
-Physical Hexa ADC, DIO, and switched-12 V adapters remain incomplete.
+The obsolete Sensor Interface Module (SIM) Linux gateway has been removed from
+the active repository. Fresh installations cannot register or provision a SIM.
+Historical SIM module rows, migration descriptions, audit records, and
+classical CAN protocol names remain readable for compatibility; they are not an
+active runtime dependency. Room sensing replacement work uses the PNL local-alias
+and telemetry architecture and requires explicit deployed-device mapping.
 
 ### RMC — Room Monitoring Cluster
 
@@ -189,7 +180,7 @@ The principal communication planes are:
 - HCM API: HTTP/REST;
 - HCM <-> Linux modules: persistent TCP 6501 using length-prefixed JSON;
 - Unified Heartbeat V3: TCP 6004 using HTTP with HMAC authentication in the current secured configuration;
-- SIM <-> RMC: Classical CAN at 125000 bit/s;
+- Historical SIM <-> RMC CAN records remain at their recorded 125000 bit/s;
 - local module <-> heartbeat daemon: Unix domain socket.
 
 ## 4. Device Identity
@@ -442,9 +433,6 @@ A green CI run must not be described as physical commissioning.
 
 The following remain intentionally incomplete or uncommissioned:
 
-- physical SIM ADS1115 input implementation;
-- physical SIM Hexa DIO;
-- physical SIM switched 12 V;
 - RMC physical CAN bootloader/update transport;
 - final Shelly device identity/endpoints;
 - production WebAuthn verification;

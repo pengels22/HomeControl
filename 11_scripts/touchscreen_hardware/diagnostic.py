@@ -20,7 +20,7 @@ else:
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="HomeControl touchscreen hardware diagnostic")
-    parser.add_argument("--role", choices=["RCM", "LCM", "SIM"], default="RCM")
+    parser.add_argument("--role", choices=["RCM", "LCM"], default="RCM")
     parser.add_argument("--mode", choices=["simulated", "orange_pi"], default="simulated")
     args = parser.parse_args()
     service = create_service(args.role, args.mode)

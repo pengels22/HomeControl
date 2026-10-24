@@ -69,11 +69,8 @@ class LcmChannelSettingsIn(BaseModel):
     max_intensity: int | None = Field(default=None, ge=0, le=100)
     fade_seconds: float | None = Field(default=None, ge=0, le=60)
 
-class SimNameIn(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
-
 class ModuleRoleChangeIn(BaseModel):
-    requested_role: Literal['UNASSIGNED','RCM','SIM','LCM']
+    requested_role: Literal['UNASSIGNED','RCM','LCM','PNL']
     confirm: bool = False
 
 class FireStateIn(BaseModel):
@@ -130,19 +127,10 @@ class UserPasswordChangeIn(BaseModel):
 
 class PairingKeyCreateIn(BaseModel):
     label: str
-    target_type: Literal['HCM_SCREEN','PNL','RCM','LCM','SIM','RMC','OTHER']
+    target_type: Literal['HCM_SCREEN','PNL','RCM','LCM','RMC','OTHER']
     ttl_minutes: int = Field(default=30, ge=1, le=1440)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 class PairingKeyVerifyIn(BaseModel):
     pairing_key: str
     used_by: str | None = None
-
-class RmcFirmwareUpdateIn(BaseModel):
-    target_rmc_id: str
-    sim_hostname: str
-    can_interface: str
-    node_id: int = Field(ge=0, le=15)
-    firmware_version: str
-    firmware_image_b64: str
-    hardware_revision: str = 'RMC-NANO-ATMEGA328P'

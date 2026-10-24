@@ -137,7 +137,7 @@ stale; it does not infer health from saved configuration alone.
   rejects demotion of the final active ADMIN.
 - The SIM UI enumerates ten requested physical analog input rows. The checked-in
   SIM firmware/config still defines eight Hexa AIO analog inputs (`A1`-`A8`) in
-  `07_config/02_SIM/sim.yaml`; `AI-9` and `AI-10` have no verified module-local
+  historical SIM configuration (retired in Pass 9.1); `AI-9` and `AI-10` have no verified module-local
   telemetry/config source yet and remain `Unknown` unless HCM state later
   reports them.
 - Production SIM room/RMC assignment depends on existing HCM logical devices,

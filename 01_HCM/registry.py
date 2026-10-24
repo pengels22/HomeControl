@@ -21,8 +21,8 @@ protocol = import_module('08_servises.common.protocol')
 module_infra = import_module('08_servises.common.module_infra')
 log = logging.getLogger(__name__)
 
-MODULE_TYPES = ('RCM', 'LCM', 'SIM', 'PNL')
-LAB1_SIMULATED_MODULE_TYPES = {'RCM', 'SIM', 'LCM'}
+MODULE_TYPES = ('RCM', 'LCM', 'PNL')
+LAB1_SIMULATED_MODULE_TYPES = {'RCM', 'LCM'}
 DEVICE_URI_PREFIX = 'urn:homecontrol:device:'
 
 
@@ -382,7 +382,7 @@ class ModuleRegistry:
 
     async def _base_config(self, module_type: str, logical_id: str | None = None, device_id: str | None = None) -> dict[str, Any]:
         path = Path(settings.config_root) / {
-            'RCM':'04_RCM','LCM':'03_LCM','SIM':'02_SIM','PNL':'05_PNL'
+            'RCM':'04_RCM','LCM':'03_LCM','PNL':'05_PNL'
         }[module_type] / f'{module_type.lower()}.yaml'
         if not path.exists():
             result = {'version': 1, 'config': {}}

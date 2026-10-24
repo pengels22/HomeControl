@@ -9,9 +9,9 @@ import yaml
 
 
 SCHEMA_VERSION = 1
-DEVICE_TYPES = {"HCM", "SIM", "LCM", "RCM", "PNL", "RMC", "CONFLICT", "LAB"}
+DEVICE_TYPES = {"HCM", "LCM", "RCM", "PNL", "RMC", "CONFLICT", "LAB"}
 DEPLOYMENT_ACTIONS = {"install", "update", "verify", "rollback", "firmware"}
-LINUX_DEVICE_TYPES = {"HCM", "SIM", "LCM", "RCM", "PNL", "CONFLICT", "LAB"}
+LINUX_DEVICE_TYPES = {"HCM", "LCM", "RCM", "PNL", "CONFLICT", "LAB"}
 SERVICE_RE = re.compile(r"^[A-Za-z0-9_.@:-]+\.(service|timer)$")
 PACKAGE_RE = re.compile(r"^[0-9]{2}_[A-Z0-9_]+$")
 SCRIPT_RE = re.compile(r"^[A-Za-z0-9_.-]+\.sh$")

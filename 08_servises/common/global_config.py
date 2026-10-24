@@ -9,7 +9,6 @@ class GlobalConfigError(ValueError):
 
 COMPONENT_FILES = {
     'HCM': Path('07_config/01_HCM/global_var.py'),
-    'SIM': Path('07_config/02_SIM/global_config_SIM.py'),
     'LCM': Path('07_config/03_LCM/global_config_LCM.py'),
     'RCM': Path('07_config/04_RCM/global_config_RCM.py'),
     'PNL': Path('07_config/05_PNL/global_config_PNL.py'),
@@ -48,13 +47,6 @@ REQUIRED = {
         'Safety_Aux_Relay_Pulse': (int, 0, 60000),
         'Updater_Module_Poll_Interval': (int, 1, 60000),
         'Updater_Module_Return_Timeout': (int, 1, 3600000),
-    },
-    'SIM': {
-        'CAN_Bitrate': (int, 1, 1000000),
-        'Hexa_12V_Restart_Off_Time': (int, 0, 60000),
-        'Module_Connect_Backoff_Initial': (int, 0, 60000),
-        'Module_Connect_Backoff_Max': (int, 1, 300000),
-        'Safety_Fail_Safe_On_Unknown': (bool, None, None),
     },
     'LCM': {
         'Lighting_Default_Fade_Steps': (int, 1, 1000),

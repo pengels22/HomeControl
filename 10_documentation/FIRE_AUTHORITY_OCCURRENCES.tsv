@@ -123,7 +123,6 @@ path	line	component/classification	term:count (case-insensitive, overlapping sea
 01_HCM/www/app.js	231	HCM authority/API/UI	fire:4,fire_alarm:1,fire_alarm_s:1
 01_HCM/www/app.js	309	HCM authority/API/UI	fire:1
 01_HCM/www/app.js	321	HCM authority/API/UI	fire:2
-02_SIM/main.py	435	SIM commanded safety/local safe-off only	fire:1
 03_LCM/main.py	69	LCM commanded safety/local safe-off only	fire:1
 04_RCM/main.py	75	RCM commanded safety/local safe-off only	fire:1
 07_config/01_HCM/Pinout.md	24	Configuration/manifests/deployment (component in path)	fire:1

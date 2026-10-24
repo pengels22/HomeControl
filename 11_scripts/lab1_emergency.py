@@ -27,9 +27,9 @@ HTML = """<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport c
 DYNAMIC_SCRIPT = r"""<script>
 function renderRoleInterface(config, health){
   const role=config.role||'UNASSIGNED', admin=config.user?.role==='ADMIN', channels=config.channels||[];
-  if(role==='UNASSIGNED'||role==='SIM'){
+  if(role==='UNASSIGNED'){
     const identity=health?.identity||{};
-    $('channels').innerHTML=`<div class=box><b>${role==='SIM'?'SIM dashboard':'Unassigned module'}</b><br><span class=muted>Role: ${esc(role)} · Device: ${esc(identity.device_id||'Unknown')} · Simulation: ${identity.simulation===true?'Enabled':'Unknown'} · Physical outputs: ${identity.physical_outputs_enabled===false?'Disabled':'Unknown'}</span><p class=muted>${role==='SIM'?'No output controls are exposed for this simulation role.':'Assign an operational role through authenticated HCM administration before configuring outputs.'}</p></div>`;return}
+    $('channels').innerHTML=`<div class=box><b>Unassigned module</b><br><span class=muted>Role: ${esc(role)} · Device: ${esc(identity.device_id||'Unknown')} · Simulation: ${identity.simulation===true?'Enabled':'Unknown'} · Physical outputs: ${identity.physical_outputs_enabled===false?'Disabled':'Unknown'}</span><p class=muted>Assign an operational role through authenticated HCM administration before configuring outputs.</p></div>`;return}
   const groups=role==='RCM'?[['Relays',channels]]:[['Relays',channels.filter(x=>x.type==='Relay')],['0-10V dimmers',channels.filter(x=>x.type==='0-10V')],['110V dimmers',channels.filter(x=>x.type==='110V')]];
   $('channels').innerHTML=groups.map(([title,items])=>`<div><h3>${title} <span class=meta>${items.length}</span></h3>${items.map(x=>`<article class=channel><b>${esc(x.name)||'Unnamed'}</b><div class=meta>${esc(x.channel)} · ${esc(x.type||'Relay')} · ${x.lockout?'Maintenance locked':'Available'}</div><label class=meta>Name <input data-name=${esc(x.channel)} value="${esc(x.name)}" ${admin?'':'disabled'}></label><label class=meta><input type=checkbox data-lock=${esc(x.channel)} ${x.lockout?'checked':''} ${admin?'':'disabled'}> Lockout</label>${role==='LCM'?`<label class=meta><input type=checkbox data-light=${esc(x.channel)} ${x.emergency_lighting?'checked':''} ${admin?'':'disabled'}> eLight</label>${x.type!=='Relay'?`<label class=meta>Max brightness <input type=number min=0 max=100 data-max=${esc(x.channel)} value=${x.max_intensity??''} ${admin?'':'disabled'}></label><label class=meta>Fade seconds <input type=number min=0 max=3600 step=.1 data-fade=${esc(x.channel)} value=${x.fade_seconds??3} ${admin?'':'disabled'}></label>`:''}`:''}<div class=meta>Simulated state: Unknown</div></article>`).join('')}</div>`).join('');
 }
@@ -51,7 +51,7 @@ def audit(action: str, user: str) -> None:
 
 def active_role() -> str:
     role = str(state().get('role') or 'UNASSIGNED').upper()
-    return role if role in {'RCM', 'LCM', 'SIM', 'UNASSIGNED'} else 'UNASSIGNED'
+    return role if role in {'RCM', 'LCM', 'UNASSIGNED'} else 'UNASSIGNED'
 
 def role_store(role: str):
     return infra.LocalConfigStore(RUNTIME_ROOT, role, 'lab1')

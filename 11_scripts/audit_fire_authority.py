@@ -10,7 +10,6 @@ TERMS = ['fire', 'fire_alarm', 'fire_alarm_s', 'fire_alarm_P', 'life_safety', 'S
 CLASSES = {
     '00_Heartbeat': 'Conflict/Heartbeat supervision and independent input support',
     '01_HCM': 'HCM authority/API/UI',
-    '02_SIM': 'SIM commanded safety/local safe-off only',
     '03_LCM': 'LCM commanded safety/local safe-off only',
     '04_RCM': 'RCM commanded safety/local safe-off only',
     '05_PNL': 'PNL interface only',

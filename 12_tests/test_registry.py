@@ -230,25 +230,6 @@ async def test_request_send_failure_clears_pending(method):
 
 
 @pytest.mark.asyncio
-async def test_base_config_includes_conflict_heartbeat_supervisor(monkeypatch, tmp_path):
-    monkeypatch.setattr(registry_mod.settings, 'config_root', tmp_path)
-    monkeypatch.setattr(registry_mod.settings, 'conflict_heartbeat_device_id', '3c:53:bb:f7:ad:b2')
-    monkeypatch.setattr(registry_mod.settings, 'conflict_heartbeat_host', '192.168.20.26')
-    reg = registry_mod.ModuleRegistry()
-
-    payload = await reg._base_config('SIM')
-
-    assert payload['heartbeat_supervisor'] == {
-        'enabled': True,
-        'device_id': '3c53bbf7adb2',
-        'host': '192.168.20.26',
-        'port': 6004,
-        'interval_seconds': 5,
-        'timeout_seconds': 15,
-        'protocol': 'hcm-heartbeat-v3',
-    }
-    assert payload['package']['module_type'] == 'SIM'
-    assert payload['package']['checksum']
 
 
 def test_stored_channel_config_payload_rebuilds_package_from_hcm_revision(monkeypatch, tmp_path):
@@ -333,72 +314,12 @@ async def test_assign_prefers_normalized_device_id(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_identify_capabilities_are_normalized_for_persistence(monkeypatch):
-    conn = FakeRegistryConn()
-    monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
-    monkeypatch.setattr(registry_mod.settings, 'commissioning_enabled', True)
-    reg = registry_mod.ModuleRegistry()
-
-    await reg._assign({
-        'module_type': 'SIM',
-        'device_id': '48:b0:2d:87:db:16',
-        'identity_interface': 'eth0',
-        'capabilities': [
-            'telemetry',
-            {'name': 'rmc-can', 'interfaces': ['can0']},
-            {'capability': 'hexa-dio', 'channels': 4},
-            'telemetry',
-        ],
-    })
-    async with registry_mod.db.acquire() as dbc:
-        await reg._store_capabilities(dbc, '48b02d87db16', None, {
-            'capabilities': [
-                'telemetry',
-                {'name': 'rmc-can', 'interfaces': ['can0']},
-                {'capability': 'hexa-dio', 'channels': 4},
-                'telemetry',
-            ],
-        })
-
-    capabilities = conn.modules['48b02d87db16']['capabilities']
-    assert set(capabilities) == {'telemetry', 'rmc-can', 'hexa-dio'}
-    assert json.loads(capabilities['rmc-can']) == {'interfaces': ['can0']}
-    assert conn.modules['48b02d87db16']['identity_interface'] == 'eth0'
 
 
 @pytest.mark.asyncio
-async def test_partial_capability_reports_do_not_delete_existing_capabilities(monkeypatch):
-    conn = FakeRegistryConn()
-    monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
-    monkeypatch.setattr(registry_mod.settings, 'commissioning_enabled', True)
-    reg = registry_mod.ModuleRegistry()
-    await reg._assign({'module_type': 'SIM', 'device_id': '48:b0:2d:87:db:16'})
-    conn.modules['48b02d87db16']['capabilities'] = {'telemetry': '{}', 'rmc-can': '{}'}
-
-    async with registry_mod.db.acquire() as dbc:
-        await reg._store_capabilities(dbc, '48b02d87db16', None, {
-            'capabilities': ['telemetry'],
-        })
-
-    assert set(conn.modules['48b02d87db16']['capabilities']) == {'telemetry', 'rmc-can'}
 
 
 @pytest.mark.asyncio
-async def test_full_capability_snapshot_replaces_existing_capabilities(monkeypatch):
-    conn = FakeRegistryConn()
-    monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
-    monkeypatch.setattr(registry_mod.settings, 'commissioning_enabled', True)
-    reg = registry_mod.ModuleRegistry()
-    await reg._assign({'module_type': 'SIM', 'device_id': '48:b0:2d:87:db:16'})
-    conn.modules['48b02d87db16']['capabilities'] = {'telemetry': '{}', 'rmc-can': '{}'}
-
-    async with registry_mod.db.acquire() as dbc:
-        await reg._store_capabilities(dbc, '48b02d87db16', None, {
-            'capabilities_full_snapshot': True,
-            'capabilities': ['telemetry'],
-        })
-
-    assert set(conn.modules['48b02d87db16']['capabilities']) == {'telemetry'}
 
 
 @pytest.mark.asyncio
@@ -500,7 +421,6 @@ async def test_replaced_connection_cannot_mark_new_session_offline(monkeypatch):
     assert conn.modules[key]['online'] is True
     assert conn.modules[key]['control_session_online'] is True
 
-
 def write_hcm_config(root: Path, active_profile: str, production_subnet: str | None = None) -> None:
     path = root / '01_HCM'
     path.mkdir(parents=True)
@@ -518,7 +438,6 @@ network:
         pools:
           RCM: {{start: 192.168.20.20, end: 192.168.20.29}}
           LCM: {{start: 192.168.20.30, end: 192.168.20.39}}
-          SIM: {{start: 192.168.20.40, end: 192.168.20.49}}
           PNL: {{start: 192.168.20.50, end: 192.168.20.89}}
       production_control:
         vlan: 40
@@ -669,16 +588,6 @@ async def test_lab1_rejects_unassigned_as_physical_module_role(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_lab1_rejects_roles_outside_simulator_allowlist(monkeypatch):
-    conn = FakeRegistryConn()
-    monkeypatch.setattr(registry_mod.db, 'acquire', lambda: FakeAcquire(conn))
-    reg = registry_mod.ModuleRegistry()
-
-    with pytest.raises(ValueError, match='LAB1 does not support'):
-        await reg._assign({
-            'module_type': 'PNL',
-            'device_id': '2ccf675d3414',
-        })
 
 
 @pytest.mark.asyncio

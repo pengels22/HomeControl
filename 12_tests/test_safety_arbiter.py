@@ -8,7 +8,6 @@ arb = import_module('08_servises.common.safety_arbiter')
 fire_input = import_module('08_servises.common.fire_input')
 rcm = import_module('04_RCM.main')
 lcm = import_module('03_LCM.main')
-sim_mod = import_module('02_SIM.main')
 
 
 def decision(channel, command, conditions=None, emergency=None, hvac=None):
@@ -170,49 +169,3 @@ async def test_lcm_lockout_immediately_deenergizes_existing_outputs():
     assert result['arbitration']
     assert state['relays']['A1'] is False
     assert state['lv_dimmers']['10-1']['percent'] == 0.0
-
-
-@pytest.mark.asyncio
-async def test_sim_hexa_output_cannot_bypass_lockout():
-    cfg = sim_mod.common_cfg.load_yaml(sim_mod.Path(__file__).resolve().parents[1] / '07_config/02_SIM/sim.yaml')
-    cfg['io'] = {'mode': 'simulated'}
-    agent = sim_mod.SIMAgent(cfg)
-    await agent.apply_command({'op': 'safety_state', 'conditions': {'maintenance_lockout': True}})
-
-    result = await agent.apply_command({'op': 'set_hexa_12v', 'channel': 'sw1', 'value': True})
-
-    assert result['value'] is False
-    assert result['arbitration']['reason'] == 'maintenance_lockout'
-
-
-@pytest.mark.asyncio
-async def test_sim_hexa_inputs_are_not_part_of_lockout():
-    cfg = sim_mod.common_cfg.load_yaml(sim_mod.Path(__file__).resolve().parents[1] / '07_config/02_SIM/sim.yaml')
-    cfg['io'] = {'mode': 'simulated'}
-    agent = sim_mod.SIMAgent(cfg)
-    await agent.apply_command({'op': 'safety_state', 'conditions': {'maintenance_lockout': True}})
-
-    command_result = await agent.apply_command({'op': 'set_hexa_dio', 'channel': 'dio1', 'value': True})
-    input_result = await agent.apply_command({'op': 'inject_hexa_di', 'channel': 'dio1', 'value': True})
-
-    assert command_result == {'ok': False, 'error': 'channel_is_input', 'channel': 'dio1', 'direction': 'input'}
-    assert input_result == {'ok': True, 'channel': 'dio1', 'value': True, 'direction': 'input'}
-    assert 'DIO1' not in agent.safety.snapshot()['outputs']
-    assert (await agent.collect_state())['hexa_board']['dio']['dio1']['value'] is True
-
-
-@pytest.mark.asyncio
-async def test_sim_hexa_restart_does_not_reenergize_after_lockout():
-    cfg = sim_mod.common_cfg.load_yaml(sim_mod.Path(__file__).resolve().parents[1] / '07_config/02_SIM/sim.yaml')
-    cfg['io'] = {'mode': 'simulated'}
-    agent = sim_mod.SIMAgent(cfg)
-
-    restart = asyncio.ensure_future(agent.apply_command({'op': 'restart_hexa_12v', 'channel': 'sw1', 'delay_s': 0.05}))
-    await asyncio.sleep(0)
-    await agent.apply_command({'op': 'safety_state', 'conditions': {'maintenance_lockout': True}})
-    result = await restart
-    state = await agent.collect_state()
-
-    assert result['restarted'] is False
-    assert result['cancelled'] is True
-    assert state['hexa_board']['switching_12v']['sw1']['value'] is False

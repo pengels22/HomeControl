@@ -44,7 +44,7 @@ def remote_status(target: str = TARGET) -> subprocess.CompletedProcess[str]:
         "printf ' enabled='; systemctl is-enabled travel-laser-ui.service || true; echo; "
         "printf 'processes\\n'; pgrep -af 'homecontrol-touchscreen-test|touchscreen_app|touchscreen_native' || true; "
         "printf 'owners\\n'; fuser -v /dev/spidev1.1 /dev/i2c-2 /dev/gpiochip1 /dev/uinput 2>&1 || true; "
-        "printf 'api\\n'; curl -fsS http://127.0.0.1:8765/api/touchscreen/state?role=SIM 2>/dev/null || true; echo"
+        "printf 'api\\n'; curl -fsS http://127.0.0.1:8765/api/touchscreen/state?role=RCM 2>/dev/null || true; echo"
     )
     return ssh_command(target, command, check=False)
 
@@ -178,7 +178,6 @@ def stage(source_root: Path, target: str, remote_root: str) -> None:
         "11_scripts/touchscreen_hardware",
         "11_scripts/touchscreen_ui",
         "07_config/01_HCM/hardware_pins.yaml",
-        "07_config/02_SIM/hardware_pins.yaml",
         "07_config/03_LCM/hardware_pins.yaml",
         "07_config/04_RCM/hardware_pins.yaml",
         "08_servises/common",
@@ -227,7 +226,7 @@ def main() -> None:
     parser.add_argument("--target", default=TARGET)
     parser.add_argument("--source-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--remote-root", default=REMOTE_ROOT)
-    parser.add_argument("--role", choices=["RCM", "LCM", "SIM"], default="RCM")
+    parser.add_argument("--role", choices=["RCM", "LCM"], default="RCM")
     parser.add_argument("--approve-hardware-handover", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()

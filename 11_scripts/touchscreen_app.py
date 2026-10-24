@@ -35,7 +35,6 @@ PROFILES = importlib.import_module("08_servises.common.hardware_profiles")
 ROLE_PAGES = {
     "RCM": ["status", "relays", "network", "settings"],
     "LCM": ["status", "lights", "network", "settings"],
-    "SIM": ["status", "rmc-data", "network", "settings"],
     "HCM": ["status", "sensors", "network", "settings"],
 }
 
@@ -135,8 +134,6 @@ class SimulatedTouchscreenAdapter:
                 for i in range(1, 5)
             ]
         rooms = []
-        if self.role == "SIM":
-            rooms = [{"name": "RMC-1", "online": False, "lux": None, "temperature_f": None, "humidity_pct": None, "presence": None}]
         external = []
         if self.role == "HCM":
             external = [

@@ -1,6 +1,5 @@
 from __future__ import annotations
 import asyncio
-import base64
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Header
 from .models import (
@@ -23,11 +22,9 @@ from .models import (
     PasswordLoginIn,
     RcmChannelNameIn,
     RcmSimulationIn,
-    RmcFirmwareUpdateIn,
     RoomStateIn,
     SafetyRelayPulseIn,
     SafetyRelayStateIn,
-    SimNameIn,
     UserCreateIn,
     UserPasswordChangeIn,
     UserPasswordResetIn,
@@ -66,7 +63,6 @@ from . import management
 from . import role_switching
 from .settings import settings
 from . import storage
-from .updater import updater
 from .registry import registry
 from . import command_events
 from .time_service import build_time_service
@@ -444,47 +440,6 @@ async def device_admin_lcm_channel_settings(
     except management.ValidationError as exc:
         raise HTTPException(400, str(exc)) from exc
 
-@router.get('/device-admin/{identifier}/sim-dashboard')
-async def device_admin_sim_dashboard(identifier: str, user=Depends(require_user)):
-    try:
-        return await management.get_sim_dashboard(identifier)
-    except management.NotFoundError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    except management.ValidationError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-@router.patch('/device-admin/{identifier}/sim-rmcs/{rmc_id}/settings')
-async def device_admin_sim_rmc_settings(
-    identifier: str,
-    rmc_id: str,
-    body: SimNameIn,
-    user=Depends(require_user),
-):
-    if user['role'] != 'ADMIN':
-        raise HTTPException(403)
-    try:
-        return await management.update_sim_rmc_name(identifier, rmc_id, name=body.name, actor=user['user'])
-    except management.NotFoundError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    except management.ValidationError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-@router.patch('/device-admin/{identifier}/sim-analog-inputs/{channel}/settings')
-async def device_admin_sim_analog_settings(
-    identifier: str,
-    channel: str,
-    body: SimNameIn,
-    user=Depends(require_user),
-):
-    if user['role'] != 'ADMIN':
-        raise HTTPException(403)
-    try:
-        return await management.update_sim_analog_name(identifier, channel, name=body.name, actor=user['user'])
-    except management.NotFoundError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    except management.ValidationError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
 @router.get('/module-roles')
 async def module_roles(user=Depends(require_user)):
     return {'modules': await role_switching.list_role_managed_modules(), 'roles': list(role_switching.ALLOWED_ROLES)}
@@ -673,28 +628,6 @@ async def device_command(
     except KeyError as exc: raise HTTPException(404, str(exc))
     except MaintenanceLockedError as exc: raise HTTPException(423, str(exc))
     except ConnectionError as exc: raise HTTPException(503, str(exc))
-
-@router.post('/firmware/rmc/update')
-async def rmc_firmware_update(body: RmcFirmwareUpdateIn, user=Depends(require_user)):
-    if user['role'] != 'ADMIN': raise HTTPException(403)
-    try:
-        firmware_image = base64.b64decode(body.firmware_image_b64.encode('ascii'), validate=True)
-    except Exception as exc:
-        raise HTTPException(400, 'firmware_image_b64 is not valid base64') from exc
-    try:
-        return await updater.update_rmc_via_sim(
-            target_rmc_id=body.target_rmc_id,
-            sim_hostname=body.sim_hostname,
-            can_interface=body.can_interface,
-            node_id=body.node_id,
-            firmware_image=firmware_image,
-            firmware_version=body.firmware_version,
-            hardware_revision=body.hardware_revision,
-        )
-    except KeyError as exc:
-        raise HTTPException(404, str(exc))
-    except ConnectionError as exc:
-        raise HTTPException(503, str(exc))
 
 @router.post('/safety/fire')
 async def fire(body: FireStateIn, user=Depends(require_user)):
