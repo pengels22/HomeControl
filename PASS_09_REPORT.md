@@ -26,12 +26,14 @@ legacy-policy test also passed. Python compileall, JavaScript syntax validation,
 
 ## Deployment status
 
-The authorized software preparation is complete. A read-only SSH preflight now
-succeeds: the deployed HCM is healthy, Heartbeat V3 and the HCM-only watchdog
-are active, Conflict is online, and the Ethernet-first route is present. The
-host is still running the prior HCM container SHA with migrations through 025;
-Pass 9 migrations 026–029 and the new container remain pending. No live host or
-physical output was changed.
+The Pass 9 Jetson deployment completed after explicit approval. A fresh
+PostgreSQL backup was restore-tested in an isolated PostgreSQL 16 container;
+migrations 026–029 applied successfully. Deployment ID
+`hc-20261024T1330Z-84f9f3f3` now runs release SHA
+`84f9f3f340bb0fd47108245546fbf121c267d4dd`, with the prior container retained
+for rollback. HCM health/version, PNL/editor authentication gates, mounted
+storage and PKI, watchdog, Heartbeat V3, and Conflict supervision all passed.
+No physical output operation was performed.
 
 ## Remaining limitations
 
