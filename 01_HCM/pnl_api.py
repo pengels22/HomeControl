@@ -19,6 +19,7 @@ class TelemetryIn(BaseModel):
     sequence: int = Field(ge=0)
     timestamp: str
     local: dict[str, object]
+    validity: dict[str, bool] | None = None
 
 
 @router.post('/telemetry')
@@ -28,15 +29,15 @@ async def ingest_telemetry(body: TelemetryIn, authorization: str | None = Header
     if not x_pnl_device or x_pnl_device != body.device_id or not token:
         raise HTTPException(401, 'PNL identity and bearer token are required')
     async with db.acquire() as conn:
-        device = await conn.fetchrow('SELECT * FROM pnl_devices WHERE device_id=$1 AND enabled=true', body.device_id)
-        if not device or not verify_token(token, device['token_hash']):
-            raise HTTPException(401, 'PNL authentication failed')
-        try:
-            payload = validate_telemetry(body.model_dump(), device_id=body.device_id,
-                                         last_sequence=int(device['last_sequence']))
-        except PNLTelemetryError as exc:
-            raise HTTPException(422, str(exc)) from None
         async with conn.transaction():
+            device = await conn.fetchrow('SELECT * FROM pnl_devices WHERE device_id=$1 AND enabled=true FOR UPDATE', body.device_id)
+            if not device or not verify_token(token, device['token_hash']):
+                raise HTTPException(401, 'PNL authentication failed')
+            try:
+                payload = validate_telemetry(body.model_dump(exclude_none=True), device_id=body.device_id,
+                                             last_sequence=int(device['last_sequence']))
+            except PNLTelemetryError as exc:
+                raise HTTPException(422, str(exc)) from None
             await conn.execute('''INSERT INTO pnl_telemetry_events(device_id,sequence,payload)
                                   VALUES($1,$2,$3::jsonb)''', body.device_id, body.sequence, json.dumps(payload))
             await conn.execute('''UPDATE pnl_devices SET last_sequence=$2,last_telemetry_at=now(),

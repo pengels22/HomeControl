@@ -1374,4 +1374,5 @@ textarea[data-automation-yaml], textarea[data-new-automation-yaml] { width: 100%
 .editor-card strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .editor-card span, .editor-card small { color: #a7c7bd; font-size: .75rem; }
 .editor-json textarea { width: 100%; min-height: 250px; resize: vertical; font-family: "SFMono-Regular", Consolas, monospace; line-height: 1.4; padding: 10px; color: #e7ece9; background: #101519; border: 1px solid #46515a; border-radius: 6px; }
+.pnl-admin-list { display: grid; gap: 10px; }
 @media (max-width: 900px) { .automation-list-header { display: none; } .automation-row { grid-template-columns: minmax(0, 1fr) auto; } .automation-row .detail-fields { display: grid; grid-column: 1 / -1; } }

@@ -23,12 +23,16 @@ REQUIRED_COLUMNS = {
                             'idle_expires_at', 'absolute_expires_at', 'revoked_at', 'revoke_reason'},
     'touchscreen_rate_limits': {'scope', 'failed_attempts', 'next_allowed_at', 'last_failed_at', 'updated_at'},
     'module_type_deprecations': {'module_type', 'status', 'reason', 'deprecated_at', 'retired_at'},
-    'pnl_devices': {'device_id', 'token_hash', 'enabled', 'last_sequence', 'last_telemetry_at', 'local_state'},
+    'pnl_devices': {'device_id', 'token_hash', 'enabled', 'last_sequence', 'last_telemetry_at', 'local_state', 'friendly_id', 'hostname', 'software_version', 'token_generation', 'revoked_at', 'last_heartbeat_at', 'last_sonic_epoch', 'last_sonic_muted'},
     'pnl_telemetry_events': {'device_id', 'sequence', 'received_at', 'payload'},
     'sonic_policy': {'singleton', 'epoch', 'globally_muted', 'expires_at', 'updated_at'},
     'dashboard_documents': {'id', 'name', 'scope', 'owner', 'draft_revision', 'published_revision'},
     'dashboard_revisions': {'dashboard_id', 'revision', 'layout', 'layout_sha256', 'created_by'},
     'dashboard_assignments': {'dashboard_id', 'pnl_device_id', 'area_id', 'is_primary'},
+    'pnl_credentials_audit': {'device_id', 'token_generation', 'token_hash', 'issued_at', 'revoked_at'},
+    'pnl_command_ledger': {'device_id', 'request_id', 'logical_entity', 'status', 'response', 'expires_at'},
+    'pnl_occupancy_events': {'device_id', 'sequence', 'occupied', 'event_key', 'occurred_at'},
+    'pnl_state_events': {'device_id', 'sequence', 'event_type', 'payload'},
 }
 
 

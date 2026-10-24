@@ -864,6 +864,16 @@ function editorAddCard(type) {
   cards.push(card); editorState.layout = layout; $("content").innerHTML = editorMarkup();
 }
 
+async function renderPnlAdmin() {
+  setTitle("Administration", "PNL Management");
+  const [panelData, dashboardData] = await Promise.all([api("/pnl-production/admin/devices"), api("/dashboard-editor")]);
+  const panels = panelData.devices || [];
+  $("content").innerHTML = `<section class="panel detail-page"><div class="panel-head"><div><h3>Registered PNLs</h3><p class="muted">Panel credentials are shown only at registration or rotation.</p></div><span class="status-pill">${panelData.stale_after_seconds}s stale threshold</span></div>
+    <form class="editor-toolbar" data-pnl-register><label>MAC <input name="device_id" placeholder="02:00:00:00:00:10" required></label><label>Friendly ID <input name="friendly_id" placeholder="PNL-001" required></label><label>Hostname <input name="hostname" placeholder="pnl-living" required></label><label>Area ID <input name="area_id" type="number" min="1"></label><button>Register PNL</button></form>
+    <div class="pnl-admin-list">${panels.map((panel) => `<article class="metadata-card"><div class="panel-head"><strong>${esc(panel.friendly_id || panel.device_id)}</strong><span class="status-pill">${panel.enabled ? "Enabled" : "Disabled"}</span></div><p class="muted">${esc(panel.device_id)} · ${esc(panel.hostname || "no hostname")} · area ${esc(panel.area_id || "unassigned")}</p><p>Telemetry: ${esc(panel.last_telemetry_at || "never")} · Heartbeat: ${esc(panel.last_heartbeat_at || "never")}</p><div class="inline-actions"><button type="button" data-pnl-rotate="${esc(panel.device_id)}">Rotate credentials</button><button type="button" class="secondary" data-pnl-revoke="${esc(panel.device_id)}">Revoke</button></div></article>`).join("") || '<p class="muted">No panels registered.</p>'}</div>
+    <h3>Assign published dashboard</h3><form class="editor-toolbar" data-pnl-assignment><label>Dashboard <select name="dashboard_id">${(dashboardData.dashboards || []).map((item) => `<option value="${item.id}">${esc(item.name)} · rev ${item.published_revision || "draft"}</option>`).join("")}</select></label><label>Panel ID <input name="pnl_device_id" placeholder="optional"></label><label>Area ID <input name="area_id" type="number" min="1" placeholder="optional"></label><button>Assign</button></form></section>`;
+}
+
 async function renderDevices() {
   setTitle("Registry", "Devices");
   $("content").innerHTML = `<div class="loading">Loading registered devices...</div>`;
@@ -1887,6 +1897,7 @@ async function renderRoute() {
     if (parts[0] === "ha-mappings") return await renderHaMappings();
     if (parts[0] === "users") return await renderUsers();
     if (parts[0] === "editor") return await renderEditor();
+    if (parts[0] === "pnl") return await renderPnlAdmin();
     return await renderDashboard();
   } catch (error) {
     $("content").innerHTML = `<section class="panel"><h3>Unable to load page</h3><p class="muted">${esc(error.message)}</p></section>`;
@@ -1933,6 +1944,14 @@ document.addEventListener("click", async (event) => {
   if (editorPublish) { try { await api(`/dashboard-editor/${editorState.dashboardId}/publish`, {method: "POST", body: JSON.stringify({expected_revision: editorState.revision})}); await renderEditor(); setError("Dashboard published"); } catch (error) { setError(error.message); } return; }
   const editorRevert = event.target.closest("[data-editor-revert-action]");
   if (editorRevert) { try { const revision = Number($("[data-editor-revert]").value); const result = await api(`/dashboard-editor/${editorState.dashboardId}/revert`, {method: "POST", body: JSON.stringify({expected_revision: editorState.revision, revision})}); editorState.revision = result.revision; await renderEditor(); } catch (error) { setError(error.message); } return; }
+  const pnlRotate = event.target.closest("[data-pnl-rotate]");
+  if (pnlRotate) { try { const result = await api(`/pnl-production/admin/devices/${encodeURIComponent(pnlRotate.dataset.pnlRotate)}/rotate-credentials`, {method: "POST"}); window.prompt("Copy this new PNL token; it will not be shown again.", result.token); await renderPnlAdmin(); } catch (error) { setError(error.message); } return; }
+  const pnlRevoke = event.target.closest("[data-pnl-revoke]");
+  if (pnlRevoke) { try { await api(`/pnl-production/admin/devices/${encodeURIComponent(pnlRevoke.dataset.pnlRevoke)}/revoke`, {method: "POST"}); await renderPnlAdmin(); } catch (error) { setError(error.message); } return; }
+  const pnlRegister = event.target.closest("[data-pnl-register]");
+  if (pnlRegister) { event.preventDefault(); const f = pnlRegister.elements; try { const result = await api("/pnl-production/admin/devices", {method: "POST", body: JSON.stringify({device_id: f.device_id.value, friendly_id: f.friendly_id.value, hostname: f.hostname.value, area_id: f.area_id.value ? Number(f.area_id.value) : null})}); window.prompt("Copy this new PNL token; it will not be shown again.", result.token); await renderPnlAdmin(); } catch (error) { setError(error.message); } return; }
+  const pnlAssignment = event.target.closest("[data-pnl-assignment]");
+  if (pnlAssignment) { event.preventDefault(); const f = pnlAssignment.elements; try { await api("/pnl-production/admin/dashboard-assignments", {method: "POST", body: JSON.stringify({dashboard_id: Number(f.dashboard_id.value), pnl_device_id: f.pnl_device_id.value || null, area_id: f.area_id.value ? Number(f.area_id.value) : null})}); setError("Dashboard assignment saved"); } catch (error) { setError(error.message); } return; }
   const hvacOpen = event.target.closest("[data-open-hvac]");
   if (hvacOpen) {
     await openHvacDialog();

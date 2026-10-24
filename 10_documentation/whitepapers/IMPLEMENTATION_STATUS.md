@@ -50,7 +50,7 @@
 | SIM DIO | Partial | Direction/state model exists; physical adapter incomplete |
 | SIM switched 12 V | Partial | State model exists; physical mapping/adapter incomplete |
 | RMC physical firmware update | Planned | Explicitly fails closed |
-| PNL module agent | Partial | State/config agent only |
+| PNL module agent | Implemented / deployment-unverified | PostgreSQL-backed registration, published dashboard delivery, telemetry, bounded state resync, commands, occupancy, and Sonic policy APIs; ESP32/P4 transport remains unverified |
 | Unified Heartbeat V3 | Implemented / tested | HMAC, replay rejection, SQLite registry |
 | Conflict Manager | Implemented / deployment-validated in dev scope | Independent supervisor |
 | Generic update trust | Implemented / tested | HMAC + Ed25519 + SHA256 + replay store |
@@ -72,6 +72,13 @@
 | GitHub branch protection | Not configured | `main` currently unprotected |
 
 ## Current safe defaults
+
+PNL production APIs treat each panel as a separately authenticated client. HCM
+selects published dashboards by explicit panel assignment, then area, then a
+shared published dashboard, with a bounded local fallback. Panel-local sensor
+aliases remain relative to the panel; remote commands continue through HCM's
+logical command authority. The panel event endpoint is bounded and supports
+resynchronization; it does not replace Unified Heartbeat V3.
 
 Repository defaults intentionally inhibit physical actuation:
 
