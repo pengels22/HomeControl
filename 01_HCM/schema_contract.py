@@ -22,6 +22,10 @@ REQUIRED_COLUMNS = {
     'touchscreen_sessions': {'user_id', 'device_id', 'token_hash', 'permission', 'last_activity_at',
                             'idle_expires_at', 'absolute_expires_at', 'revoked_at', 'revoke_reason'},
     'touchscreen_rate_limits': {'scope', 'failed_attempts', 'next_allowed_at', 'last_failed_at', 'updated_at'},
+    'module_type_deprecations': {'module_type', 'status', 'reason', 'deprecated_at', 'retired_at'},
+    'pnl_devices': {'device_id', 'token_hash', 'enabled', 'last_sequence', 'last_telemetry_at', 'local_state'},
+    'pnl_telemetry_events': {'device_id', 'sequence', 'received_at', 'payload'},
+    'sonic_policy': {'singleton', 'epoch', 'globally_muted', 'expires_at', 'updated_at'},
 }
 
 

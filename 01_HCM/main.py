@@ -16,6 +16,7 @@ from .safety_relays import HCMSafetyRelayController, UnavailableLinuxSafetyInput
 from .rules import RulesEngine
 from .notifications import notifications
 from . import api
+from .pnl_api import router as pnl_router
 from .notification_api import router as notification_config_router
 from . import storage
 from .devices import command_logical
@@ -134,6 +135,7 @@ async def alarm_contact_loop():
 
 app = FastAPI(title='HomeControl HCM', version='0.1.0', lifespan=lifespan)
 app.include_router(api.router)
+app.include_router(pnl_router)
 app.include_router(notification_config_router)
 from .metadata_api import router as metadata_router
 app.include_router(metadata_router)
