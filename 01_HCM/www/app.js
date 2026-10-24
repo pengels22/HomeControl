@@ -7,7 +7,7 @@ let moduleRoleOptions = ["UNASSIGNED", "RCM", "SIM", "LCM"];
 const pending = new Set();
 let activeDialog = null;
 let previewMode = false;
-let editorState = {dashboardId: null, revision: 0, layout: null, revisions: []};
+let editorState = {dashboardId: null, revision: 0, layout: null, revisions: [], selectedCard: null, catalog: []};
 
 async function api(path, options = {}) {
   const headers = {"Content-Type": "application/json", ...(options.headers || {})};
@@ -814,7 +814,7 @@ function renderEditorCanvas(layout) {
   if (!page) return '<p class="muted">Add a page to begin.</p>';
   return `<div class="editor-canvas" aria-label="Panel preview canvas">${page.cards.map((card) => {
     const b = card.bounds;
-    return `<article class="editor-card" style="left:${b.x / 10.24}%;top:${b.y / 6}%;width:${b.w / 10.24}%;height:${b.h / 6}%"><strong>${esc(editorCardLabel(card))}</strong><span>${esc(card.type)}</span><small>${esc(card.entity || card.entities || "Preview only")}</small></article>`;
+    return `<article class="editor-card ${editorState.selectedCard === card.id ? "selected" : ""}" data-editor-card="${esc(card.id)}" style="left:${b.x / 10.24}%;top:${b.y / 6}%;width:${b.w / 10.24}%;height:${b.h / 6}%"><strong>${esc(editorCardLabel(card))}</strong><span>${esc(card.type)}</span><small>${esc(card.entity || card.entities || "Preview only")}</small></article>`;
   }).join("")}</div>`;
 }
 
@@ -826,7 +826,8 @@ function editorMarkup() {
     <div class="panel-head"><div><h3>Panel Editor</h3><p class="muted">Arrange a bounded declarative layout for PNL panels.</p></div><span class="status-pill">Preview only</span></div>
     <div class="editor-preview-banner"><strong>Preview only.</strong> Actions are disabled. Global microphone mute policy remains platform-controlled.</div>
     <div class="editor-toolbar"><label>Dashboard <select data-editor-dashboard><option value="">New dashboard</option>${dashboards.map((item) => `<option value="${item.id}" ${item.id === editorState.dashboardId ? "selected" : ""}>${esc(item.name)} · rev ${item.draft_revision}</option>`).join("")}</select></label><label>Name <input data-editor-name value="${esc(editorState.name || "PNL Panel")}" maxlength="120"></label><button type="button" data-editor-new>New</button><button type="button" data-editor-save>Save draft</button><button type="button" data-editor-publish ${editorState.dashboardId ? "" : "disabled"}>Publish</button></div>
-    <div class="editor-palette" aria-label="Card palette"><strong>Add card</strong>${["button", "slider", "entity", "entities", "thermostat"].map((type) => `<button type="button" data-editor-add-card="${type}">${type}</button>`).join("")}</div>
+    <div class="editor-palette" aria-label="Card palette"><strong>Add card</strong>${["button", "slider", "entity", "entities", "thermostat"].map((type) => `<button type="button" data-editor-add-card="${type}">${type}</button>`).join("")}<span class="muted">Select a card to edit</span>${editorState.selectedCard ? '<button type="button" data-editor-move="left">←</button><button type="button" data-editor-move="right">→</button><button type="button" data-editor-move="up">↑</button><button type="button" data-editor-move="down">↓</button><button type="button" data-editor-size="grow">Grow</button><button type="button" data-editor-size="shrink">Shrink</button><button type="button" data-editor-remove>Remove</button>' : ''}</div>
+    <div class="editor-toolbar"><label>Entity binding <select data-editor-entity><option value="">Select card first</option>${(editorState.catalog || []).map((item) => `<option value="${esc(item.logical_name || item.entity_id)}">${esc(item.name || item.logical_name || item.entity_id)} · ${esc(item.area || "global")}</option>`).join("")}</select></label><label>Area filter <input data-editor-area-filter placeholder="Area ID"></label></div>
     ${renderEditorCanvas(layout)}
     <div class="editor-json"><label for="editor-layout-json">Layout JSON</label><textarea id="editor-layout-json" data-editor-json spellcheck="false">${esc(JSON.stringify(layout, null, 2))}</textarea><div class="inline-actions"><button type="button" data-editor-apply-json>Apply JSON</button>${editorState.dashboardId && revisions.length ? `<label>Revert to <select data-editor-revert>${revisions.map((item) => `<option value="${item.revision}">Revision ${item.revision}</option>`).join("")}</select></label><button type="button" data-editor-revert-action>Revert draft</button>` : ""}</div></div>
   </section>`;
@@ -836,6 +837,7 @@ async function renderEditor() {
   setTitle("Design", "Panel Editor");
   const data = await api("/dashboard-editor");
   editorState.dashboards = data.dashboards || [];
+  try { editorState.catalog = (await api('/pnl-production/admin/entity-catalog')).entities || []; } catch { editorState.catalog = []; }
   if (editorState.dashboardId) {
     const selected = editorState.dashboards.find((item) => item.id === editorState.dashboardId);
     if (!selected) editorState.dashboardId = null;
@@ -862,6 +864,19 @@ function editorAddCard(type) {
   const card = {id: `${type}-${Date.now()}`, type, title: type, bounds: {x: 24 + (index % 3) * 240, y: 288 + Math.floor(index / 3) * 120, w: 216, h: 96}};
   if (type === "entities") card.entities = "area.current"; else card.entity = type === "thermostat" ? "climate.home" : "local.temp";
   cards.push(card); editorState.layout = layout; $("content").innerHTML = editorMarkup();
+}
+
+function editorSelectedCard() {
+  const page = editorState.layout?.pages?.[0];
+  return page?.cards.find((card) => card.id === editorState.selectedCard);
+}
+
+function editorAdjust(action) {
+  const card = editorSelectedCard(); if (!card) return;
+  const b = card.bounds; const step = 16;
+  if (action === 'left') b.x = Math.max(0, b.x - step); if (action === 'right') b.x = Math.min(1024 - b.w, b.x + step);
+  if (action === 'up') b.y = Math.max(0, b.y - step); if (action === 'down') b.y = Math.min(600 - b.h, b.y + step);
+  editorState.layout = editorState.layout; $("content").innerHTML = editorMarkup();
 }
 
 async function renderPnlAdmin() {
@@ -1919,10 +1934,20 @@ document.addEventListener("click", async (event) => {
   }
   const editorAdd = event.target.closest("[data-editor-add-card]");
   if (editorAdd) { editorAddCard(editorAdd.dataset.editorAddCard); return; }
+  const editorCard = event.target.closest("[data-editor-card]");
+  if (editorCard) { editorState.selectedCard = editorCard.dataset.editorCard; $("content").innerHTML = editorMarkup(); return; }
+  const editorMove = event.target.closest("[data-editor-move]");
+  if (editorMove) { editorAdjust(editorMove.dataset.editorMove); return; }
+  const editorSize = event.target.closest("[data-editor-size]");
+  if (editorSize) { const card = editorSelectedCard(); if (card) { const delta = editorSize.dataset.editorSize === 'grow' ? 16 : -16; card.bounds.w = Math.max(1, Math.min(1024 - card.bounds.x, card.bounds.w + delta)); card.bounds.h = Math.max(1, Math.min(600 - card.bounds.y, card.bounds.h + delta)); $("content").innerHTML = editorMarkup(); } return; }
+  const editorRemove = event.target.closest("[data-editor-remove]");
+  if (editorRemove) { const page = editorState.layout?.pages?.[0]; if (page) page.cards = page.cards.filter((card) => card.id !== editorState.selectedCard); editorState.selectedCard = null; $("content").innerHTML = editorMarkup(); return; }
   const editorNew = event.target.closest("[data-editor-new]");
   if (editorNew) { editorState = {dashboardId: null, revision: 0, layout: editorDefaultLayout(), revisions: [], dashboards: []}; await renderEditor(); return; }
   const editorDashboard = event.target.closest("[data-editor-dashboard]");
   if (editorDashboard) { editorState.dashboardId = editorDashboard.value ? Number(editorDashboard.value) : null; editorState.layout = null; await renderEditor(); return; }
+  const editorEntity = event.target.closest("[data-editor-entity]");
+  if (editorEntity) { const card = editorSelectedCard(); if (card && editorEntity.value) { if (card.type === 'entities') card.entities = editorEntity.value; else card.entity = editorEntity.value; $("content").innerHTML = editorMarkup(); } return; }
   const editorApply = event.target.closest("[data-editor-apply-json]");
   if (editorApply) { try { editorState.layout = editorReadJson(); $("content").innerHTML = editorMarkup(); } catch (error) { setError(error.message); } return; }
   const editorSave = event.target.closest("[data-editor-save]");
@@ -2220,6 +2245,8 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", async (event) => {
+  const areaFilter = event.target.closest("[data-editor-area-filter]");
+  if (areaFilter) { try { editorState.catalog = (await api(`/pnl-production/admin/entity-catalog?area_id=${encodeURIComponent(areaFilter.value || "")}`)).entities || []; $("content").innerHTML = editorMarkup(); } catch (error) { setError(error.message); } return; }
   if (event.target.closest("input[name='hvac-mode']")) {
     syncHvacDialog();
     return;

@@ -1372,6 +1372,7 @@ textarea[data-automation-yaml], textarea[data-new-automation-yaml] { width: 100%
 .editor-canvas { position: relative; width: 100%; max-width: 1024px; aspect-ratio: 1024 / 600; overflow: hidden; background: #0e1417; border: 1px solid #46515a; border-radius: 8px; }
 .editor-card { position: absolute; display: flex; flex-direction: column; gap: 3px; padding: 10px; overflow: hidden; color: #eaf4ef; background: #1b292a; border: 1px solid #5c9d8e; border-radius: 6px; }
 .editor-card strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-card.selected { outline: 2px solid #f4c96a; outline-offset: 2px; }
 .editor-card span, .editor-card small { color: #a7c7bd; font-size: .75rem; }
 .editor-json textarea { width: 100%; min-height: 250px; resize: vertical; font-family: "SFMono-Regular", Consolas, monospace; line-height: 1.4; padding: 10px; color: #e7ece9; background: #101519; border: 1px solid #46515a; border-radius: 6px; }
 .pnl-admin-list { display: grid; gap: 10px; }

@@ -23,6 +23,7 @@ from . import db, entities
 from .auth import require_user
 from .devices import command_logical
 from .pnl_backplane import STALE_AFTER_SECONDS, local_aliases, token_hash, verify_token
+from .pnl_events import MAX_REPLAY_EVENTS
 
 dashboard = import_module('05_PNL.dashboard')
 
@@ -167,6 +168,12 @@ async def list_registered_pnls(user=Depends(require_user)):
     return {'devices': [dict(row) for row in rows], 'stale_after_seconds': STALE_AFTER_SECONDS}
 
 
+@router.get('/admin/entity-catalog')
+async def admin_entity_catalog(area_id: int | None = None, user=Depends(require_user)):
+    _admin(user)
+    return {'area_id': area_id, 'entities': await _area_entities(area_id)}
+
+
 @router.patch('/admin/devices/{device_id}')
 async def update_registered_pnl(device_id: str, body: UpdatePNL, user=Depends(require_user)):
     _admin(user)
@@ -264,7 +271,7 @@ async def panel_events(since: int = 0, authorization: str | None = Header(defaul
     async with db.acquire() as conn:
         await _panel(conn, device_id, token)
         rows = await conn.fetch('''SELECT sequence,event_type,payload,created_at FROM pnl_state_events
-            WHERE device_id=$1 AND sequence>$2 ORDER BY sequence LIMIT 100''', device_id, since)
+            WHERE device_id=$1 AND sequence>$2 ORDER BY sequence LIMIT $3''', device_id, since, MAX_REPLAY_EVENTS)
     return {'events': [dict(row) for row in rows], 'next_sequence': rows[-1]['sequence'] if rows else since, 'bounded': True}
 
 

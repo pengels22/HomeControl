@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import db
 from .auth import require_user
+from .pnl_events import publish_state_event
 dashboard = import_module('05_PNL.dashboard')
 DashboardError = dashboard.DashboardError
 compile_dashboard = dashboard.compile_dashboard
@@ -111,6 +112,10 @@ async def publish_dashboard(dashboard_id: int, body: RevisionAction, user=Depend
             if row['draft_revision'] != body.expected_revision:
                 raise HTTPException(409, 'dashboard publish conflict')
             await conn.execute('UPDATE dashboard_documents SET published_revision=$2,updated_at=now() WHERE id=$1', dashboard_id, body.expected_revision)
+            panel_rows = await conn.fetch('''SELECT DISTINCT pnl_device_id FROM dashboard_assignments
+                                             WHERE dashboard_id=$1 AND is_primary AND pnl_device_id IS NOT NULL''', dashboard_id)
+            for panel in panel_rows:
+                await publish_state_event(conn, panel['pnl_device_id'], 'dashboard_published', {'dashboard_id': dashboard_id, 'revision': body.expected_revision})
     return {'id': dashboard_id, 'published_revision': body.expected_revision, 'status': 'published'}
 
 
