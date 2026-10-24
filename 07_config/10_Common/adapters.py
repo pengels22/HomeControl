@@ -339,7 +339,7 @@ class JetsonDockerAdapter(BaseAdapter):
             AdapterStep("preflight_docker_layout", self._docker_preflight_command()),
             AdapterStep("build_hcm_image", f"sudo docker build --build-arg HCM_GIT_SHA={artifact.release} -t {image} -f {release_dir}/07_config/02_HCM/Dockerfile.live {release_dir}", changes_system=True, timeout=600),
             AdapterStep("verify_hcm_image_git", f"sudo docker run --rm --user 10001:10001 {image} git --version", changes_system=True, timeout=60),
-            AdapterStep("verify_hcm_schema", self._schema_check_command(release_dir), timeout=60),
+            AdapterStep("verify_hcm_schema", self._schema_check_command(image), timeout=60),
             AdapterStep("provision_conflict_status_secret", "sudo -n test -f /etc/hcm-heartbeat/heartbeat-auth.secret && sudo -n install -o 10001 -g 10001 -m 0400 /etc/hcm-heartbeat/heartbeat-auth.secret /etc/hcm/conflict-status.secret && sudo -n cmp -s /etc/hcm-heartbeat/heartbeat-auth.secret /etc/hcm/conflict-status.secret && sudo -n test \"$(sudo -n stat -c '%u:%a' /etc/hcm/conflict-status.secret)\" = '10001:400'", changes_system=True),
             AdapterStep("replace_hcm_container", f"sudo python3 {release_dir}/11_scripts/hcm_docker_deploy.py deploy --image {image} --expected-sha {artifact.release} --rollback-name {rollback_name} --deployment-id {deployment_id or artifact.release}", changes_system=True, timeout=180),
             AdapterStep("verify_hcm_api", self._hcm_health_command(), timeout=60),
@@ -347,12 +347,19 @@ class JetsonDockerAdapter(BaseAdapter):
             AdapterStep("record_release", f"printf '%s\n' {artifact.release} | sudo tee {self.release_marker()} >/dev/null", changes_system=True),
         ]
 
-    def _schema_check_command(self, release_dir: str) -> str:
-        # Execute the candidate contract inside the existing app container, using
-        # its DB credentials without printing or transferring them. No GPIO import.
+    def _schema_check_command(self, image: str) -> str:
+        # Run the candidate contract in the candidate image while sharing the
+        # existing app container's network namespace. The database URL is read
+        # from the running container without printing or transferring it. This
+        # keeps the gate valid when the candidate changes its Python package path.
         return (
-            f"(cat {release_dir}/02_HCM/schema_contract.py; cat <<'HCM_SCHEMA'\n"
+            "set -eu; "
+            "db_url=$(sudo -n docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "
+            "hcm-test | sed -n 's/^HCM_DATABASE_URL=//p' | tail -n 1); "
+            "test -n \"$db_url\"; "
+            f"sudo -n docker run --rm --network container:hcm-test -e HCM_DATABASE_URL=\"$db_url\" {image} python - <<'HCM_SCHEMA'\n"
             "import asyncio\nfrom importlib import import_module\n"
+            "check_schema=import_module('02_HCM.schema_contract').check_schema\n"
             "async def verify():\n"
             " db=import_module('02_HCM.db')\n"
             " try:\n"
@@ -360,8 +367,7 @@ class JetsonDockerAdapter(BaseAdapter):
             "   async with conn.transaction(readonly=True):\n"
             "    print(await check_schema(conn))\n"
             " finally:\n  await db.close()\n"
-            "asyncio.run(verify())\nHCM_SCHEMA\n"
-            ") | sudo -n docker exec -i hcm-test python -"
+            "asyncio.run(verify())\nHCM_SCHEMA"
         )
 
     def _rollback_container_name(self, deployment_id: str) -> str:
