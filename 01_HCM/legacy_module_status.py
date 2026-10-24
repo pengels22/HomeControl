@@ -11,6 +11,14 @@ from typing import Any
 
 from . import db
 
+LEGACY_ROLES = frozenset({'SIM', 'RMC'})
+NEW_INSTALL_ROLES = frozenset({'RCM', 'LCM', 'PNL'})
+
+
+def role_available_for_new_install(role: str) -> bool:
+    """Fresh-install policy; existing legacy role records remain readable."""
+    return str(role or '').upper() in NEW_INSTALL_ROLES
+
 
 async def status() -> list[dict[str, Any]]:
     async with db.acquire() as conn:
