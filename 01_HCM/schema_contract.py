@@ -26,6 +26,9 @@ REQUIRED_COLUMNS = {
     'pnl_devices': {'device_id', 'token_hash', 'enabled', 'last_sequence', 'last_telemetry_at', 'local_state'},
     'pnl_telemetry_events': {'device_id', 'sequence', 'received_at', 'payload'},
     'sonic_policy': {'singleton', 'epoch', 'globally_muted', 'expires_at', 'updated_at'},
+    'dashboard_documents': {'id', 'name', 'scope', 'owner', 'draft_revision', 'published_revision'},
+    'dashboard_revisions': {'dashboard_id', 'revision', 'layout', 'layout_sha256', 'created_by'},
+    'dashboard_assignments': {'dashboard_id', 'pnl_device_id', 'area_id', 'is_primary'},
 }
 
 
