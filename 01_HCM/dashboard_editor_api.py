@@ -90,6 +90,17 @@ async def preview_dashboard(dashboard_id: int, user=Depends(require_user)):
     return {'preview_only': True, 'revision': row['draft_revision'], 'sha256': row['layout_sha256'], 'layout': row['layout']}
 
 
+@router.get('/{dashboard_id}/revisions')
+async def list_revisions(dashboard_id: int, user=Depends(require_user)):
+    async with db.acquire() as conn:
+        exists = await conn.fetchval('SELECT 1 FROM dashboard_documents WHERE id=$1', dashboard_id)
+        if not exists:
+            raise HTTPException(404, 'dashboard not found')
+        rows = await conn.fetch('''SELECT revision,layout_sha256,created_by,created_at
+                                   FROM dashboard_revisions WHERE dashboard_id=$1 ORDER BY revision DESC''', dashboard_id)
+    return {'revisions': [dict(row) for row in rows]}
+
+
 @router.post('/{dashboard_id}/publish')
 async def publish_dashboard(dashboard_id: int, body: RevisionAction, user=Depends(require_user)):
     async with db.acquire() as conn:

@@ -7,6 +7,7 @@ let moduleRoleOptions = ["UNASSIGNED", "RCM", "SIM", "LCM"];
 const pending = new Set();
 let activeDialog = null;
 let previewMode = false;
+let editorState = {dashboardId: null, revision: 0, layout: null, revisions: []};
 
 async function api(path, options = {}) {
   const headers = {"Content-Type": "application/json", ...(options.headers || {})};
@@ -797,6 +798,70 @@ function deviceTable(modules) {
         <td>${esc(module.supervision_state || "unknown")}<br><span>${esc(module.supervision_last_seen || module.last_seen || "")}</span></td>
       </tr>`).join("")}</tbody>
   </table></div>`;
+}
+
+function editorDefaultLayout() {
+  return {version: 1, theme: "dark", pages: [{id: "main", title: "Main", cards: [
+    {id: "temperature", type: "entity", title: "Temperature", entity: "local.temp", bounds: {x: 24, y: 24, w: 240, h: 120}},
+    {id: "rooms", type: "entities", title: "Current area", entities: "area.current", bounds: {x: 288, y: 24, w: 320, h: 240}},
+  ]}]};
+}
+
+function editorCardLabel(card) { return card.title || card.entity || card.entities || card.type; }
+
+function renderEditorCanvas(layout) {
+  const page = layout?.pages?.[0];
+  if (!page) return '<p class="muted">Add a page to begin.</p>';
+  return `<div class="editor-canvas" aria-label="Panel preview canvas">${page.cards.map((card) => {
+    const b = card.bounds;
+    return `<article class="editor-card" style="left:${b.x / 10.24}%;top:${b.y / 6}%;width:${b.w / 10.24}%;height:${b.h / 6}%"><strong>${esc(editorCardLabel(card))}</strong><span>${esc(card.type)}</span><small>${esc(card.entity || card.entities || "Preview only")}</small></article>`;
+  }).join("")}</div>`;
+}
+
+function editorMarkup() {
+  const layout = editorState.layout || editorDefaultLayout();
+  const dashboards = editorState.dashboards || [];
+  const revisions = editorState.revisions || [];
+  return `<section class="panel detail-page editor-page">
+    <div class="panel-head"><div><h3>Panel Editor</h3><p class="muted">Arrange a bounded declarative layout for PNL panels.</p></div><span class="status-pill">Preview only</span></div>
+    <div class="editor-preview-banner"><strong>Preview only.</strong> Actions are disabled. Global microphone mute policy remains platform-controlled.</div>
+    <div class="editor-toolbar"><label>Dashboard <select data-editor-dashboard><option value="">New dashboard</option>${dashboards.map((item) => `<option value="${item.id}" ${item.id === editorState.dashboardId ? "selected" : ""}>${esc(item.name)} · rev ${item.draft_revision}</option>`).join("")}</select></label><label>Name <input data-editor-name value="${esc(editorState.name || "PNL Panel")}" maxlength="120"></label><button type="button" data-editor-new>New</button><button type="button" data-editor-save>Save draft</button><button type="button" data-editor-publish ${editorState.dashboardId ? "" : "disabled"}>Publish</button></div>
+    <div class="editor-palette" aria-label="Card palette"><strong>Add card</strong>${["button", "slider", "entity", "entities", "thermostat"].map((type) => `<button type="button" data-editor-add-card="${type}">${type}</button>`).join("")}</div>
+    ${renderEditorCanvas(layout)}
+    <div class="editor-json"><label for="editor-layout-json">Layout JSON</label><textarea id="editor-layout-json" data-editor-json spellcheck="false">${esc(JSON.stringify(layout, null, 2))}</textarea><div class="inline-actions"><button type="button" data-editor-apply-json>Apply JSON</button>${editorState.dashboardId && revisions.length ? `<label>Revert to <select data-editor-revert>${revisions.map((item) => `<option value="${item.revision}">Revision ${item.revision}</option>`).join("")}</select></label><button type="button" data-editor-revert-action>Revert draft</button>` : ""}</div></div>
+  </section>`;
+}
+
+async function renderEditor() {
+  setTitle("Design", "Panel Editor");
+  const data = await api("/dashboard-editor");
+  editorState.dashboards = data.dashboards || [];
+  if (editorState.dashboardId) {
+    const selected = editorState.dashboards.find((item) => item.id === editorState.dashboardId);
+    if (!selected) editorState.dashboardId = null;
+  }
+  if (!editorState.dashboardId) {
+    editorState.layout = editorState.layout || editorDefaultLayout(); editorState.revisions = []; editorState.revision = 0;
+  } else {
+    const selected = editorState.dashboards.find((item) => item.id === editorState.dashboardId);
+    editorState.revision = selected.draft_revision; editorState.name = selected.name;
+    editorState.layout = (await api(`/dashboard-editor/${editorState.dashboardId}/preview`)).layout;
+    editorState.revisions = (await api(`/dashboard-editor/${editorState.dashboardId}/revisions`)).revisions || [];
+  }
+  $("content").innerHTML = editorMarkup();
+}
+
+function editorReadJson() {
+  try { return JSON.parse($("editor-layout-json").value); }
+  catch (error) { throw new Error(`Layout JSON is invalid: ${error.message}`); }
+}
+
+function editorAddCard(type) {
+  const layout = editorState.layout || editorDefaultLayout();
+  const cards = layout.pages[0].cards; const index = cards.length;
+  const card = {id: `${type}-${Date.now()}`, type, title: type, bounds: {x: 24 + (index % 3) * 240, y: 288 + Math.floor(index / 3) * 120, w: 216, h: 96}};
+  if (type === "entities") card.entities = "area.current"; else card.entity = type === "thermostat" ? "climate.home" : "local.temp";
+  cards.push(card); editorState.layout = layout; $("content").innerHTML = editorMarkup();
 }
 
 async function renderDevices() {
@@ -1821,6 +1886,7 @@ async function renderRoute() {
     if (parts[0] === "settings") return await renderSettings();
     if (parts[0] === "ha-mappings") return await renderHaMappings();
     if (parts[0] === "users") return await renderUsers();
+    if (parts[0] === "editor") return await renderEditor();
     return await renderDashboard();
   } catch (error) {
     $("content").innerHTML = `<section class="panel"><h3>Unable to load page</h3><p class="muted">${esc(error.message)}</p></section>`;
@@ -1840,6 +1906,33 @@ document.addEventListener("click", async (event) => {
     go(link.getAttribute("href"));
     return;
   }
+  const editorAdd = event.target.closest("[data-editor-add-card]");
+  if (editorAdd) { editorAddCard(editorAdd.dataset.editorAddCard); return; }
+  const editorNew = event.target.closest("[data-editor-new]");
+  if (editorNew) { editorState = {dashboardId: null, revision: 0, layout: editorDefaultLayout(), revisions: [], dashboards: []}; await renderEditor(); return; }
+  const editorDashboard = event.target.closest("[data-editor-dashboard]");
+  if (editorDashboard) { editorState.dashboardId = editorDashboard.value ? Number(editorDashboard.value) : null; editorState.layout = null; await renderEditor(); return; }
+  const editorApply = event.target.closest("[data-editor-apply-json]");
+  if (editorApply) { try { editorState.layout = editorReadJson(); $("content").innerHTML = editorMarkup(); } catch (error) { setError(error.message); } return; }
+  const editorSave = event.target.closest("[data-editor-save]");
+  if (editorSave) {
+    try {
+      editorState.layout = editorReadJson(); editorState.name = $("[data-editor-name]").value;
+      if (!editorState.dashboardId) {
+        const created = await api("/dashboard-editor", {method: "POST", body: JSON.stringify({name: editorState.name, scope: "shared", layout: editorState.layout})});
+        editorState.dashboardId = created.id; editorState.revision = created.revision;
+      } else {
+        const saved = await api(`/dashboard-editor/${editorState.dashboardId}/draft`, {method: "PUT", body: JSON.stringify({layout: editorState.layout, expected_revision: editorState.revision})});
+        editorState.revision = saved.revision;
+      }
+      await renderEditor(); setError("Draft saved");
+    } catch (error) { setError(error.message); }
+    return;
+  }
+  const editorPublish = event.target.closest("[data-editor-publish]");
+  if (editorPublish) { try { await api(`/dashboard-editor/${editorState.dashboardId}/publish`, {method: "POST", body: JSON.stringify({expected_revision: editorState.revision})}); await renderEditor(); setError("Dashboard published"); } catch (error) { setError(error.message); } return; }
+  const editorRevert = event.target.closest("[data-editor-revert-action]");
+  if (editorRevert) { try { const revision = Number($("[data-editor-revert]").value); const result = await api(`/dashboard-editor/${editorState.dashboardId}/revert`, {method: "POST", body: JSON.stringify({expected_revision: editorState.revision, revision})}); editorState.revision = result.revision; await renderEditor(); } catch (error) { setError(error.message); } return; }
   const hvacOpen = event.target.closest("[data-open-hvac]");
   if (hvacOpen) {
     await openHvacDialog();
