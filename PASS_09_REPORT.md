@@ -26,9 +26,12 @@ legacy-policy test also passed. Python compileall, JavaScript syntax validation,
 
 ## Deployment status
 
-The authorized software preparation is complete. Jetson SSH read-only preflight
-failed authentication, so backup, migration, container replacement, and live
-validation remain pending. No live host or physical output was changed.
+The authorized software preparation is complete. A read-only SSH preflight now
+succeeds: the deployed HCM is healthy, Heartbeat V3 and the HCM-only watchdog
+are active, Conflict is online, and the Ethernet-first route is present. The
+host is still running the prior HCM container SHA with migrations through 025;
+Pass 9 migrations 026–029 and the new container remain pending. No live host or
+physical output was changed.
 
 ## Remaining limitations
 
