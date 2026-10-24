@@ -182,9 +182,21 @@ class NWSWeatherService:
     async def resolve_point(self, *, force=False):
         if self.latitude is None or self.longitude is None:
             raise ValueError('Weather latitude and longitude are not configured')
-        if self.point and not force:
+        # NWS redirects over-precise coordinates to four decimal places.  The
+        # bounded provider client intentionally does not follow redirects, so
+        # canonicalize the point before requesting it.  A cache entry without
+        # forecast URLs is incomplete and must not block recovery after a
+        # failed or redirected lookup.
+        def nws_coordinate(value):
+            numeric = float(value)
+            rounded = round(numeric, 4)
+            return str(value) if numeric == rounded else f'{rounded:.4f}'
+
+        latitude = nws_coordinate(self.latitude)
+        longitude = nws_coordinate(self.longitude)
+        if self.point and self.point.get('forecast_url') and not force:
             return self.point
-        self.point = await self._get(f'{NWS_ROOT}/points/{self.latitude},{self.longitude}')
+        self.point = await self._get(f'{NWS_ROOT}/points/{latitude},{longitude}')
         properties = self.point.get('properties') or {}
         self.point = {'forecast_office': properties.get('cwa'), 'grid_x': properties.get('gridX'),
                       'grid_y': properties.get('gridY'), 'forecast_url': properties.get('forecast'),

@@ -31,6 +31,22 @@ def service(responses):
 
 
 @pytest.mark.asyncio
+async def test_point_lookup_canonicalizes_coordinates_and_recovers_incomplete_cache():
+    point_url = 'https://api.weather.gov/points/42.3000,-83.0000'
+    svc = weather.NWSWeatherService(
+        time_mod.TimeService('America/Detroit'), 42.30004, -83.00004,
+        client=FakeClient({point_url: {'properties': {
+            'cwa': 'DTX', 'gridX': 1, 'gridY': 2, 'forecast': 'daily',
+            'forecastHourly': 'hourly', 'observationStations': 'stations',
+        }}}),
+    )
+    svc.point = {'forecast_url': None}
+    point = await svc.resolve_point()
+    assert point['forecast_office'] == 'DTX'
+    assert svc.client.urls == [point_url]
+
+
+@pytest.mark.asyncio
 async def test_native_weather_normalizes_point_current_forecast_and_alerts():
     point_url = 'https://api.weather.gov/points/42.3,-83.0'
     responses = {
