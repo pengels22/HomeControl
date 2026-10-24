@@ -3,7 +3,7 @@
 ## Software checks
 
 - Focused PNL display, retention, event, editor, and API tests: 18 passed.
-- Full pytest suite: 860 passed, 46 skipped.
+- Full pytest suite before the final legacy-policy regression: 860 passed, 46 skipped; the final focused legacy-policy test passed separately.
 - Python compileall and JavaScript syntax checks: required final gates.
 - Migration ordering/schema checks: migration 029 included; no live database
   migration was run.

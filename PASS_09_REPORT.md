@@ -20,7 +20,8 @@
 ## Validation
 
 The focused Pass 9 suite passed 18 tests. The complete suite passed **860
-tests with 46 skipped**; Python compileall, JavaScript syntax validation, and
+tests with 46 skipped before the final legacy-policy test; the final focused
+legacy-policy test also passed. Python compileall, JavaScript syntax validation, and
 `git diff --check` also passed.
 
 ## Deployment status
