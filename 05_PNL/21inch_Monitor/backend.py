@@ -93,6 +93,29 @@ def entity(entity_id):
     except Exception as exc:
         return error_response(exc)
 
+
+@app.get("/api/calendar")
+def calendar():
+    try:
+        from datetime import datetime, timedelta, timezone
+        start = datetime.now(timezone.utc)
+        end = start + timedelta(days=35)
+        result = []
+        for entity_id in ("calendar.rhino_staging","calendar.personal"):
+            path = "/api/calendars/" + entity_id + "?start=" + quote(start.isoformat()) + "&end=" + quote(end.isoformat())
+            try:
+                events = ha("GET",path)
+                if isinstance(events,list):
+                    for event in events:
+                        result.append({"calendar":entity_id,"summary":event.get("summary","Event"),"start":event.get("start"),"end":event.get("end")})
+            except requests.HTTPError as exc:
+                if exc.response.status_code in (404, 400):
+                    continue
+                raise
+        return jsonify(result)
+    except Exception as exc:
+        return error_response(exc)
+
 @app.post("/api/action")
 def action():
     if request.content_length is None or request.content_length > 1024:
