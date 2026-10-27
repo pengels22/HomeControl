@@ -40,9 +40,14 @@ ExecStart=/usr/bin/python3 /opt/homecontrol/21inch-monitor/backend.py
 EOF
 systemctl daemon-reload
 systemctl restart "$UNIT"
-sleep 2
-curl -fsS --max-time 12 http://127.0.0.1:8765/api/health | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d); assert d.get("home_assistant")=="connected"'
-curl -fsS --max-time 12 http://127.0.0.1:8765/api/entities | python3 -c 'import sys,json; states=json.load(sys.stdin); print("Live entities:",len(states)); assert any(x.get("entity_id","").startswith("light.") for x in states)'
+health=''
+for attempt in $(seq 1 12); do
+  if health=$(curl -fsS --max-time 3 http://127.0.0.1:8765/api/health 2>/dev/null); then break; fi
+  sleep 1
+done
+python3 -c 'import sys,json; d=json.loads(sys.argv[1]); print(d); assert d.get("home_assistant")=="connected"' "$health"
+entities=$(curl -fsS --max-time 12 http://127.0.0.1:8765/api/entities)
+python3 -c 'import sys,json; states=json.loads(sys.argv[1]); print("Live entities:",len(states)); assert any(x.get("entity_id","").startswith("light.") for x in states)' "$entities"
 trap - ERR
 echo "SUCCESS: HomeControl kiosk now serves authenticated HA backend on localhost:8765."
 echo "Backup retained at: $BACKUP"
