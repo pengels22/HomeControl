@@ -1,6 +1,6 @@
 # 21-inch Monitor entity and integration audit
 
-This audit describes what the dashboard can currently prove. It is intentionally conservative: a control is not presented as live unless an authenticated backend mapping has been verified.
+This audit describes the dashboard's safety boundaries. The live registry inventory and unresolved mappings are recorded in [ENTITY_WIRING_AUDIT.md](ENTITY_WIRING_AUDIT.md). A control is not presented as live unless an authenticated backend mapping has been verified.
 
 ## Current implementation
 
