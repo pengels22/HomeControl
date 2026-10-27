@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent
 HA_URL = os.getenv("HA_URL", "http://192.168.1.8:8123").rstrip("/")
 TOKEN = os.getenv("HA_TOKEN", "").strip()
 app = Flask(__name__, static_folder=None)
-ENTITY_RE = re.compile(r"^(?:light|switch|sensor|binary_sensor|climate|weather|calendar|media_player|timer|select)\.[a-z0-9_]+$")
+ENTITY_RE = re.compile(r"^(?:light|switch|sensor|binary_sensor|climate|weather|calendar|media_player|timer|select|automation)\.[a-z0-9_]+$")
 # Explicit controls approved by the supplied Lovelace YAML.
 LIGHTS = {
     "light.cabinets_lights_light","light.tv_leds_light","light.desk_leds_light",
