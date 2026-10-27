@@ -1,6 +1,6 @@
 (function(){
  'use strict';
- const C=window.STATIC_APARTMENT, overlay=document.getElementById('overlay'), rooms=C.rooms, previewOn=new URLSearchParams(location.search).get('preview')==='bedroom-on', state={selected:previewOn?'bedroom':'living',on:previewOn?{'bedroom:bedroom-over':true}:{}};
+ const C=window.STATIC_APARTMENT, overlay=document.getElementById('overlay'), rooms=C.rooms, previewMode=new URLSearchParams(location.search).get('preview'), previewOn=previewMode==='bedroom-on', state={selected:(previewOn||previewMode==='bedroom-off')?'bedroom':'living',on:previewOn?{'bedroom:bedroom-over':true}:{}};
  const ns='http://www.w3.org/2000/svg';
  function el(tag,attrs){const e=document.createElementNS(ns,tag);Object.keys(attrs||{}).forEach(k=>e.setAttribute(k,attrs[k]));return e}
  function gradient(id,color){const g=el('radialGradient',{id,cx:'50%',cy:'50%',r:'50%'});g.append(el('stop',{offset:'0%','stop-color':color,'stop-opacity':'.95'}));g.append(el('stop',{offset:'58%','stop-color':color,'stop-opacity':'.44'}));g.append(el('stop',{offset:'100%','stop-color':color,'stop-opacity':'0'}));return g}
