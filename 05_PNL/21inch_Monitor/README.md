@@ -4,13 +4,15 @@ This folder is deliberately isolated from the 7-inch ESP32 PNL firmware. It targ
 
 ## Current state
 
-- `index.html` is a standalone, dependency-free HTML/CSS/SVG/JavaScript prototype.
-- Approximate rooms and sample furniture match the user's hand-sketched floor plan at a conceptual level; dimensions, doors, fixtures and furniture positions have **not** been surveyed.
-- Tapping a room shows example lighting controls; toggles modify **browser-memory preview state only**. No command is sent to any physical device.
-- Top/tilt switches between flat and skewed SVG views. This is **not true 3D**.
-- Timers count down locally while the page is open.
-- Media and alarm controls are disabled until authenticated integrations are designed.
-- Climate, calendar and cooking navigation entries are placeholders.
+- `index.html` is a standalone, dependency-free HTML/CSS/JavaScript frontend.
+- `apartment_config.js` contains the editable, sketch-derived room, furniture, fixture, and logical-device mapping data.
+- `webgl_apartment.js` renders a genuine low-poly 3D scene with floors, room-height walls, furniture, fixtures, two camera modes, and room ray-picking.
+- The renderer is intentionally low-detail and uses WebGL directly so it does not require a framework or a network-loaded library on the Raspberry Pi.
+- Tapping a room selects it and updates the contextual light controls. Toggle state is explicitly **Preview** state held in browser memory; no physical command is sent.
+- Overhead and Angled 3D are real camera changes, not an SVG skew transformation.
+- Timers count down locally while the page is open and are labeled as local preview timers.
+- Media and alarm controls are disabled until authenticated integrations are designed and tested.
+- Climate, calendar, and cooking navigation entries remain placeholders beyond the local timer rail.
 - No HCM or HA credentials, tokens, or network endpoints are stored in the frontend.
 
 ## Run the preview
@@ -27,7 +29,7 @@ Open `http://localhost:8765` in a browser, or use the machine's LAN address when
 
 1. Keep all 21-inch code under `05_PNL/21inch_Monitor/`. Do not modify 7-inch PNL native LVGL firmware merely to support this display.
 2. Before backend integration, inspect root `AGENTS.md`, `README.md`, the white-paper index, relevant security/runbooks and existing HCM API contracts. HCM remains authoritative for logical control mappings and safety.
-3. Replace the approximate SVG with an **actual furnished 3D apartment model**, ideally rendering with a performant WebGL engine and a fallback for Pi devices without adequate GPU performance. Use the user-supplied hand sketch as geometry reference. Do not claim a proper 3D implementation until there is navigable geometry and real lighting effects.
+3. The current frontend provides the first low-poly WebGL implementation. Continue refining geometry and materials from `APARTMENT_LAYOUT.md`; do not treat the rough sketch as a measured survey.
 4. Store room polygons/model object IDs and logical light identifiers in a dedicated editable configuration file, not embedded throughout rendering code.
 5. Provide responsive controls suitable for the measured native resolution of the 21-inch display. Verify on the actual target browser and hardware, checking frame rate, memory and touch selection accuracy.
 6. Implement device-state subscriptions and commands **through an authorized backend**, not browser-exposed permanent HA tokens, direct module transport, or hardcoded secrets. Confirm actual authenticated HCM APIs and HA integration requirements before wiring controls.
