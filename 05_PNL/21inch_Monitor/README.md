@@ -5,14 +5,15 @@ This folder is deliberately isolated from the 7-inch ESP32 PNL firmware. It targ
 ## Current state
 
 - `index.html` is a standalone, dependency-free HTML/CSS/JavaScript frontend.
-- `apartment_render.svg` is the local static furnished apartment asset, following the documented room arrangement.
+- `approved_trace.svg` is the approved local apartment floor-plan asset. It is loaded unchanged as the background; the old `apartment_render.svg` is retained only as a historical artifact and is not loaded.
 - `static_apartment_config.js` contains editable room polygons, independent lighting zones, preview entities, and mask colors.
 - `static_apartment.js` builds the SVG hit-zone and animated lighting overlay without WebGL, Three.js, or network-loaded libraries.
 - Tapping a room selects it and updates the contextual light controls. Toggle state is explicitly **Preview** state held in browser memory; no physical command is sent.
 - The fixed plan is deliberately static; room selection and lighting visualization are separate editable overlays.
 - Timers count down locally while the page is open and are labeled as local preview timers.
 - Media and alarm controls are disabled until authenticated integrations are designed and tested.
-- Climate, calendar, and cooking navigation entries remain placeholders beyond the local timer rail.
+- Climate and Calendar explicitly show unavailable states until an authenticated HCM/provider session is connected. Cooking provides clearly labeled local-preview timers.
+- `ENTITY_AUDIT.md` records the current entity/provider mapping and every intentionally disabled control.
 - No HCM or HA credentials, tokens, or network endpoints are stored in the frontend.
 
 ### Raspberry Pi rendering note
