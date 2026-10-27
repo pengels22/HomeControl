@@ -15,6 +15,14 @@ This folder is deliberately isolated from the 7-inch ESP32 PNL firmware. It targ
 - Climate, calendar, and cooking navigation entries remain placeholders beyond the local timer rail.
 - No HCM or HA credentials, tokens, or network endpoints are stored in the frontend.
 
+### Raspberry Pi rendering note
+
+The current target is a Raspberry Pi 2B whose Chromium GPU path does not expose
+usable hardware WebGL in the installed image. The kiosk therefore starts
+Chromium with `--use-angle=swiftshader --enable-unsafe-swiftshader`; the model
+is deliberately low-poly so this software-rendered fallback remains usable.
+The 3D canvas was visually verified at 1920x1080 on the target display.
+
 ## Run the preview
 
 From the repository root:
