@@ -47,7 +47,7 @@ for attempt in $(seq 1 12); do
 done
 python3 -c 'import sys,json; d=json.loads(sys.argv[1]); print(d); assert d.get("home_assistant")=="connected"' "$health"
 entities=$(curl -fsS --max-time 12 http://127.0.0.1:8765/api/entities)
-python3 -c 'import sys,json; states=json.loads(sys.argv[1]); print("Live entities:",len(states)); assert any(x.get("entity_id","").startswith("light.") for x in states)' "$entities"
+printf '%s' "$entities" | python3 -c 'import sys,json; states=json.load(sys.stdin); print("Live entities:",len(states)); assert any(x.get("entity_id","").startswith("light.") for x in states)'
 trap - ERR
 echo "SUCCESS: HomeControl kiosk now serves authenticated HA backend on localhost:8765."
 echo "Backup retained at: $BACKUP"
