@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=HomeControl 21-inch Chromium Kiosk
+Comment=HomeControl 21-inch touchscreen dashboard
+Exec=/opt/homecontrol/21inch-monitor/kiosk_autostart.sh
+Terminal=false
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=5
