@@ -1,0 +1,57 @@
+This patch is intentionally not deployed. Apply it only after review on Server1.
+
+1. Copy `panel_api.py` to `/opt/sonic-ha-bridge/panel_api.py`.
+2. Copy `panel_config_living_room.json` to `/etc/sonic-ha/panel_config_living_room.json`.
+3. Add this import to `/opt/sonic-ha-bridge/sonic_ha_bridge.py`:
+
+    from panel_api import PanelError, get_panel, panel_authorized, post_panel
+
+4. Add these branches at the start of `Handler.do_GET` and `Handler.do_POST`, before the existing voice route handling:
+
+    def do_GET(self):
+        if self.path in ('/panel/config', '/panel/states', '/panel/health'):
+            if not panel_authorized(self.headers.get('Authorization')):
+                return self.respond(401, {'error': 'unauthorized'})
+            try:
+                status, payload = get_panel(self.path)
+                return self.respond(status, payload)
+            except PanelError as exc:
+                return self.respond(exc.status, {'error': exc.code})
+        return self.respond(404, {'error': 'not_found'})
+
+    def do_POST(self):
+        if self.path == '/panel/action':
+            if not panel_authorized(self.headers.get('Authorization')):
+                return self.respond(401, {'error': 'unauthorized'})
+            try:
+                length = int(self.headers.get('Content-Length', '-1'))
+            except ValueError:
+                return self.respond(400, {'error': 'invalid_length'})
+            if length < 1 or length > 8192:
+                return self.respond(413, {'error': 'action_body_too_large'})
+            body = self.rfile.read(length)
+            try:
+                status, payload = post_panel(self.path, body, self.client_address[0])
+                return self.respond(status, payload)
+            except PanelError as exc:
+                return self.respond(exc.status, {'error': exc.code})
+        # Existing /voice-command body follows unchanged.
+
+5. The Caddy site must add these routes before its existing catch-all:
+
+    handle /panel/config {
+        reverse_proxy 127.0.0.1:8767
+    }
+    handle /panel/states {
+        reverse_proxy 127.0.0.1:8767
+    }
+    handle /panel/action {
+        reverse_proxy 127.0.0.1:8767
+    }
+
+Do not add `forward_auth /authorize` to these panel routes: that endpoint is
+deliberately microphone-mute-gated. The application-level check requires
+`SONIC_FIRE7_TOKEN`, giving panel routes explicit dashboard authorization while
+keeping touchscreen controls independent of microphone mute. The existing
+`/voice-command` and `/transcribe` routes retain their current `forward_auth`
+blocks unchanged.

@@ -1,0 +1,29 @@
+<resources>
+    <string name="app_name">SonicSatilite</string>
+    <string name="diagnostic_title">Sonic Satellite</string>
+    <string name="recording_format">Microphone diagnostic · 16 kHz mono PCM · 5 seconds</string>
+    <string name="record_button">Record 5 Seconds</string>
+    <string name="status_idle">Status: Ready</string>
+    <string name="status_permission">Status: Requesting microphone permission</string>
+    <string name="status_checking_policy">Status: Checking global mute policy…</string>
+    <string name="status_recording_blocked">Status: Recording blocked by microphone policy</string>
+    <string name="status_recording">Status: Recording…</string>
+    <string name="status_saved">Status: WAV saved</string>
+    <string name="status_failed">Status: Recording failed</string>
+    <string name="elapsed_initial">Elapsed: 0.0 s</string>
+    <string name="elapsed_value">Elapsed: %1$.1f s</string>
+    <string name="size_initial">WAV size: 0 bytes</string>
+    <string name="size_value">WAV size: %1$d bytes</string>
+    <string name="file_none">File: None</string>
+    <string name="file_value">File: %1$s</string>
+    <string name="error_none">Error: None</string>
+    <string name="error_permission">Error: Microphone permission denied</string>
+    <string name="error_global_mute">Error: Global mute is active</string>
+    <string name="error_value">Error: %1$s</string>
+    <string-array name="microphone_gain_options">
+        <item>1.0x (neutral)</item>
+        <item>1.5x</item>
+        <item>2.0x</item>
+        <item>3.0x</item>
+    </string-array>
+</resources>

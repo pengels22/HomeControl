@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/settings_page" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone" android:background="#102131" android:elevation="18dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="24dp">
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SONIC SETTINGS" android:textColor="#F4FAFF" android:textSize="25sp" android:letterSpacing="0.12" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Connection, wake-word, and microphone diagnostics" android:textColor="#B3D4E7" android:textSize="13sp" android:layout_marginTop="4dp" />
+        <Button android:id="@+id/settings_return_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Return to Dashboard" />
+        <Button android:id="@+id/test_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Test Server Connection" />
+        <TextView android:id="@+id/connection_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Server Connection: NOT TESTED" android:textColor="#D7E8F4" android:padding="4dp" />
+        <TextView android:id="@+id/credential_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Credential: NOT TESTED" android:textColor="#D7E8F4" android:padding="4dp" />
+        <TextView android:id="@+id/mute_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Global Mute: NOT TESTED" android:textColor="#D7E8F4" android:padding="4dp" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Microphone Input Calibration" android:textColor="#F4FAFF" android:textSize="18sp" android:layout_marginTop="8dp" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Software gain is applied to the single captured PCM stream. Raw levels remain available for diagnostics." android:textColor="#B3D4E7" android:textSize="12sp" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Software gain" android:textColor="#D7E8F4" />
+            <Spinner android:id="@+id/gain_spinner" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:entries="@array/microphone_gain_options" />
+            <Button android:id="@+id/gain_reset_button" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Reset 1.0x" />
+        </LinearLayout>
+        <TextView android:id="@+id/input_level_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Input: waiting for microphone" android:textColor="#D7E8F4" />
+        <TextView android:id="@+id/input_agc_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="AutomaticGainControl: not inspected" android:textColor="#D7E8F4" />
+        <TextView android:id="@+id/input_clip_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Clipping: not measured" android:textColor="#D7E8F4" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+            <Button android:id="@+id/import_token_button" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Import Credential" />
+            <Button android:id="@+id/import_ca_button" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Import Caddy CA" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+            <Button android:id="@+id/import_local_token_button" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Import Download Credential" />
+            <Button android:id="@+id/import_local_ca_button" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Import Download CA" />
+        </LinearLayout>
+        <Button android:id="@+id/remove_local_token_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Remove Download Credential Source" />
+        <TextView android:id="@+id/import_status_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Credential and CA status messages appear here" android:textColor="#B3D4E7" android:padding="4dp" />
+        <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#355064" android:layout_marginTop="10dp" />
+        <Switch android:id="@+id/wake_toggle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Enable Wake Word (Hey Jarvis)" android:textColor="#F4FAFF" />
+        <TextView android:id="@+id/wake_state_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Wake Word: Stopped" android:textColor="#D7E8F4" />
+        <TextView android:id="@+id/wake_model_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Model: Not initialized" android:textColor="#D7E8F4" />
+        <TextView android:id="@+id/wake_confidence_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Confidence: —" android:textColor="#D7E8F4" />
+        <TextView android:id="@+id/wake_count_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Detections: 0" android:textColor="#D7E8F4" />
+        <TextView android:id="@+id/wake_last_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Last detection: —" android:textColor="#D7E8F4" />
+        <TextView android:id="@+id/wake_inference_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Audio frames: 0  Classifier inferences: 0" android:textColor="#D7E8F4" />
+        <Button android:id="@+id/settings_record_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Record 5 Seconds (Manual Diagnostic)" />
+        <Button android:id="@+id/settings_send_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Send Recording" />
+        <TextView android:id="@+id/status_text_settings" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Manual recording status is shown on Dashboard" android:textColor="#D7E8F4" />
+        <TextView android:id="@+id/elapsed_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Elapsed: 0.0 s" android:textColor="#D7E8F4" />
+        <TextView android:id="@+id/size_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="WAV size: 0 bytes" android:textColor="#D7E8F4" />
+        <TextView android:id="@+id/file_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="File: None" android:textColor="#D7E8F4" />
+        <TextView android:id="@+id/error_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Error: None" android:textColor="#FFB4AB" />
+        <TextView android:id="@+id/transcription_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Whisper: —" android:textColor="#D7E8F4" />
+        <TextView android:id="@+id/ha_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Home Assistant: —" android:textColor="#D7E8F4" />
+        <Switch android:id="@+id/transcription_logging" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Log transcription text for diagnostics" android:textColor="#F4FAFF" />
+        <TextView android:id="@+id/diagnostic_events" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Diagnostic events:\n—" android:textColor="#B3D4E7" android:paddingTop="8dp" android:maxLines="12" />
+    </LinearLayout>
+</ScrollView>

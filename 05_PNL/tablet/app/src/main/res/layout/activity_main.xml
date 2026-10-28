@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/main" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#07101A">
+    <ImageView android:layout_width="match_parent" android:layout_height="match_parent" android:src="@drawable/living_room_fallback" android:scaleType="centerCrop" android:contentDescription="Living room background" />
+    <View android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/living_room_scrim" />
+    <LinearLayout android:id="@+id/dashboard_shell" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:paddingStart="20dp" android:paddingTop="7dp" android:paddingEnd="20dp" android:paddingBottom="4dp">
+        <LinearLayout android:id="@+id/dashboard_top_bar" android:layout_width="match_parent" android:layout_height="52dp" android:paddingStart="12dp" android:paddingEnd="4dp" android:background="@drawable/dashboard_top_bar" android:gravity="center_vertical" android:orientation="horizontal">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="⌂  HomeControl" android:textColor="#F4FAFF" android:textSize="22sp" android:fontFamily="sans" />
+            <TextView android:id="@+id/homecontrol_header" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Living Room" android:textColor="#F4FAFF" android:textSize="24sp" android:textStyle="bold" android:fontFamily="sans" />
+            <LinearLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center_vertical|end" android:orientation="horizontal">
+                <TextView android:id="@+id/header_clock" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Mon, Aug 26   3:24 PM" android:textColor="#C8D8E6" android:textSize="12sp" />
+                <Button android:id="@+id/settings_menu_button" android:layout_width="48dp" android:layout_height="48dp" android:text="⋮" android:textSize="24sp" android:textColor="#F4FAFF" android:background="@android:color/transparent" android:contentDescription="Open Sonic Settings menu" android:minWidth="48dp" android:minHeight="48dp" />
+            </LinearLayout>
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:visibility="gone" android:text="Welcome home, Patrick" android:textColor="#B3D4E7" android:textSize="12sp" />
+        <LinearLayout android:id="@+id/dashboard_content" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:layout_marginTop="4dp" android:orientation="vertical">
+            <LinearLayout android:id="@+id/dashboard_top_cards" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1.18" android:orientation="horizontal">
+                <include layout="@layout/dashboard_card_lights" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" />
+                <include layout="@layout/dashboard_card_temperature" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" />
+                <include layout="@layout/dashboard_card_shop" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" />
+            </LinearLayout>
+            <LinearLayout android:id="@+id/dashboard_bottom_cards" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="0.82" android:orientation="horizontal">
+                <include layout="@layout/dashboard_card_media" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" />
+                <include layout="@layout/dashboard_card_scene" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" />
+                <include layout="@layout/dashboard_card_curtain" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+    <FrameLayout android:id="@+id/dashboard_footer" android:layout_width="match_parent" android:layout_height="50dp" android:layout_gravity="bottom" android:layout_marginStart="20dp" android:layout_marginEnd="20dp" android:layout_marginBottom="4dp" android:background="@drawable/dashboard_footer">
+        <TextView android:id="@+id/status_text" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" android:text="Jarvis is ready" />
+        <LinearLayout android:id="@+id/intercom_controls" android:layout_width="match_parent" android:layout_height="match_parent" android:layout_gravity="start|center_vertical" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="8dp">
+            <Button android:id="@+id/intercom_target_one" android:layout_width="96dp" android:layout_height="36dp" android:layout_marginEnd="5dp" android:background="@drawable/ptt_target_button" android:backgroundTint="@null" android:elevation="0dp" android:stateListAnimator="@null" android:text="Office" android:textAllCaps="false" android:textColor="#F5FCFF" android:textSize="11sp" />
+            <Button android:id="@+id/intercom_target_two" android:layout_width="96dp" android:layout_height="36dp" android:background="@drawable/ptt_target_button" android:backgroundTint="@null" android:elevation="0dp" android:stateListAnimator="@null" android:text="Bedroom" android:textAllCaps="false" android:textColor="#F5FCFF" android:textSize="11sp" />
+        </LinearLayout>
+        <Button android:id="@+id/record_button" android:layout_width="270dp" android:layout_height="32dp" android:layout_gravity="center" android:background="@drawable/jarvis_listening_button" android:backgroundTint="@null" android:elevation="0dp" android:stateListAnimator="@null" android:text="JARVIS  •  LISTENING" android:textAllCaps="false" android:textColor="#F5FCFF" android:textSize="10sp" android:letterSpacing="0.04" android:padding="0dp" />
+    </FrameLayout>
+    <include layout="@layout/settings_panel" android:layout_width="match_parent" android:layout_height="match_parent" />
+    <View android:id="@+id/ptt_active_ring" android:layout_width="match_parent" android:layout_height="match_parent" android:layout_margin="6dp" android:background="@drawable/ptt_active_ring" android:visibility="gone" android:clickable="false" android:importantForAccessibility="no" />
+</FrameLayout>

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/media_card" android:layout_width="0dp" android:layout_height="0dp" android:layout_margin="7dp" android:padding="14dp" android:orientation="vertical" android:background="@drawable/dashboard_card">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="♫  Media" android:textColor="#F5FBFF" android:textSize="21sp" android:textStyle="bold" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="›" android:textColor="#F5FBFF" android:textSize="34sp" />
+    </LinearLayout>
+    <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="3dp" android:background="#336C8494" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:layout_marginTop="7dp" android:orientation="horizontal">
+        <ImageView android:layout_width="108dp" android:layout_height="match_parent" android:src="@drawable/living_room_fallback" android:scaleType="centerCrop" android:contentDescription="Album art" />
+        <LinearLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_marginStart="14dp" android:orientation="vertical">
+            <TextView android:id="@+id/media_title" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Panel not configured" android:textColor="#F5FBFF" android:textSize="18sp" android:textStyle="bold" />
+            <TextView android:id="@+id/media_detail" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="Waiting for Home Assistant" android:textColor="#D7E5EF" android:textSize="13sp" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:gravity="center" android:orientation="horizontal">
+                <Button android:id="@+id/media_previous" android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1" android:text="|‹" android:enabled="false" />
+                <Button android:id="@+id/media_play_pause" android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1" android:text="▶" android:enabled="false" />
+                <Button android:id="@+id/media_next" android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1" android:text="›|" android:enabled="false" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="♪" android:textColor="#F5FBFF" android:textSize="18sp" />
+                <SeekBar android:id="@+id/media_volume" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:max="100" android:enabled="false" />
+                <TextView android:id="@+id/media_volume_text" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="60%" android:textColor="#D7E5EF" android:textSize="12sp" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

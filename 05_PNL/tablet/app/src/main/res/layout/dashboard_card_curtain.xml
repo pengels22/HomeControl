@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/curtain_card"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_weight="0"
+    android:layout_margin="5dp"
+    android:padding="6dp"
+    android:orientation="vertical"
+    android:background="@drawable/dashboard_card"
+    android:visibility="gone">
+    <LinearLayout android:id="@+id/curtain_controls" android:layout_width="match_parent" android:layout_height="98dp" android:orientation="vertical" />
+    <TextView android:id="@+id/curtain_state" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" android:text="Waiting for Home Assistant" />
+</LinearLayout>
