@@ -26,9 +26,10 @@ from .pnl_backplane import STALE_AFTER_SECONDS, local_aliases, token_hash, verif
 from .pnl_events import MAX_REPLAY_EVENTS
 
 dashboard = import_module('05_PNL.dashboard')
+reference_dashboard = import_module('05_PNL.reference_dashboard')
 
 router = APIRouter(prefix='/api/v1/pnl-production')
-FALLBACK_LAYOUT = {'version': 1, 'theme': 'dark', 'pages': [{'id': 'main', 'title': 'Main', 'cards': []}]}
+FALLBACK_LAYOUT = reference_dashboard.REFERENCE_DASHBOARD
 
 
 def _admin(user):

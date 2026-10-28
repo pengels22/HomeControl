@@ -68,13 +68,24 @@ class DisplayEngine:
         for card in page['cards']:
             reference = card.get('entity')
             value, available = self._value(reference, state)
+            items = card.get('items')
+            if isinstance(items, list):
+                rendered_items = []
+                for item in items:
+                    item_reference = item.get('entity') if isinstance(item, dict) else None
+                    item_value, item_available = self._value(item_reference, state)
+                    rendered_items.append({**item, 'value': item_value, 'available': item_available,
+                                           'remote_action_enabled': bool(item_available and state.connected)})
+                value = rendered_items
+                available = state.connected
             if card['type'] == 'entities':
                 refs = card.get('entities') if isinstance(card.get('entities'), list) else list(state.remote)
                 rows = []
                 for ref in refs:
                     row_value, row_available = self._value(ref, state)
                     rows.append({'entity': ref, 'value': row_value, 'available': row_available, 'writable': bool(state.connected and state.remote.get(ref, {}).get('writable'))})
-                value = rows
+                if not isinstance(items, list):
+                    value = rows
                 available = state.connected
             cards.append({**card, 'value': value, 'available': available, 'remote_action_enabled': bool(available and state.connected and card['type'] not in {'entity', 'entities'} or available and state.connected and state.remote.get(reference, {}).get('writable'))})
         return {'width': DISPLAY_WIDTH, 'height': DISPLAY_HEIGHT, 'theme': layout.get('theme', 'dark'), 'header': {'room': state.room, 'connected': state.connected, 'microphone_muted': state.microphone_muted, 'clock': clock}, 'page': {'id': page['id'], 'title': page['title'], 'cards': cards}, 'page_index': self.page, 'page_count': len(layout['pages']), 'layout_sha256': self.layout_sha256}

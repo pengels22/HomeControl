@@ -5,6 +5,7 @@ import pytest
 
 display = import_module('05_PNL.display_engine')
 simulator = import_module('05_PNL.desktop_simulator')
+reference = import_module('05_PNL.reference_dashboard')
 
 
 def layout():
@@ -40,3 +41,17 @@ def test_desktop_fixture_is_full_width_and_has_no_sidebar_or_scenes():
     assert frame['header']['room'] == 'Bedroom'
     assert 'sidebar' not in html.lower()
     assert 'Scenes' not in html
+
+
+def test_reference_dashboard_compiles_and_resolves_room_grid_items():
+    engine = display.DisplayEngine(); engine.load_layout(reference.REFERENCE_DASHBOARD)
+    state = display.PanelDisplayState(room='Living Room', remote={
+        'switch.lamp_switch': {'state': 'on', 'available': True, 'writable': True},
+    })
+    frame = engine.render_frame(state)
+    assert [page['id'] for page in reference.REFERENCE_DASHBOARD['pages']] == ['home', 'lights', 'calendar', 'cooking']
+    engine.set_page(1)
+    lights = engine.render_frame(state)['page']['cards']
+    room = next(card for card in lights if card['id'] == 'living-room')
+    assert room['value'][0]['title'] == 'Lamp'
+    assert room['value'][0]['value'] == 'on'

@@ -9,7 +9,7 @@ from typing import Any
 
 CARD_TYPES = {'button', 'slider', 'entity', 'entities', 'thermostat'}
 MAX_PAGES = 8
-MAX_CARDS = 40
+MAX_CARDS = 160
 MAX_TEXT = 120
 
 
@@ -46,7 +46,7 @@ def validate_dashboard(layout: dict[str, Any]) -> dict[str, Any]:
             total += 1
             if total > MAX_CARDS or not isinstance(card, dict):
                 raise DashboardError('dashboard card count or shape is invalid')
-            if set(card) - {'id', 'type', 'title', 'entity', 'entities', 'action', 'bounds', 'visible_if'}:
+            if set(card) - {'id', 'type', 'title', 'entity', 'entities', 'items', 'icon', 'action', 'bounds', 'visible_if'}:
                 raise DashboardError('card contains unsupported fields')
             card_type = card.get('type')
             if card_type not in CARD_TYPES:
@@ -65,6 +65,8 @@ def validate_dashboard(layout: dict[str, Any]) -> dict[str, Any]:
                 raise DashboardError(f'{card_type} requires an entity reference')
             if card_type == 'entities' and not (isinstance(card.get('entities'), list) or card.get('entities') == 'area.current'):
                 raise DashboardError('entities requires an allowlisted selector')
+            if 'items' in card and (not isinstance(card['items'], list) or any(not isinstance(item, dict) for item in card['items'])):
+                raise DashboardError('card.items must be a list of objects')
             clean_cards.append(copy.deepcopy(card))
         clean_pages.append({'id': page_id, 'title': title, 'cards': clean_cards})
     return {'version': 1, 'theme': layout.get('theme', 'default'), 'pages': clean_pages}
