@@ -232,8 +232,12 @@ public class MainActivity extends AppCompatActivity {
             diagnosticTranscriptionLogging = enabled;
             preferences.edit().putBoolean("diagnostic_transcription_logging", enabled).apply();
         });
-        final float[] gainOptions = {1.0f, 1.5f, 2.0f, 3.0f};
+        final float[] gainOptions = {1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 6.0f, 8.0f};
         softwareGain = preferences.getFloat("microphone_gain", 1.0f);
+        if (isLivingRoomTablet() && softwareGain < 6.0f) {
+            softwareGain = 6.0f;
+            preferences.edit().putFloat("microphone_gain", softwareGain).apply();
+        }
         int selectedGain = 0;
         for (int i = 0; i < gainOptions.length; i++) {
             if (Math.abs(gainOptions[i] - softwareGain) < 0.01f) selectedGain = i;
@@ -931,9 +935,9 @@ public class MainActivity extends AppCompatActivity {
             if (minimumBuffer <= 0) {
                 throw new IOException("16 kHz mono recording is unavailable (code " + minimumBuffer + ")");
             }
-            recorder = new AudioRecord(MediaRecorder.AudioSource.MIC, SAMPLE_RATE,
+            recorder = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, SAMPLE_RATE,
                     AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
-                    Math.max(minimumBuffer, 3200));
+                    Math.max(minimumBuffer, SAMPLE_RATE * 2));
             if (recorder.getState() != AudioRecord.STATE_INITIALIZED) {
                 throw new IOException("Microphone could not be initialized");
             }
@@ -1310,9 +1314,10 @@ public class MainActivity extends AppCompatActivity {
         } else {
             try {
                 effect = AutomaticGainControl.create(recorder.getAudioSessionId());
+                if (effect != null && !effect.getEnabled()) effect.setEnabled(true);
                 enabled = effect != null && effect.getEnabled();
                 status = effect == null ? "available, session effect unavailable"
-                        : (enabled ? "available and already enabled" : "available, disabled");
+                        : (enabled ? "enabled for voice recognition" : "available, could not enable");
             } catch (RuntimeException failure) {
                 status = "available, session inspection failed";
                 android.util.Log.w("SonicSatellite", "AutomaticGainControl inspection failed: "
@@ -1484,9 +1489,9 @@ public class MainActivity extends AppCompatActivity {
             android.util.Log.i("OpenWakeWord", "Microphone initialization: sampleRate=" + SAMPLE_RATE
                     + " channels=1 encoding=PCM_16BIT minBuffer=" + minimum);
             if (minimum <= 0) throw new IOException("16 kHz microphone unavailable");
-            recorder = new AudioRecord(MediaRecorder.AudioSource.MIC, SAMPLE_RATE,
+            recorder = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, SAMPLE_RATE,
                     AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
-                    Math.max(minimum, frameLength * 4));
+                    Math.max(minimum, SAMPLE_RATE * 2));
             if (recorder.getState() != AudioRecord.STATE_INITIALIZED)
                 throw new IOException("Wake microphone could not initialize");
             agc = inspectAgc(recorder);

@@ -63,9 +63,9 @@ def _read_config() -> dict:
         entity_id = control.get("entity_id")
         if (entity_id in expected and control.get("type") != expected[entity_id]) or entity_id in seen:
             raise PanelError(503, "panel_configuration_invalid")
-        if not isinstance(entity_id, str) or not entity_id.startswith(("light.", "switch.", "climate.", "media_player.", "select.")):
+        if not isinstance(entity_id, str) or not entity_id.startswith(("light.", "switch.", "climate.", "media_player.", "select.", "automation.")):
             raise PanelError(503, "panel_configuration_invalid")
-        if control.get("type") not in ("light", "switch", "climate", "media_player", "select"):
+        if control.get("type") not in ("light", "switch", "climate", "media_player", "select", "automation"):
             raise PanelError(503, "panel_configuration_invalid")
         seen.add(entity_id)
     if not set(expected).issubset(seen):
@@ -83,7 +83,50 @@ def _read_config() -> dict:
                 or not isinstance(source.get("source"), str) or not source["source"]
                 or not isinstance(source.get("label"), str) or not source["label"]):
             raise PanelError(503, "panel_configuration_invalid")
+    # Keep the checked-in room mappings for the tablet UI, but expose the full
+    # current Home Assistant entity inventory through Server1 as well. This
+    # lets integrations address newly added entities without a config edit.
+    _, raw_states = _ha_request("/api/states")
+    if not isinstance(raw_states, list):
+        raise PanelError(502, "ha_invalid_states")
+    configured = {c["entity_id"] for c in controls}
+    for item in raw_states:
+        if not isinstance(item, dict):
+            continue
+        entity_id = item.get("entity_id")
+        if not isinstance(entity_id, str) or "." not in entity_id or entity_id in configured:
+            continue
+        domain = entity_id.split(".", 1)[0]
+        attributes = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
+        actions = _default_entity_actions(domain, attributes)
+        controls.append({
+            "entity_id": entity_id,
+            "type": domain,
+            "label": attributes.get("friendly_name", entity_id),
+            "order": 100000,
+            "actions": actions,
+        })
+    config["controls"] = controls
     return config
+
+
+def _default_entity_actions(domain: str, attributes: dict) -> list[str]:
+    if domain in ("light", "switch", "input_boolean"):
+        actions = ["turn_on", "turn_off"]
+        if domain == "light" and (attributes.get("supported_color_modes") or attributes.get("supported_features", 0)):
+            actions.append("set_brightness")
+        return actions
+    if domain == "climate":
+        return ["set_temperature", "set_hvac_mode", "set_fan_mode"]
+    if domain == "media_player":
+        return ["media_play_pause", "media_next_track", "media_previous_track", "volume_set", "turn_on", "turn_off"]
+    if domain == "select":
+        return ["select_option"]
+    if domain == "automation":
+        return ["trigger"]
+    if domain in ("scene", "script"):
+        return ["turn_on"]
+    return []
 
 
 def _controls(config: dict) -> dict[str, dict]:
@@ -238,6 +281,8 @@ def post_panel(path: str, body: bytes, client_key: str = "unknown") -> tuple[int
         data["brightness_pct"] = int(round(brightness))
     elif domain == "switch" and action in ("turn_on", "turn_off"):
         service = action
+    elif domain == "input_boolean" and action in ("turn_on", "turn_off"):
+        service = action
     elif domain == "climate" and action == "set_temperature":
         temperature = _number(request, "temperature")
         minimum, maximum = attributes.get("min_temp"), attributes.get("max_temp")
@@ -283,6 +328,10 @@ def post_panel(path: str, body: bytes, client_key: str = "unknown") -> tuple[int
             raise PanelError(422, "unsupported_select_option")
         service = "select_option"
         data["option"] = option
+    elif domain == "automation" and action == "trigger":
+        service = "trigger"
+    elif domain in ("scene", "script") and action == "turn_on":
+        service = action
     else:
         raise PanelError(422, "unsupported_action")
     status, _ = _ha_request(f"/api/services/{domain}/{service}", method="POST", payload=data)

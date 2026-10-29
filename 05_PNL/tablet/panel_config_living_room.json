@@ -15,8 +15,17 @@
     ,{"entity_id":"switch.printer_lights_switch","type":"switch","label":"Printer Lights","order":130,"actions":["turn_on","turn_off"]}
     ,{"entity_id":"switch.workbench_switch","type":"switch","label":"Workbench","order":140,"actions":["turn_on","turn_off"]}
     ,{"entity_id":"light.office_desk_lights","type":"light","label":"Desk Over","order":150,"actions":["turn_on","turn_off","set_brightness"]}
+    ,{"entity_id":"light.desk_lights_2","type":"light","label":"Desk Back","order":155,"actions":["turn_on","turn_off","set_brightness"]}
     ,{"entity_id":"light.office_laser_fan","type":"light","label":"Laser Fan","order":160,"actions":["turn_on","turn_off"]}
     ,{"entity_id":"select.bedroom_curtain_bedroom_curtain_position_preset","type":"select","label":"Bedroom Curtains","order":170,"actions":["select_option"]}
+    ,{"entity_id":"light.bedroom_lamp_light","type":"light","label":"Bedroom Lamp","order":180,"actions":["turn_on","turn_off","set_brightness"]}
+    ,{"entity_id":"light.headboard_white_light","type":"light","label":"Headboard","order":190,"actions":["turn_on","turn_off","set_brightness"]}
+    ,{"entity_id":"switch.barbecue_lights_switch","type":"switch","label":"Barbecue Lights","order":200,"actions":["turn_on","turn_off"]}
+    ,{"entity_id":"switch.bedroom_fan_switch","type":"switch","label":"Bedroom Fan","order":210,"actions":["turn_on","turn_off"]}
+    ,{"entity_id":"switch.bedroom_light","type":"switch","label":"Bedroom Light","order":220,"actions":["turn_on","turn_off"]}
+    ,{"entity_id":"switch.bedroom_vines_switch","type":"switch","label":"Vines","order":230,"actions":["turn_on","turn_off"]}
+    ,{"entity_id":"automation.full_bed","type":"automation","label":"Full Bed","order":240,"actions":["trigger"]}
+    ,{"entity_id":"automation.good_morning1","type":"automation","label":"Good Morning","order":250,"actions":["trigger"]}
   ],
   "media_sources": [
     {"entity_id":"media_player.living_room","label":"Wii","source":"Wii","order":10},

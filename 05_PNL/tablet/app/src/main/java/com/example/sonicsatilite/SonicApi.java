@@ -36,7 +36,9 @@ final class SonicApi {
     private static final String SERVER_IP = "192.168.1.6";
     private static final int CONNECT_TIMEOUT_MS = 4000;
     private static final int READ_TIMEOUT_MS = 60000; // Whisper and HA can take time.
-    private static final int MAX_RESPONSE = 65536;
+    // Server1 may return the complete Home Assistant entity catalog. Keep this
+    // bounded, but large enough for the catalog and its state snapshot.
+    private static final int MAX_RESPONSE = 2 * 1024 * 1024;
     private static final int MAX_PANEL_REQUEST = 8192;
     private static final long MAX_WAV = 1000000;
     private static final String TOKEN_FILE = "sonic-api-token";

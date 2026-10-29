@@ -45,6 +45,8 @@ final class PanelController {
     private static final String LAMP = "switch.lamp_switch";
     private static final String OFFICE = "switch.office_lights_switch";
     private static final String FAN = "switch.bedroom_camera_power";
+    private static final String DESK_OVER = "light.office_desk_lights";
+    private static final String DESK_BACK = "light.desk_lights_2";
     private static final String CLIMATE = "climate.nest_thermostat";
     private static final String INSIDE_TEMP = "sensor.average_temp";
     private static final String INSIDE_HUMIDITY = "sensor.average_humidity";
@@ -54,11 +56,11 @@ final class PanelController {
     private static final List<String> OFFICE_LIGHTING_ORDER = Arrays.asList(
             "switch.office_lights_switch_2",
             "switch.printer_lights_switch", "switch.workbench_switch",
-            "light.office_desk_lights", "light.office_laser_fan");
+            DESK_OVER, "light.office_laser_fan");
     private static final List<String> BEDROOM_LIGHTING_ORDER = Arrays.asList(
             "light.bedroom_lamp_light", "light.headboard_white_light",
-            "switch.barbecue_lights_switch", "switch.bedroom_fan_switch",
-            "switch.bedroom_light", "switch.bedroom_vines_switch");
+            "switch.bedroom_light", "switch.bedroom_fan_switch",
+            "switch.barbecue_lights_switch", "switch.bedroom_vines_switch");
     private static final List<String> BEDROOM_AUTOMATION_ORDER = Arrays.asList(
             "automation.full_bed", "automation.good_morning1");
     private static final String BEDROOM_CURTAIN = "select.bedroom_curtain_bedroom_curtain_position_preset";
@@ -484,8 +486,9 @@ final class PanelController {
             if (!validEntity(id)) continue;
             // Domains are never inferred from a different controller category.
             if ("climate".equals(type) && CLIMATE.equals(id)) climateControl = c;
-            if ("media_player".equals(type) && id.startsWith("media_player.")) mediaControl = c;
-            if (lightingOrder().contains(id) || BEDROOM_AUTOMATION_ORDER.contains(id) || BEDROOM_CURTAIN.equals(id) || CLIMATE.equals(id)
+            if ("media_player".equals(type) && id.startsWith("media_player.")
+                    && (mediaControl == null || "media_player.living_room".equals(id))) mediaControl = c;
+            if (lightingOrder().contains(id) || DESK_BACK.equals(id) || BEDROOM_AUTOMATION_ORDER.contains(id) || BEDROOM_CURTAIN.equals(id) || CLIMATE.equals(id)
                     || INSIDE_TEMP.equals(id) || INSIDE_HUMIDITY.equals(id) || OUTSIDE_TEMP.equals(id) || OUTSIDE_HUMIDITY.equals(id)
                     || ("media_player".equals(type) && id.startsWith("media_player."))) controls.put(id, c);
         }
@@ -660,6 +663,7 @@ final class PanelController {
             if (dimmable) {
                 SeekBar brightness = new SeekBar(activity);
                 brightness.setMax(100);
+                tintSliderWhite(brightness);
                 JSONObject attrs = s.optJSONObject("attributes");
                 int percent = attrs != null && attrs.has("brightness") ? Math.round(attrs.optInt("brightness") * 100f / 255f) : 100;
                 brightness.setProgress(Math.max(0, percent));
@@ -1227,18 +1231,26 @@ final class PanelController {
     }
 
     private void allOff() {
-        if (actionInFlight) return; List<String> targets = new ArrayList<>(); for (String id : lightingOrder()) if (!( !isOfficeTablet() && FAN.equals(id)) && controls.containsKey(id) && supports(controls.get(id), "turn_off")) targets.add(id); if (targets.isEmpty()) return;
+        if (actionInFlight) return; List<String> targets = new ArrayList<>(); for (String id : lightingOrder()) if (!( !isOfficeTablet() && FAN.equals(id)) && controls.containsKey(id) && supports(controls.get(id), "turn_off")) addActionTargets(targets, id, "turn_off"); if (targets.isEmpty()) return;
         actionInFlight = true; pendingActionId = UUID.randomUUID().toString(); sourceStatusOwnedByAction = true; setSourceStatus("Pending: turning off lighting");
         Log.i("PanelController", "USER_ACTION all_off targets=" + targets);
         executor.execute(() -> { String error = null; try { for (String id : targets) { JSONObject request = new JSONObject(); request.put("entity_id", id); request.put("action", "turn_off"); JSONObject response = api.panelAction(request); Log.i("PanelController", "ACTION_RESULT entity=" + id + " action=turn_off response=" + response); } } catch (Exception e) { error = safePanelError(e); Log.e("PanelController", "ACTION_ERROR all_off=" + error, e); }
             final String result = error; activity.runOnUiThread(() -> { actionInFlight = false; if (result == null) { setSourceStatus("Lighting off; waiting for HA state"); pendingActionId = null; refresh(); } else { setSourceStatus("Action failed: " + result); pendingActionId = null; } }); });
     }
 
+    private void addActionTargets(List<String> targets, String entity, String action) {
+        if (!targets.contains(entity)) targets.add(entity);
+        if (DESK_OVER.equals(entity)
+                && ("turn_on".equals(action) || "turn_off".equals(action) || "set_brightness".equals(action))
+                && controls.containsKey(DESK_BACK) && supports(controls.get(DESK_BACK), action)
+                && !targets.contains(DESK_BACK)) targets.add(DESK_BACK);
+    }
+
     private void action(String entity, String name, JSONObject args) {
         JSONObject c = controls.get(entity); if (entity == null || entity.isEmpty() || c == null || !supports(c, name) || actionInFlight) return;
         final String requestId = UUID.randomUUID().toString(); pendingActionId = requestId; actionInFlight = true; sourceStatusOwnedByAction = true; setSourceStatus("Pending: " + name);
         Log.i("PanelController", "USER_ACTION id=" + requestId + " entity=" + entity + " action=" + name + " args=" + args);
-        executor.execute(() -> { String error = null; try { JSONObject request = new JSONObject(); request.put("entity_id", entity); request.put("action", name); if (args != null) for (java.util.Iterator<String> it = args.keys(); it.hasNext();) { String key = it.next(); request.put(key, args.get(key)); } JSONObject response = api.panelAction(request); Log.i("PanelController", "ACTION_RESULT id=" + requestId + " response=" + response); } catch (Exception e) { error = safePanelError(e); Log.e("PanelController", "ACTION_ERROR id=" + requestId + " error=" + error, e); }
+        executor.execute(() -> { String error = null; try { List<String> targets = new ArrayList<>(); addActionTargets(targets, entity, name); for (String target : targets) { JSONObject request = new JSONObject(); request.put("entity_id", target); request.put("action", name); if (args != null) for (java.util.Iterator<String> it = args.keys(); it.hasNext();) { String key = it.next(); request.put(key, args.get(key)); } JSONObject response = api.panelAction(request); Log.i("PanelController", "ACTION_RESULT id=" + requestId + " entity=" + target + " response=" + response); } } catch (Exception e) { error = safePanelError(e); Log.e("PanelController", "ACTION_ERROR id=" + requestId + " error=" + error, e); }
             final String result = error; activity.runOnUiThread(() -> { if (!requestId.equals(pendingActionId)) return; actionInFlight = false; if (result != null) { setSourceStatus("Action failed: " + result); pendingActionId = null; } else { setSourceStatus("Action submitted; waiting for HA state"); pendingActionId = null; refresh(); } }); });
     }
 

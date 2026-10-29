@@ -36,7 +36,7 @@ SWITCHES = {
 AUTOMATIONS = {
     "automation.dvd_player","automation.fire_stick","automation.xbox",
     "automation.game_cube","automation.ps2","automation.listen_to_music",
-    "automation.retropie",
+    "automation.retropie","automation.bedroom_tv_off_schedule",
 }
 TIMERS = {"timer.3_min_timer","timer.5_min_timer","timer.10_min_timer","timer.kitchen_timer"}
 SELECTS = {"select.bedroom_curtain_bedroom_curtain_position_preset"}
@@ -203,8 +203,10 @@ def action():
         service, data = command, {"entity_id":entity_id}
     elif domain == "select" and entity_id in SELECTS and command == "select_option" and body.get("option") in CURTAIN_OPTIONS:
         service, data = command, {"entity_id":entity_id,"option":body["option"]}
-    elif domain == "automation" and entity_id in AUTOMATIONS and command == "trigger":
-        service, data = command, {"entity_id":entity_id,"skip_condition":False}
+    elif domain == "automation" and entity_id in AUTOMATIONS and command in {"turn_on","turn_off","trigger"}:
+        service, data = command, {"entity_id":entity_id}
+        if command == "trigger":
+            data["skip_condition"] = False
     elif domain == "media_player" and entity_id == "media_player.living_room" and command in {"volume_up","volume_down","media_play_pause","media_stop"}:
         service, data = command, {"entity_id":entity_id}
     else:

@@ -4,12 +4,17 @@ Temporary inventory of the entities currently mapped by the 21-inch monitor UI.
 
 ## Bedroom
 
-- [ x] `switch.bedroom_fan_switch` — Fan
-- [ ] `light.hubby_glow_light` — Hubby Glow
-- [ ] `light.wifey_glow_light` — Wifey Glow
-- [ ] `light.bed_underglow_light` — Under Bed
-- [ x] `light.bedroom_lamp_light` — Lamps
-- [ x] `switch.bedroom_light` — Bedroom Over
+- [x] `light.headboard_white_light` — Headboard
+- [x] `light.bedroom_lamp_light` — Lamps
+- [x] `light.hubby_glow_light` — Hubby Underglow
+- [x] `light.wifey_glow_light` — Wifey Underglow
+- [x] `light.bed_underglow_light` — Under Bed Underglow
+- [x] `switch.bedroom_light` — Bedroom Over
+- [x] `switch.bedroom_fan_switch` — Fan
+- [x] `switch.bedroom_tv_switch` — Bedroom TV
+- [x] `automation.bedroom_tv_off_schedule` — TV Schedule
+- [x] `switch.bedroom_vines_switch` — Vine Lights
+- [x] `switch.barbecue_lights_switch` — Wreath
 
 ## Bathroom
 
