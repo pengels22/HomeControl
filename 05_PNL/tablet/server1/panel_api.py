@@ -63,15 +63,15 @@ def _read_config() -> dict:
         entity_id = control.get("entity_id")
         if (entity_id in expected and control.get("type") != expected[entity_id]) or entity_id in seen:
             raise PanelError(503, "panel_configuration_invalid")
-        if not isinstance(entity_id, str) or not entity_id.startswith(("light.", "switch.", "climate.", "media_player.")):
+        if not isinstance(entity_id, str) or not entity_id.startswith(("light.", "switch.", "climate.", "media_player.", "select.")):
             raise PanelError(503, "panel_configuration_invalid")
-        if control.get("type") not in ("light", "switch", "climate", "media_player"):
+        if control.get("type") not in ("light", "switch", "climate", "media_player", "select"):
             raise PanelError(503, "panel_configuration_invalid")
         seen.add(entity_id)
     if not set(expected).issubset(seen):
         raise PanelError(503, "panel_configuration_invalid")
     sources = config.get("media_sources", [])
-    if not isinstance(sources, list) or len(sources) > 7:
+    if not isinstance(sources, list) or len(sources) > 8:
         raise PanelError(503, "panel_configuration_invalid")
     controls_by_id = {c["entity_id"]: c for c in controls}
     for source in sources:
@@ -209,7 +209,7 @@ def post_panel(path: str, body: bytes, client_key: str = "unknown") -> tuple[int
         raise PanelError(400, "malformed_json")
     if not isinstance(request, dict):
         raise PanelError(400, "json_object_required")
-    allowed_fields = {"entity_id", "action", "brightness_pct", "temperature", "hvac_mode", "fan_mode", "volume_level", "source"}
+    allowed_fields = {"entity_id", "action", "brightness_pct", "temperature", "hvac_mode", "fan_mode", "volume_level", "source", "option"}
     if set(request) - allowed_fields or not isinstance(request.get("entity_id"), str) or not isinstance(request.get("action"), str):
         raise PanelError(400, "invalid_action_request")
     _check_rate(client_key)
@@ -263,7 +263,7 @@ def post_panel(path: str, body: bytes, client_key: str = "unknown") -> tuple[int
             raise PanelError(422, "unsupported_fan_mode")
         service = action
         data["fan_mode"] = mode
-    elif domain == "media_player" and action in ("media_play_pause", "media_next_track", "media_previous_track"):
+    elif domain == "media_player" and action in ("media_play_pause", "media_next_track", "media_previous_track", "turn_on", "turn_off"):
         service = action
     elif domain == "media_player" and action == "volume_set":
         volume = _number(request, "volume_level")
@@ -277,6 +277,12 @@ def post_panel(path: str, body: bytes, client_key: str = "unknown") -> tuple[int
             raise PanelError(422, "unsupported_media_source")
         service = "select_source"
         data["source"] = source
+    elif domain == "select" and action == "select_option":
+        option = _enum(request, "option")
+        if option not in attributes.get("options", []):
+            raise PanelError(422, "unsupported_select_option")
+        service = "select_option"
+        data["option"] = option
     else:
         raise PanelError(422, "unsupported_action")
     status, _ = _ha_request(f"/api/services/{domain}/{service}", method="POST", payload=data)

@@ -8,8 +8,10 @@ import android.graphics.drawable.Drawable;
 import android.graphics.PorterDuff;
 import android.util.Log;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.Spinner;
@@ -20,6 +22,7 @@ import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.TextPaint;
 import android.text.style.MetricAffectingSpan;
+import android.text.style.RelativeSizeSpan;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -59,7 +62,7 @@ final class PanelController {
     private static final List<String> BEDROOM_AUTOMATION_ORDER = Arrays.asList(
             "automation.full_bed", "automation.good_morning1");
     private static final String BEDROOM_CURTAIN = "select.bedroom_curtain_bedroom_curtain_position_preset";
-    private static final int SOURCE_SLOT_COUNT = 7;
+    private static final int SOURCE_SLOT_COUNT = 8;
 
     private final MainActivity activity;
     private final SonicApi api;
@@ -75,6 +78,7 @@ final class PanelController {
     private boolean suppressSlider;
     private boolean suppressClimateMode;
     private boolean sourceStatusOwnedByAction;
+    private boolean pandoraPickerOpen;
     private String pendingActionId;
     private JSONObject climateControl;
     private JSONObject mediaControl;
@@ -92,6 +96,7 @@ final class PanelController {
         wireControls();
         configureOfficeLayout();
         configureBedroomLayout();
+        configureLivingLayout();
         standardizeCardTitles();
     }
 
@@ -117,6 +122,61 @@ final class PanelController {
         if (bottom != null && isOfficeTablet()) bottom.setVisibility(View.GONE);
         TextView header = activity.findViewById(R.id.homecontrol_header);
         if (header != null) header.setText(isOfficeTablet() ? "Office" : "Bedroom");
+        if (isOfficeTablet()) {
+            View lights = activity.findViewById(R.id.lights_card);
+            LinearLayout lightControls = activity.findViewById(R.id.lights_controls);
+            if (lights != null && lightControls != null) {
+                LinearLayout.LayoutParams lightsParams = (LinearLayout.LayoutParams) lights.getLayoutParams();
+                lightsParams.height = LinearLayout.LayoutParams.WRAP_CONTENT;
+                lightsParams.weight = 0f;
+                lights.setLayoutParams(lightsParams);
+                LinearLayout.LayoutParams controlsParams = (LinearLayout.LayoutParams) lightControls.getLayoutParams();
+                controlsParams.height = LinearLayout.LayoutParams.WRAP_CONTENT;
+                controlsParams.weight = 0f;
+                lightControls.setLayoutParams(controlsParams);
+            }
+            if (lights instanceof ViewGroup && ((ViewGroup) lights).getChildAt(0) instanceof ViewGroup) {
+                ViewGroup titleRow = (ViewGroup) ((ViewGroup) lights).getChildAt(0);
+                if (titleRow.getChildAt(0) instanceof TextView) {
+                    ((TextView) titleRow.getChildAt(0)).setText("⚙  Controls");
+                }
+            }
+            LinearLayout benchControls = activity.findViewById(R.id.office_bench_controls);
+            TextView benchLabel = activity.findViewById(R.id.office_bench_label);
+            if (benchControls != null) {
+                benchControls.setVisibility(View.VISIBLE);
+                if (benchLabel != null) benchLabel.setVisibility(View.VISIBLE);
+                int[] ids = {R.id.shop_bench1_5v, R.id.shop_bench1_12v, R.id.shop_bench2_5v,
+                        R.id.shop_bench2_12v, R.id.shop_bench3_5v, R.id.shop_bench3_12v, R.id.shop_all_off};
+                LinearLayout row = null;
+                for (int i = 0; i < ids.length; i++) {
+                    Button button = activity.findViewById(ids[i]);
+                    if (button == null) continue;
+                    if (button.getParent() instanceof ViewGroup) ((ViewGroup) button.getParent()).removeView(button);
+                    if (i % 2 == 0) {
+                        row = new LinearLayout(activity);
+                        row.setOrientation(LinearLayout.HORIZONTAL);
+                        row.setGravity(android.view.Gravity.CENTER);
+                        benchControls.addView(row, new LinearLayout.LayoutParams(
+                                LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
+                    }
+                    button.setTextSize(14);
+                    button.setTextColor(0xfff5fbff);
+                    button.setAllCaps(false);
+                    button.setGravity(android.view.Gravity.CENTER);
+                    button.setPadding(dp(6), dp(4), dp(6), dp(4));
+                    button.setMinHeight(0);
+                    button.setMinWidth(0);
+                    button.setBackgroundResource(R.drawable.dashboard_control_button);
+                    button.setBackgroundTintList(null);
+                    LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(40), 1f);
+                    params.setMargins(dp(4), dp(4), dp(4), dp(4));
+                    row.addView(button, params);
+                }
+            }
+            View shopCard = activity.findViewById(R.id.shop_card);
+            if (shopCard != null) shopCard.setVisibility(View.GONE);
+        }
         Log.i("PanelController", (isOfficeTablet() ? "OFFICE" : "BEDROOM") + "_LAYOUT media and source cards hidden");
     }
 
@@ -134,17 +194,64 @@ final class PanelController {
                 lp.weight = 1f;
                 child.setLayoutParams(lp);
             }
+            View lights = activity.findViewById(R.id.lights_card);
+            LinearLayout lightControls = activity.findViewById(R.id.lights_controls);
+            if (lights != null && lightControls != null) {
+                LinearLayout.LayoutParams lightsParams = (LinearLayout.LayoutParams) lights.getLayoutParams();
+                lightsParams.height = LinearLayout.LayoutParams.WRAP_CONTENT;
+                lightsParams.weight = 0f;
+                lightsParams.setMargins(dp(5), dp(5), dp(5), dp(5));
+                lights.setLayoutParams(lightsParams);
+                lights.setPadding(dp(4), dp(3), dp(4), dp(3));
+                LinearLayout.LayoutParams controlsParams = (LinearLayout.LayoutParams) lightControls.getLayoutParams();
+                controlsParams.height = LinearLayout.LayoutParams.WRAP_CONTENT;
+                controlsParams.weight = 0f;
+                lightControls.setLayoutParams(controlsParams);
+                TextView lightsState = activity.findViewById(R.id.lights_state);
+                if (lightsState != null) lightsState.setVisibility(View.GONE);
+            }
             View climate = activity.findViewById(R.id.climate_card);
             View climateBody = activity.findViewById(R.id.climate_body);
             if (climate != null && climateBody != null) {
                 LinearLayout.LayoutParams climateParams = (LinearLayout.LayoutParams) climate.getLayoutParams();
                 climateParams.height = LinearLayout.LayoutParams.WRAP_CONTENT;
                 climateParams.weight = 0f;
+                climateParams.setMargins(dp(5), dp(10), dp(5), dp(5));
                 climate.setLayoutParams(climateParams);
+                climate.setPadding(dp(6), dp(4), dp(6), dp(4));
+                TextView climateTitle = firstTextView(climate);
+                if (climateTitle != null) climateTitle.setTextSize(24);
                 LinearLayout.LayoutParams bodyParams = (LinearLayout.LayoutParams) climateBody.getLayoutParams();
-                bodyParams.height = LinearLayout.LayoutParams.WRAP_CONTENT;
+                bodyParams.height = dp(142);
                 bodyParams.weight = 0f;
                 climateBody.setLayoutParams(bodyParams);
+                TextView environment = activity.findViewById(R.id.climate_environment);
+                if (environment != null) environment.setVisibility(View.GONE);
+                TextView current = activity.findViewById(R.id.climate_current);
+                if (current != null) current.setTextSize(42);
+                TextView target = activity.findViewById(R.id.climate_target);
+                if (target != null) {
+                    target.setTextSize(20);
+                    target.setLineSpacing(0, 1f);
+                }
+                int[] climateButtons = {R.id.climate_down, R.id.climate_up};
+                for (int id : climateButtons) {
+                    View button = activity.findViewById(id);
+                    if (button != null) {
+                        LinearLayout.LayoutParams buttonParams = (LinearLayout.LayoutParams) button.getLayoutParams();
+                        buttonParams.width = dp(80);
+                        buttonParams.height = dp(80);
+                        button.setLayoutParams(buttonParams);
+                        if (button instanceof TextView) ((TextView) button).setTextSize(36);
+                    }
+                }
+                LinearLayout modeButtons = activity.findViewById(R.id.climate_mode_buttons);
+                if (modeButtons != null) {
+                    LinearLayout.LayoutParams modeParams = (LinearLayout.LayoutParams) modeButtons.getLayoutParams();
+                    modeParams.height = dp(58);
+                    modeParams.setMargins(0, dp(4), 0, 0);
+                    modeButtons.setLayoutParams(modeParams);
+                }
             }
         }
         if (bottom != null) bottom.setVisibility(View.GONE);
@@ -167,6 +274,53 @@ final class PanelController {
         Log.i("PanelController", "BEDROOM_LAYOUT cards stacked vertically");
     }
 
+    private void configureLivingLayout() {
+        if (!isLivingRoomTablet()) return;
+        activity.findViewById(R.id.media_previous).setVisibility(View.GONE);
+        activity.findViewById(R.id.media_play_pause).setVisibility(View.GONE);
+        activity.findViewById(R.id.media_next).setVisibility(View.GONE);
+        activity.findViewById(R.id.lights_card).setVisibility(View.VISIBLE);
+        activity.findViewById(R.id.lights_controls).setVisibility(View.VISIBLE);
+        activity.findViewById(R.id.source_grid).setVisibility(View.VISIBLE);
+        SeekBar volume = activity.findViewById(R.id.media_volume);
+        if (volume != null) {
+            if (volume.getParent() instanceof android.view.ViewGroup) {
+                android.view.ViewGroup volumeRow = (android.view.ViewGroup) volume.getParent();
+                volumeRow.setClipChildren(false);
+                volumeRow.setClipToPadding(false);
+                // Lift the volume row into the media content area while moving
+                // its parent so the SeekBar keeps the correct touch rectangle.
+                // The title now has its own row, leaving room for this offset.
+                volumeRow.setTranslationY(-dp(24));
+                if (volumeRow.getParent() instanceof android.view.ViewGroup) {
+                    android.view.ViewGroup mediaInfo = (android.view.ViewGroup) volumeRow.getParent();
+                    mediaInfo.setClipChildren(false);
+                    mediaInfo.setClipToPadding(false);
+                }
+            }
+            volume.setTranslationY(0);
+            volume.setMinimumHeight(dp(30));
+            volume.setScaleY(2.4f);
+            volume.setElevation(dp(8));
+            volume.setClickable(true);
+            tintSliderWhite(volume);
+        }
+        Log.i("PanelController", "LIVING_LAYOUT media transport buttons hidden");
+    }
+
+    private void tintSliderWhite(SeekBar slider) {
+        Drawable progress = slider.getProgressDrawable();
+        if (progress != null) {
+            progress = progress.mutate();
+            progress.setColorFilter(0xffffffff, PorterDuff.Mode.SRC_IN);
+        }
+        Drawable thumb = slider.getThumb();
+        if (thumb != null) {
+            thumb = thumb.mutate();
+            thumb.setColorFilter(0xffffffff, PorterDuff.Mode.SRC_IN);
+        }
+    }
+
     void start() { visible = true; handler.removeCallbacks(poll); refresh(); }
     void stop() { visible = false; handler.removeCallbacks(poll); }
     void refreshNow() { if (visible) refresh(); }
@@ -177,7 +331,7 @@ final class PanelController {
             TextView title = firstTextView(activity.findViewById(id));
             if (title != null) title.setTextSize(14);
             if (id == R.id.lights_card && title != null) {
-                title.setText("Lights"); title.setCompoundDrawablesWithIntrinsicBounds(icon(R.drawable.ic_light_bulb, 0xffffe37a), null, null, null);
+                title.setText(isOfficeTablet() ? "Controls" : "Lights"); title.setCompoundDrawablesWithIntrinsicBounds(icon(R.drawable.ic_light_bulb, 0xffffe37a), null, null, null);
                 title.setCompoundDrawablePadding(dp(6));
             } else if (id == R.id.sources_card && title != null) {
                 title.setText("Media Source"); title.setCompoundDrawablesWithIntrinsicBounds(icon(R.drawable.ic_source_tv, 0xfff5fbff), null, null, null);
@@ -242,6 +396,10 @@ final class PanelController {
         styleControlButton(R.id.media_previous);
         styleControlButton(R.id.media_play_pause);
         styleControlButton(R.id.media_next);
+        styleControlButton(R.id.media_power);
+        styleMediaButton(R.id.media_previous);
+        styleMediaButton(R.id.media_play_pause);
+        styleMediaButton(R.id.media_next);
         SeekBar brightness = activity.findViewById(R.id.lights_brightness);
         brightness.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             public void onProgressChanged(SeekBar b, int p, boolean fromUser) {
@@ -273,6 +431,11 @@ final class PanelController {
         activity.findViewById(R.id.media_previous).setOnClickListener(v -> action(mediaId(), "media_previous_track", null));
         activity.findViewById(R.id.media_play_pause).setOnClickListener(v -> action(mediaId(), "media_play_pause", null));
         activity.findViewById(R.id.media_next).setOnClickListener(v -> action(mediaId(), "media_next_track", null));
+        activity.findViewById(R.id.media_power).setOnClickListener(v -> {
+            JSONObject current = states.get(mediaId());
+            boolean isOn = current != null && !"off".equals(current.optString("state"));
+            action(mediaId(), isOn ? "turn_off" : "turn_on", null);
+        });
         SeekBar volume = activity.findViewById(R.id.media_volume);
         volume.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             public void onProgressChanged(SeekBar b, int p, boolean fromUser) {
@@ -348,6 +511,10 @@ final class PanelController {
     private void renderLights() {
         if (isBedroomTablet()) {
             renderBedroomLights();
+            return;
+        }
+        if (isLivingRoomTablet()) {
+            renderLivingLights();
             return;
         }
         if (isOfficeTablet()) {
@@ -446,6 +613,7 @@ final class PanelController {
         TextView state = activity.findViewById(R.id.lights_state);
         LinearLayout rows = activity.findViewById(R.id.lights_controls);
         rows.removeAllViews();
+        rows.setGravity(android.view.Gravity.TOP);
         label.setText("Bedroom");
         List<String> entities = new ArrayList<>();
         entities.addAll(BEDROOM_LIGHTING_ORDER);
@@ -456,7 +624,7 @@ final class PanelController {
                 currentRow = new LinearLayout(activity);
                 currentRow.setOrientation(LinearLayout.HORIZONTAL);
                 currentRow.setGravity(android.view.Gravity.CENTER);
-                rows.addView(currentRow, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+                rows.addView(currentRow, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(100)));
             }
             String id = entities.get(i);
             JSONObject c = controls.get(id), s = states.get(id);
@@ -465,24 +633,30 @@ final class PanelController {
             String labelText = bedroomLabel(id, c == null ? id : c.optString("label", id));
             Button button = new Button(activity);
             button.setText(iconLabel(bedroomIcon(id), labelText));
-            button.setTextSize(14);
-            button.setTextColor(0xfff5fbff);
-            button.setGravity(android.view.Gravity.CENTER);
+            button.setTextSize(18);
+            boolean active = !automation && "on".equals(s == null ? "" : s.optString("state"));
+            button.setTextColor(active ? 0xffffd166 : 0xfff5fbff);
+            button.setGravity(android.view.Gravity.CENTER_HORIZONTAL | android.view.Gravity.TOP);
             button.setAllCaps(false);
-            button.setPadding(dp(5), dp(5), dp(5), dp(5));
+            button.setPadding(dp(3), dp(22), dp(3), dp(3));
             button.setMinHeight(dp(82));
             button.setMinWidth(dp(100));
             button.setBackgroundResource(R.drawable.dashboard_control_button);
             button.setBackgroundTintList(null);
             String actionName = automation ? "trigger" : ("on".equals(s == null ? "" : s.optString("state")) ? "turn_off" : "turn_on");
-            button.setEnabled(available && c != null && supports(c, actionName));
+            boolean actionable = available && c != null && supports(c, actionName);
+            button.setEnabled(actionable);
             final String entity = id;
-            button.setOnClickListener(v -> action(entity, automation ? "trigger" : ("on".equals(states.get(entity).optString("state")) ? "turn_off" : "turn_on"), null));
+            button.setOnClickListener(null);
+            button.setClickable(false);
+            button.setFocusable(false);
             LinearLayout cell = new LinearLayout(activity);
             cell.setOrientation(LinearLayout.VERTICAL);
             cell.setGravity(android.view.Gravity.CENTER);
-            cell.addView(button, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(82)));
             boolean dimmable = !automation && available && c != null && supports(c, "set_brightness");
+            FrameLayout buttonArea = new FrameLayout(activity);
+            buttonArea.addView(button, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
             if (dimmable) {
                 SeekBar brightness = new SeekBar(activity);
                 brightness.setMax(100);
@@ -494,14 +668,129 @@ final class PanelController {
                     public void onStartTrackingTouch(SeekBar bar) { }
                     public void onStopTrackingTouch(SeekBar bar) { action(entity, "set_brightness", value("brightness_pct", bar.getProgress())); }
                 });
-                cell.addView(brightness, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(30)));
+                FrameLayout.LayoutParams sliderParams = new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT, dp(22), android.view.Gravity.BOTTOM);
+                sliderParams.bottomMargin = dp(16);
+                buttonArea.addView(brightness, sliderParams);
+                cell.addView(buttonArea, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(100)));
             } else {
                 View spacer = new View(activity);
-                cell.addView(spacer, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(30)));
+                cell.addView(spacer, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(18)));
+                cell.addView(buttonArea, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(82)));
             }
+            View clickArea = new View(activity);
+            clickArea.setEnabled(actionable);
+            clickArea.setOnClickListener(v -> action(entity, automation ? "trigger" : ("on".equals(states.get(entity).optString("state")) ? "turn_off" : "turn_on"), null));
+            FrameLayout.LayoutParams clickParams = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, dp(50), android.view.Gravity.TOP);
+            buttonArea.addView(clickArea, clickParams);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
-            lp.setMargins(dp(5), dp(5), dp(5), dp(5));
+            lp.setMargins(0, 0, 0, 0);
             currentRow.addView(cell, lp);
+        }
+        state.setText("Live Home Assistant state");
+    }
+
+    private void renderLivingLights() {
+        TextView label = activity.findViewById(R.id.lights_label);
+        TextView state = activity.findViewById(R.id.lights_state);
+        LinearLayout rows = activity.findViewById(R.id.lights_controls);
+        rows.removeAllViews();
+        rows.setGravity(android.view.Gravity.TOP);
+        label.setText("Living Room");
+        List<String> entities = LIGHTING_ORDER;
+        LinearLayout currentRow = null;
+        for (int i = 0; i < entities.size(); i++) {
+            if (i % 2 == 0) {
+                currentRow = new LinearLayout(activity);
+                currentRow.setOrientation(LinearLayout.HORIZONTAL);
+                currentRow.setGravity(android.view.Gravity.CENTER);
+                rows.addView(currentRow, new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, dp(108)));
+            }
+            String id = entities.get(i);
+            JSONObject c = controls.get(id), s = states.get(id);
+            boolean available = s != null && s.optBoolean("available", !"unavailable".equals(s.optString("state")));
+            String labelText = lightLabel(id, c == null ? id : c.optString("label", id));
+            boolean active = available && "on".equals(s.optString("state"));
+            boolean actionable = available && c != null
+                    && (supports(c, "turn_on") || supports(c, "turn_off"));
+            boolean dimmable = available && c != null && supports(c, "set_brightness");
+            Button button = new Button(activity);
+            button.setText(iconLabel(bedroomIcon(id), labelText));
+            button.setTextSize(18);
+            button.setTextColor(active ? 0xffffd166 : 0xfff5fbff);
+            button.setGravity(dimmable
+                    ? android.view.Gravity.CENTER_HORIZONTAL | android.view.Gravity.TOP
+                    : android.view.Gravity.CENTER);
+            button.setAllCaps(false);
+            if (dimmable) button.setPadding(dp(3), dp(22), dp(3), dp(3));
+            else button.setPadding(dp(3), dp(3), dp(3), dp(3));
+            button.setMinHeight(dp(82));
+            button.setMinWidth(dp(100));
+            button.setBackgroundResource(R.drawable.dashboard_control_button);
+            button.setBackgroundTintList(null);
+            button.setEnabled(actionable);
+            button.setOnClickListener(null);
+            button.setClickable(false);
+            button.setFocusable(false);
+
+            final String entity = id;
+            FrameLayout buttonArea = new FrameLayout(activity);
+            buttonArea.addView(button, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+            SeekBar brightness = null;
+            if (dimmable) {
+                brightness = new SeekBar(activity);
+                brightness.setMax(100);
+                brightness.setMinimumHeight(dp(30));
+                brightness.setScaleY(2.4f);
+                Drawable progressDrawable = brightness.getProgressDrawable();
+                if (progressDrawable != null) {
+                    progressDrawable = progressDrawable.mutate();
+                    progressDrawable.setColorFilter(0xffffffff, PorterDuff.Mode.SRC_IN);
+                }
+                Drawable thumbDrawable = brightness.getThumb();
+                if (thumbDrawable != null) {
+                    thumbDrawable = thumbDrawable.mutate();
+                    thumbDrawable.setColorFilter(0xffffffff, PorterDuff.Mode.SRC_IN);
+                }
+                brightness.setElevation(dp(8));
+                JSONObject attrs = s.optJSONObject("attributes");
+                int percent = attrs != null && attrs.has("brightness")
+                        ? Math.round(attrs.optInt("brightness") * 100f / 255f) : 100;
+                brightness.setProgress(Math.max(0, percent));
+                brightness.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                    public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) { }
+                    public void onStartTrackingTouch(SeekBar bar) { }
+                    public void onStopTrackingTouch(SeekBar bar) {
+                        action(entity, "set_brightness", value("brightness_pct", bar.getProgress()));
+                    }
+                });
+                FrameLayout.LayoutParams sliderParams = new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT, dp(30), android.view.Gravity.BOTTOM);
+                sliderParams.bottomMargin = dp(12);
+                buttonArea.addView(brightness, sliderParams);
+            }
+            View clickArea = new View(activity);
+            clickArea.setEnabled(actionable);
+            clickArea.setOnClickListener(v -> {
+                JSONObject current = states.get(entity);
+                boolean isOn = current != null && "on".equals(current.optString("state"));
+                action(entity, isOn ? "turn_off" : "turn_on", null);
+            });
+            buttonArea.addView(clickArea, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, dp(50), android.view.Gravity.TOP));
+            if (brightness != null) brightness.bringToFront();
+
+            LinearLayout cell = new LinearLayout(activity);
+            cell.setGravity(android.view.Gravity.CENTER);
+            cell.addView(buttonArea, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(100)));
+            LinearLayout.LayoutParams cellParams = new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.MATCH_PARENT, 1f);
+            cellParams.setMargins(dp(4), dp(4), dp(4), dp(4));
+            currentRow.addView(cell, cellParams);
         }
         state.setText("Live Home Assistant state");
     }
@@ -528,6 +817,16 @@ final class PanelController {
             }
         }
         if (options.isEmpty()) options.add("Closed");
+        int closedIndex = -1, openIndex = -1;
+        for (int i = 0; i < options.size(); i++) {
+            if ("Closed".equalsIgnoreCase(options.get(i))) closedIndex = i;
+            if ("Open".equalsIgnoreCase(options.get(i))) openIndex = i;
+        }
+        if (closedIndex >= 0 && openIndex >= 0) {
+            String endpoint = options.get(closedIndex);
+            options.set(closedIndex, options.get(openIndex));
+            options.set(openIndex, endpoint);
+        }
         LinearLayout row = new LinearLayout(activity);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(android.view.Gravity.CENTER);
@@ -569,35 +868,38 @@ final class PanelController {
                 LinearLayout row = new LinearLayout(activity);
                 row.setOrientation(LinearLayout.HORIZONTAL);
                 row.setGravity(android.view.Gravity.CENTER);
-                rows.addView(row, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(92)));
+                rows.addView(row, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                        dp(isOfficeTablet() ? 58 : 92)));
             }
             String id = entities[i];
             JSONObject c = controls.get(id);
             JSONObject s = states.get(id);
             boolean available = s != null && s.optBoolean("available", !"unavailable".equals(s.optString("state")));
+            boolean on = s != null && "on".equalsIgnoreCase(s.optString("state"));
             Button button = new Button(activity);
             button.setText(lightLabel(id, c == null ? id : c.optString("label", id)));
-            button.setTextSize(12);
-            button.setTextColor(0xfff5fbff);
-            button.setGravity(android.view.Gravity.CENTER);
+            button.setTextSize(16);
+            int stateColor = on ? 0xffffe37a : 0xfff5fbff;
+            button.setTextColor(stateColor);
+            button.setGravity(android.view.Gravity.CENTER_VERTICAL | android.view.Gravity.START);
             button.setAllCaps(false);
-            button.setMinHeight(dp(82));
+            button.setMinHeight(dp(isOfficeTablet() ? 50 : 82));
             button.setMinWidth(dp(82));
-            button.setPadding(dp(4), dp(4), dp(4), dp(4));
+            button.setPadding(dp(10), dp(4), dp(8), dp(4));
             button.setBackgroundResource(R.drawable.dashboard_control_button);
             button.setBackgroundTintList(null);
             int iconResource = id.startsWith("light.office_laser") ? R.drawable.ic_light_fan
                     : id.startsWith("light.office_") ? R.drawable.ic_light_bulb
                     : id.contains("printer") ? R.drawable.ic_light_lamp
                     : R.drawable.ic_light_switch;
-            button.setCompoundDrawablesWithIntrinsicBounds(null, icon(iconResource, 0xffffe37a), null, null);
+            button.setCompoundDrawablesWithIntrinsicBounds(icon(iconResource, stateColor), null, null, null);
             button.setCompoundDrawablePadding(dp(4));
             button.setEnabled(available && c != null && (supports(c, "turn_on") || supports(c, "turn_off")));
             final String entity = id;
             button.setOnClickListener(v -> action(entity, "on".equals(states.get(entity).optString("state")) ? "turn_off" : "turn_on", null));
             LinearLayout row = (LinearLayout) rows.getChildAt(rows.getChildCount() - 1);
-            LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(0, dp(82), 1f);
-            buttonParams.setMargins(dp(3), dp(3), dp(3), dp(3));
+            LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(0, dp(isOfficeTablet() ? 50 : 82), 1f);
+            buttonParams.setMargins(dp(4), dp(4), dp(4), dp(4));
             row.addView(button, buttonParams);
         }
         state.setText("Live Home Assistant state");
@@ -645,7 +947,7 @@ final class PanelController {
             button.setText("");
             button.setContentDescription(hvacMode.replace('_', ' '));
             setFontIcon(button, mdiFont, modeGlyph);
-            button.setTextSize(28);
+            button.setTextSize(36);
             button.setTextColor("heat".equals(hvacMode) ? 0xffffd166 : 0xff82d7ff);
             button.setTextColor(0xfff5fbff);
             button.setBackgroundResource(R.drawable.climate_round_button);
@@ -677,7 +979,14 @@ final class PanelController {
         if (s == null || !s.optBoolean("available", false)) return "—";
         JSONObject a = s.optJSONObject("attributes");
         String unit = a == null ? "" : a.optString("unit_of_measurement", "");
-        return s.optString("state", "—") + (unit.isEmpty() ? "" : " " + unit);
+        String raw = s.optString("state", "—");
+        String rounded = raw;
+        try {
+            rounded = String.valueOf(Math.round(Double.parseDouble(raw)));
+        } catch (NumberFormatException ignored) {
+            // Preserve nonnumeric states such as unavailable or unknown.
+        }
+        return rounded + (unit.isEmpty() ? "" : " " + unit);
     }
 
     private void renderMedia() {
@@ -689,23 +998,29 @@ final class PanelController {
         setMedia(R.id.media_previous, ok && supports(mediaControl, "media_previous_track") && (f == 0 || (f & 16) != 0));
         setMedia(R.id.media_next, ok && supports(mediaControl, "media_next_track") && (f == 0 || (f & 32) != 0));
         setMedia(R.id.media_play_pause, ok && supports(mediaControl, "media_play_pause") && (f == 0 || (f & 1) != 0));
+        setMedia(R.id.media_power, ok && supports(mediaControl, "turn_on") && supports(mediaControl, "turn_off"));
         SeekBar volume = activity.findViewById(R.id.media_volume); boolean volumeOk = ok && supports(mediaControl, "volume_set") && a != null && a.has("volume_level"); volume.setEnabled(volumeOk);
         if (volumeOk) { suppressSlider = true; volume.setProgress(Math.round((float) a.optDouble("volume_level") * 100)); suppressSlider = false; }
         ((TextView) activity.findViewById(R.id.media_volume_text)).setText(volumeOk ? "Volume: " + volume.getProgress() + "%" : "Volume: unsupported");
     }
 
     private void renderSources() {
-        LinearLayout grid = activity.findViewById(R.id.source_grid); grid.removeAllViews(); boolean hasMapping = false;
+        LinearLayout grid = activity.findViewById(R.id.source_grid);
+        if (pandoraPickerOpen) {
+            renderPandoraStations(grid);
+            return;
+        }
+        grid.removeAllViews(); boolean hasMapping = false;
         LinearLayout currentRow = null;
         for (int i = 0; i < SOURCE_SLOT_COUNT; i++) {
             if (i % 4 == 0) {
                 currentRow = new LinearLayout(activity);
                 currentRow.setOrientation(LinearLayout.HORIZONTAL);
                 grid.addView(currentRow, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
-                        isLivingRoomTablet() ? 38 : 50));
+                        isLivingRoomTablet() ? 62 : 50));
             }
             JSONObject source = sourceAt(i); Button button = new Button(activity);
-            String[] referenceLabels = {"Wii", "TV", "Xbox", "Cube", "PS2", "Music", "Pi"};
+            String[] referenceLabels = {"Wii", "Fire TV Stick", "Xbox", "Game Cube", "PS2", "RetroPie", "Record Player", "Pandora"};
             String sourceLabel = referenceLabels[i];
             if (source != null) {
                 String configuredLabel = source.optString("label", "").trim();
@@ -720,12 +1035,101 @@ final class PanelController {
             button.setBackgroundResource(R.drawable.dashboard_control_button);
             button.setBackgroundTintList(null);
             boolean configured = source != null && validMediaSource(source) && controls.containsKey(source.optString("entity_id")); button.setEnabled(configured); hasMapping |= configured;
-            if (configured) { final JSONObject selected = source; button.setOnClickListener(v -> { setSourceStatus("Pending: " + selected.optString("label", "Source")); action(selected.optString("entity_id"), "select_media_source", value("source", selected.optString("source", ""))); }); }
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, isLivingRoomTablet() ? 36 : 48, 1f);
-            lp.setMargins(2, 1, 2, 1);
+            if (configured) {
+                final JSONObject selected = source;
+                button.setOnClickListener(v -> {
+                    if ("Pandora".equalsIgnoreCase(selected.optString("label", ""))) {
+                        pandoraPickerOpen = true;
+                        renderSources();
+                        return;
+                    }
+                    setSourceStatus("Pending: " + selected.optString("label", "Source"));
+                    action(selected.optString("entity_id"), "select_media_source", value("source", selected.optString("source", "")));
+                });
+            }
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, isLivingRoomTablet() ? 54 : 48, 1f);
+            if (isLivingRoomTablet()) lp.setMargins(dp(4), dp(4), dp(4), dp(4));
+            else lp.setMargins(2, 1, 2, 1);
             currentRow.addView(button, lp);
         }
         if (!sourceStatusOwnedByAction) setSourceStatus(hasMapping ? "Choose a media source" : "Configuration needed");
+    }
+
+    private void renderPandoraStations(LinearLayout grid) {
+        grid.removeAllViews();
+        Button back = new Button(activity);
+        back.setText("← Media Sources");
+        back.setTextColor(0xfff5fbff);
+        back.setTextSize(isLivingRoomTablet() ? 16 : 12);
+        back.setAllCaps(false);
+        back.setGravity(android.view.Gravity.CENTER);
+        back.setBackgroundResource(R.drawable.dashboard_control_button);
+        back.setBackgroundTintList(null);
+        back.setOnClickListener(v -> {
+            pandoraPickerOpen = false;
+            renderSources();
+        });
+        LinearLayout.LayoutParams backParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, isLivingRoomTablet() ? dp(54) : dp(48));
+        backParams.setMargins(dp(4), dp(4), dp(4), dp(4));
+        grid.addView(back, backParams);
+
+        JSONObject current = states.get(mediaId());
+        JSONObject attributes = current == null ? null : current.optJSONObject("attributes");
+        JSONArray sourceList = attributes == null ? null : attributes.optJSONArray("source_list");
+        List<String> configuredSources = new ArrayList<>();
+        for (int i = 0; i < SOURCE_SLOT_COUNT; i++) {
+            JSONObject source = sourceAt(i);
+            if (source != null) configuredSources.add(source.optString("source", ""));
+        }
+        List<String> stations = new ArrayList<>();
+        if (sourceList != null) {
+            for (int i = 0; i < sourceList.length(); i++) {
+                String station = sourceList.optString(i, "").trim();
+                if (!station.isEmpty() && !configuredSources.contains(station)) stations.add(station);
+            }
+        }
+        if (stations.isEmpty()) {
+            TextView empty = new TextView(activity);
+            empty.setText("No Pandora stations available");
+            empty.setTextColor(0xfff5fbff);
+            empty.setTextSize(16);
+            empty.setGravity(android.view.Gravity.CENTER);
+            grid.addView(empty, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(54)));
+            setSourceStatus("Pandora stations unavailable");
+            return;
+        }
+        LinearLayout currentRow = null;
+        for (int i = 0; i < stations.size(); i++) {
+            if (i % 3 == 0) {
+                currentRow = new LinearLayout(activity);
+                currentRow.setOrientation(LinearLayout.HORIZONTAL);
+                currentRow.setGravity(android.view.Gravity.CENTER);
+                grid.addView(currentRow, new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, isLivingRoomTablet() ? dp(62) : dp(54)));
+            }
+            String station = stations.get(i);
+            Button button = new Button(activity);
+            button.setText(station);
+            button.setTextColor(0xfff5fbff);
+            button.setTextSize(isLivingRoomTablet() ? 14 : 12);
+            button.setAllCaps(false);
+            button.setGravity(android.view.Gravity.CENTER);
+            button.setBackgroundResource(R.drawable.dashboard_control_button);
+            button.setBackgroundTintList(null);
+            final String selectedStation = station;
+            button.setOnClickListener(v -> {
+                pandoraPickerOpen = false;
+                setSourceStatus("Pending: " + selectedStation);
+                action(mediaId(), "select_media_source", value("source", selectedStation));
+            });
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0,
+                    isLivingRoomTablet() ? dp(54) : dp(48), 1f);
+            params.setMargins(dp(4), dp(4), dp(4), dp(4));
+            currentRow.addView(button, params);
+        }
+        setSourceStatus("Choose a Pandora station");
     }
 
     private JSONObject sourceAt(int index) { return apiConfigSources == null || index >= apiConfigSources.length() ? null : apiConfigSources.optJSONObject(index); }
@@ -765,8 +1169,9 @@ final class PanelController {
     }
     private CharSequence iconLabel(IIcon glyph, String label) {
         if (mdiFont == null || glyph == null) return label;
-        SpannableString text = new SpannableString(String.valueOf(glyph.getCharacter()) + "\n" + label);
+        SpannableString text = new SpannableString(String.valueOf(glyph.getCharacter()) + "  " + label);
         text.setSpan(new FontSpan(mdiFont), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        text.setSpan(new RelativeSizeSpan(1.35f), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         return text;
     }
     private IIcon sourceGlyph(String label) {
@@ -793,6 +1198,21 @@ final class PanelController {
     private void styleControlButton(int id) {
         View view = activity.findViewById(id);
         if (view != null) { view.setBackgroundResource(R.drawable.dashboard_control_button); if (view instanceof Button) ((Button) view).setBackgroundTintList(null); }
+    }
+    private void styleMediaButton(int id) {
+        View view = activity.findViewById(id);
+        if (view == null) return;
+        if (view instanceof Button) {
+            Button button = (Button) view;
+            button.setTextSize(18);
+            button.setAllCaps(false);
+            button.setGravity(android.view.Gravity.CENTER);
+            button.setPadding(dp(3), dp(3), dp(3), dp(3));
+        }
+        LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) view.getLayoutParams();
+        params.height = dp(82);
+        params.setMargins(dp(2), dp(2), dp(2), dp(2));
+        view.setLayoutParams(params);
     }
     private String mediaId() { return mediaControl == null ? "" : mediaControl.optString("entity_id"); }
     private boolean hasConfiguredLightingExceptFan() { for (String id : lightingOrder()) if (!( !isOfficeTablet() && FAN.equals(id)) && controls.containsKey(id) && supports(controls.get(id), "turn_off")) return true; return false; }

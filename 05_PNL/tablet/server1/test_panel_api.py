@@ -44,7 +44,7 @@ class PanelApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual({c["entity_id"] for c in payload["controls"]}, set(self.states))
         self.assertEqual([item["source"] for item in payload["media_sources"]], [
-            "Wii", "Fire TV Stick", "Xbox", "Game Cube", "PS2", "RetroPie", "Record Player"
+            "Wii", "Fire TV Stick", "Xbox", "Game Cube", "PS2", "RetroPie", "Record Player", "Pandora"
         ])
 
     @patch.object(panel_api, "_ha_request")

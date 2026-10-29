@@ -9,13 +9,14 @@
     {"entity_id":"switch.office_lights_switch","type":"switch","label":"Office Lights","order":30,"actions":["turn_on","turn_off"]},
     {"entity_id":"switch.bedroom_camera_power","type":"switch","label":"Fan","order":40,"actions":["turn_on","turn_off"]},
     {"entity_id":"climate.nest_thermostat","type":"climate","label":"Nest Thermostat","order":50,"actions":["set_temperature","set_hvac_mode","set_fan_mode"]},
-    {"entity_id":"media_player.living_room","type":"media_player","label":"Living Room Media","order":60,"actions":["media_play_pause","media_next_track","media_previous_track","volume_set","select_media_source"]}
+    {"entity_id":"media_player.living_room","type":"media_player","label":"Living Room Media","order":60,"actions":["media_play_pause","media_next_track","media_previous_track","volume_set","select_media_source","turn_on","turn_off"]}
     ,{"entity_id":"switch.modem_power_switch","type":"switch","label":"Desk Lights","order":110,"actions":["turn_on","turn_off"]}
     ,{"entity_id":"switch.office_lights_switch_2","type":"switch","label":"Office Lights","order":120,"actions":["turn_on","turn_off"]}
     ,{"entity_id":"switch.printer_lights_switch","type":"switch","label":"Printer Lights","order":130,"actions":["turn_on","turn_off"]}
     ,{"entity_id":"switch.workbench_switch","type":"switch","label":"Workbench","order":140,"actions":["turn_on","turn_off"]}
     ,{"entity_id":"light.office_desk_lights","type":"light","label":"Desk Over","order":150,"actions":["turn_on","turn_off","set_brightness"]}
     ,{"entity_id":"light.office_laser_fan","type":"light","label":"Laser Fan","order":160,"actions":["turn_on","turn_off"]}
+    ,{"entity_id":"select.bedroom_curtain_bedroom_curtain_position_preset","type":"select","label":"Bedroom Curtains","order":170,"actions":["select_option"]}
   ],
   "media_sources": [
     {"entity_id":"media_player.living_room","label":"Wii","source":"Wii","order":10},
@@ -24,6 +25,7 @@
     {"entity_id":"media_player.living_room","label":"Game Cube","source":"Game Cube","order":40},
     {"entity_id":"media_player.living_room","label":"PS2","source":"PS2","order":50},
     {"entity_id":"media_player.living_room","label":"RetroPie","source":"RetroPie","order":60},
-    {"entity_id":"media_player.living_room","label":"Record Player","source":"Record Player","order":70}
+    {"entity_id":"media_player.living_room","label":"Record Player","source":"Record Player","order":70},
+    {"entity_id":"media_player.living_room","label":"Pandora","source":"Pandora","order":80}
   ]
 }

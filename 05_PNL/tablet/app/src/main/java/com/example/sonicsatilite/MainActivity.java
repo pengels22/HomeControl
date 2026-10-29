@@ -182,7 +182,11 @@ public class MainActivity extends AppCompatActivity {
             }
             catch (RuntimeException ignored) { }
         }
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        // Keep production screens protected; debug builds remain capturable for
+        // tablet layout tuning and visual verification.
+        if (!BuildConfig.DEBUG) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        }
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
         hideSystemChrome();
@@ -289,7 +293,7 @@ public class MainActivity extends AppCompatActivity {
         shopButtons.put("bench3_5v", findViewById(R.id.shop_bench3_5v));
         shopButtons.put("bench3_12v", findViewById(R.id.shop_bench3_12v));
         View shopCard = findViewById(R.id.shop_card);
-        if (isLivingRoomTablet()) {
+        if (isLivingRoomTablet() || isBedroomTablet()) {
             shopCard.setVisibility(View.GONE);
         } else {
             shopController = new ShopController(network, findViewById(R.id.shop_status), findViewById(R.id.shop_all_off), shopButtons);
@@ -1119,7 +1123,9 @@ public class MainActivity extends AppCompatActivity {
         if (climate != null && climate.getChildAt(0) != null) climate.getChildAt(0).setVisibility(View.GONE);
         LinearLayout media = findViewById(R.id.media_card);
         if (media != null && media.getChildAt(0) instanceof LinearLayout) {
-            ((LinearLayout) media.getChildAt(0)).setVisibility(View.GONE);
+            // The media title and power control live together in the content
+            // row; remove the decorative card header to keep the card compact.
+            media.getChildAt(0).setVisibility(View.GONE);
         }
         View sourcesTitle = findViewById(R.id.sources_title);
         View sourcesDivider = findViewById(R.id.sources_divider);
@@ -1139,8 +1145,10 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout bottomCards = findViewById(R.id.dashboard_bottom_cards);
         topCards.setOrientation(portrait ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
         bottomCards.setOrientation(portrait ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
-        configureCardChildren(topCards, portrait);
-        configureCardChildren(bottomCards, portrait);
+        if (!isBedroomTablet()) {
+            configureCardChildren(topCards, portrait);
+            configureCardChildren(bottomCards, portrait);
+        }
         if (isLivingRoomTablet()) {
             addLivingRoomCardSpacing(topCards);
             addLivingRoomCardSpacing(bottomCards);
@@ -1205,6 +1213,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void configurePortraitShopCard() {
+        if (isOfficeTablet()) return;
         int[] ids = {
                 R.id.shop_bench1_5v, R.id.shop_bench1_12v,
                 R.id.shop_bench2_5v, R.id.shop_bench2_12v,

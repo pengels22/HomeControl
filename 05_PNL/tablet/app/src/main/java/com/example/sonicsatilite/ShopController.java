@@ -37,5 +37,11 @@ final class ShopController {
         try (BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8))) { String line; while ((line = r.readLine()) != null) text.append(line); } finally { c.disconnect(); }
         return text.length() == 0 ? new JSONObject() : new JSONObject(text.toString());
     }
-    private void updateButtons() { for (Map.Entry<String, Button> e : buttons.entrySet()) e.getValue().setAlpha(Boolean.TRUE.equals(state.get(e.getKey())) ? 1f : 0.65f); }
+    private void updateButtons() {
+        for (Map.Entry<String, Button> e : buttons.entrySet()) {
+            boolean on = Boolean.TRUE.equals(state.get(e.getKey()));
+            e.getValue().setAlpha(on ? 1f : 0.65f);
+            e.getValue().setTextColor(on ? 0xffffe37a : 0xfff5fbff);
+        }
+    }
 }
